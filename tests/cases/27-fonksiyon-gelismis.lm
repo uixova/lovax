@@ -1,0 +1,13 @@
+fn iyileştir(hedef, miktar = 10, mesaj = "iyileşti"):
+    return "{hedef} {mesaj} (+{miktar})"
+say iyileştir("Kai")
+say iyileştir("Kai", 50, "dirildi")
+fn zincir(a, b = a * 2):
+    return a + b
+say zincir(5), zincir(5, 1)
+set çift_mi = fn(n):
+    return n % 2 == 0
+say çift_mi(4), filter([1, 2, 3, 4], çift_mi)
+set topla = fn(a, b = 100):
+    return a + b
+say topla(1), topla(1, 2)

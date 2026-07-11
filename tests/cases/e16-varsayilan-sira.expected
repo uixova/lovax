@@ -1,0 +1,4 @@
+# exit: 65
+[Sözdizimi Hatası] satır 1, sütun 13: varsayılanlı parametreden sonra varsayılansız parametre gelemez: 'b'
+[Sözdizimi Hatası] satır 2, sütun 5: beklenmeyen girinti: bu satır bir bloğa ait değil
+2 sözdizimi hatası bulundu, program çalıştırılmadı.

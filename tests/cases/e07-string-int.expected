@@ -1,0 +1,2 @@
+# exit: 70
+[Çalışma Hatası] satır 1: desteklenmeyen işlem: string + int (metne çevirmek için text() kullan veya "{...}" interpolasyonu)

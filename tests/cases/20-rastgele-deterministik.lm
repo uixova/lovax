@@ -1,0 +1,17 @@
+use game: pick, pick_weighted, shuffle
+seed(42)
+set a = random(1, 100)
+seed(42)
+set b = random(1, 100)
+say a == b
+seed(7)
+set l1 = [1, 2, 3, 4, 5]
+shuffle(l1)
+seed(7)
+set l2 = [1, 2, 3, 4, 5]
+shuffle(l2)
+say l1 == l2, sum(l1)
+seed(1)
+set sonuç = pick_weighted({"hep": 100, "hiç": 0})
+say sonuç
+say contains([1, 2, 3], pick([1, 2, 3]))

@@ -1,0 +1,14 @@
+use file
+file.write_csv("tests/tmp/loot.csv", [["isim", "adet"], ["kılıç", 5], ["virgül,lü isim", 1], ["tırnak\"lı", 2]])
+set satırlar = file.read_csv("tests/tmp/loot.csv")
+say len(satırlar)
+say satırlar[0], satırlar[2][0]
+file.write_text("tests/tmp/satirlar.txt", "bir\niki\nüç")
+say file.read_lines("tests/tmp/satirlar.txt")
+file.append_text("tests/tmp/satirlar.txt", "\ndört")
+say len(file.read_lines("tests/tmp/satirlar.txt"))
+say file.exists("tests/tmp/satirlar.txt"), file.exists("tests/tmp/yok.txt")
+file.make_dir("tests/tmp/altklasor")
+say file.exists("tests/tmp/altklasor")
+say file.delete_file("tests/tmp/satirlar.txt")
+say file.exists("tests/tmp/satirlar.txt")

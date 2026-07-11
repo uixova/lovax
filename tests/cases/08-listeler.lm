@@ -1,0 +1,15 @@
+set l = [1, 2, 3]
+say l
+say l[0], l[2], l[-1]
+l[1] = 99
+say l
+push(l, 4)
+say l, len(l)
+say pop(l)
+say remove(l, 0)
+say l
+say [1] + [2, 3]
+say [[1, 2], [3]][0][1]
+say [] == [], [1] == [1], [1] == [2]
+for x in [10, 20]:
+    say x

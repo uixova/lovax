@@ -1,0 +1,10 @@
+use os
+say os.platform() in ["linux", "windows", "macos"]
+os.set_env("LUME_GOLDEN_VAR", "değer42")
+say os.env("LUME_GOLDEN_VAR")
+say os.env("KESINLIKLE_OLMAYAN_VAR_999") == null
+say os.args()
+use file
+file.write_bytes("tests/tmp/veri.bin", [1, 2, 3, 254, 255])
+set b = file.read_bytes("tests/tmp/veri.bin")
+say b, len(b), sum(b)

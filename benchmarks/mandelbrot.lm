@@ -1,0 +1,18 @@
+# Numeric-loop benchmark (32x32 mandelbrot iteration count)
+set t0 = clock()
+set toplam = 0
+for py in range(32):
+    for px in range(32):
+        set x0 = (px - 16.0) / 8.0
+        set y0 = (py - 16.0) / 8.0
+        set x = 0.0
+        set y = 0.0
+        set i = 0
+        while i < 100 and x * x + y * y <= 4.0:
+            set xt = x * x - y * y + x0
+            set y = 2.0 * x * y + y0
+            set x = xt
+            i += 1
+        toplam += i
+say toplam
+say "süre:", round((clock() - t0) * 1000), "ms"

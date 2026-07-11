@@ -1,0 +1,23 @@
+# Build outputs
+/lume
+/lume.exe
+*_asan
+*.o
+build/
+
+# Local planning and measurement files (not part of the repo)
+ROADMAP.md
+benchmarks/history.csv
+
+# Test scratch outputs
+tests/tmp/
+
+# Editor and OS files
+.directory
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Claude Code local settings
+.claude/

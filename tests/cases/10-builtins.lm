@@ -1,0 +1,8 @@
+say len("şeyler"), len([1, 2]), len({}), len(range(10))
+say text(42) + "!", text(true), text([1])
+say num("42") + 1, num("3.5")
+say kind(1), kind(1.0), kind(""), kind(true), kind(null), kind([]), kind({}), kind(range(1))
+say abs(-5), abs(2.5)
+say min(3, 1, 2), max(1.5, 2)
+say floor(3.9), ceil(3.1), round(2.5), round(2.4)
+say sqrt(25.0), pow(2, 8), pow(2.0, 0.5) > 1.41

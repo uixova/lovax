@@ -1,0 +1,10 @@
+say 2 + 3 * 4
+say (2 + 3) * 4
+say 2 * 3 + 4 * 5
+say 10 - 2 - 3
+say 100 / 10 / 2
+say not 1 == 2
+say 1 < 2 and 3 > 2
+say false or true and false
+say -2 * 3
+say 2 * -3

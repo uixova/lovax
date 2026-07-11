@@ -1,0 +1,13 @@
+say "a" + "b"
+say "tekrar" * 3
+say "satır1\nsatır2"
+say "tab\tsonu"
+say "tırnak: \" ve ters: \\"
+set ad = "Lume"
+say "merhaba {ad}!"
+say "işlem: {2 + 3}"
+set m = {"k": "v"}
+say "iç string: {m["k"]}"
+say "düz süslü: \{böyle\}"
+say "elma" < "erik"
+say "a" == "a", "a" != "b"

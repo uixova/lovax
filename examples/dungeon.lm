@@ -1,0 +1,75 @@
+# dungeon.lm — a mini game loop in pure Lume (no engine needed):
+#   1. Weighted loot table   (pick_weighted)
+#   2. Event system          (signal / connect / emit)
+#   3. Save system           (save_data / load_data)
+# Run with:  ./lume examples/dungeon.lm
+
+use math: clamp
+use game: pick_weighted, signal, connect, emit
+use text: upper, join
+use file
+
+seed(2026)  # deterministic: same dungeon every run (replay/test friendly)
+
+set player = {"name": "Kai", "hp": 100, "gold": 0, "bag": []}
+set log = []
+
+set damaged = signal()
+set loot_found = signal()
+
+fn on_damage(amount):
+    player.hp -= amount
+    push(log, "-{amount} hp")
+
+fn on_loot(item):
+    push(player.bag, item)
+    match item:
+        "gold_pouch":
+            player.gold += random(10, 50)
+        "gem":
+            player.gold += 100
+    push(log, "+{item}")
+
+connect(damaged, on_damage)
+connect(loot_found, on_loot)
+
+set loot_table = {
+    "nothing":     40,
+    "gold_pouch":  30,
+    "potion":      20,
+    "gem":          9,
+    "legendary":    1,
+}
+
+fn explore(room):
+    say "--- Room {room} ---"
+    set trap_chance = clamp(room * 10, 0, 60)
+    if random(1, 100) <= trap_chance:
+        set dmg = random(5, 15)
+        emit(damaged, dmg)
+        say "A trap! You took {dmg} damage. HP left: {player.hp}"
+    set found = pick_weighted(loot_table)
+    if found == "nothing":
+        say "The room is empty."
+    else:
+        emit(loot_found, found)
+        say "You found: {upper(found)}!"
+
+set room = 1
+while room <= 5 and player.hp > 0:
+    explore(room)
+    room += 1
+
+say ""
+say "=== RESULT ==="
+say "HP: {player.hp}  Gold: {player.gold}"
+say "Bag: {player.bag}"
+say "Events: {join(log, ", ")}"
+
+fn valuable(item):
+    return item in ["gem", "legendary", "gold_pouch"]
+say "Valuables: {filter(player.bag, valuable)}"
+
+file.save_data("tests/tmp/dungeon_save.json", player)
+set loaded = file.load_data("tests/tmp/dungeon_save.json")
+say "Save verified: {loaded == player}"

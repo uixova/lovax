@@ -1,0 +1,16 @@
+use game: signal, connect, disconnect, emit
+set vuruldu = signal()
+set günlük = []
+fn kaydet(hasar):
+    push(günlük, hasar)
+fn çifte(hasar):
+    push(günlük, hasar * 2)
+connect(vuruldu, kaydet)
+connect(vuruldu, kaydet)
+connect(vuruldu, çifte)
+emit(vuruldu, 10)
+say günlük
+say disconnect(vuruldu, çifte), disconnect(vuruldu, çifte)
+emit(vuruldu, 5)
+say günlük
+say kind(vuruldu)

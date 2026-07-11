@@ -1,0 +1,18 @@
+set a = [1, [2, 3]]
+set sığ = copy(a)
+push(sığ, 4)
+say len(a), len(sığ)
+set derin = clone(a)
+derin[1][0] = 99
+say a[1][0], derin[1][0]
+set m = {"iç": {"x": 1}}
+set mk = clone(m)
+mk["iç"]["x"] = 5
+say m["iç"]["x"], mk["iç"]["x"]
+check(true)
+check(1 < 2, "sıralama bozuk")
+say "kontroller geçti"
+say min([3, 1, 2]), max([3, 1, 2]), min(9, 4)
+use text: chr, ord, fixed
+say chr(65) + chr(351), ord("ş")
+say fixed(3.14159, 2), fixed(2.5, 3)

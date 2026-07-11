@@ -1,0 +1,70 @@
+# inventory.lm — a realistic game inventory built with lists, maps, for and dot access.
+# Run with:  ./lume examples/inventory.lm
+
+set items = {
+    "sword":   {"value": 150, "weight": 5, "type": "weapon"},
+    "shield":  {"value": 80,  "weight": 8, "type": "armor"},
+    "potion":  {"value": 25,  "weight": 1, "type": "consumable"},
+    "gem":     {"value": 500, "weight": 1, "type": "treasure"},
+    "bread":   {"value": 2,   "weight": 1, "type": "consumable"},
+}
+
+set bag = []
+set gold = 100
+set carry_limit = 12
+
+fn total_weight(list):
+    set total = 0
+    for name in list:
+        total += items[name].weight
+    return total
+
+fn can_carry(name):
+    return total_weight(bag) + items[name].weight <= carry_limit
+
+fn buy(name):
+    if not name in items:
+        say "The shop has no '{name}'!"
+        return false
+    set price = items[name].value
+    if gold < price:
+        say "Not enough gold: {name} costs {price}, you have {gold}."
+        return false
+    if not can_carry(name):
+        say "Bag is full! ({name} does not fit, limit {carry_limit} kg)"
+        return false
+    gold -= price
+    push(bag, name)
+    say "Bought: {name} (-{price} gold, left: {gold})"
+    return true
+
+fn sell(name):
+    set at = find(bag, name)
+    if at == -1:
+        say "No '{name}' in the bag."
+        return false
+    set earnings = items[name].value / 2
+    gold += earnings
+    remove(bag, at)
+    say "Sold: {name} (+{earnings} gold, balance: {gold})"
+    return true
+
+fn show():
+    say "--- BAG ({len(bag)} items, {total_weight(bag)}/{carry_limit} kg, {gold} gold) ---"
+    if len(bag) == 0:
+        say "  (empty)"
+        return
+    for name in bag:
+        say "  - {name} ({items[name].type}, {items[name].weight} kg)"
+
+say "=== SHOP OPEN ==="
+buy("potion")
+buy("bread")
+buy("sword")
+buy("gem")
+show()
+say ""
+say "=== SELLING ==="
+sell("bread")
+sell("nonexistent")
+show()

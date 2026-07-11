@@ -1,0 +1,9 @@
+use "lib/yardımcı.lm"
+say yardımcı.SÜRÜM
+say yardımcı.selamla("Kai")
+say yardımcı.topla_hepsi([1, 2, 3])
+use "lib/yardımcı.lm" as y
+say y.SÜRÜM
+use "lib/yardımcı.lm": selamla
+say selamla("dünya")
+say keys(yardımcı)

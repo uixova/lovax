@@ -1,0 +1,9 @@
+use file: save_data, load_data, write_text, read_text
+set kayıt = {"isim": "Kai", "seviye": 12, "can": 87.5, "ölü": false, "çanta": ["kılıç"], "not": null}
+save_data("tests/tmp/kayit_test.json", kayıt)
+set geri = load_data("tests/tmp/kayit_test.json")
+say geri == kayıt
+say geri["isim"], geri["çanta"][0]
+write_text("tests/tmp/nota.txt", "satır1\nsatır2")
+say read_text("tests/tmp/nota.txt")
+say len(load_data("tests/tmp/kayit_test.json"))

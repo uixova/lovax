@@ -1,0 +1,11 @@
+# exit: 0
+Kai beş
+75
+{"isim": "Kai", "can": 75, 5: "beş", "yeni": true}
+true false
+["isim", "can", 5, "yeni"]
+["Kai", 75, "beş", true]
+true
+3
+a
+b

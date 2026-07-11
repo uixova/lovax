@@ -1,0 +1,13 @@
+# Realistic game load: 1000 entities x 60 frames of movement math
+set t0 = clock()
+set n = 1000
+set xler = []
+set hizlar = []
+for i in range(n):
+    push(xler, 0.0)
+    push(hizlar, 1.0 + i % 3)
+for kare in range(60):
+    for i in range(n):
+        xler[i] += hizlar[i] * 0.016
+say round(xler[0] * 100), round(xler[999] * 100)
+say "süre:", round((clock() - t0) * 1000), "ms"

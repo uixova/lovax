@@ -1,0 +1,3 @@
+set kalkan = 0
+check(kalkan > 0, "kalkan kırıldı")
+say "buraya ulaşılmaz"

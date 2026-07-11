@@ -1,0 +1,23 @@
+set x = 7
+if x > 10:
+    say "büyük"
+else if x > 5:
+    say "orta"
+else:
+    say "küçük"
+if x == 7:
+    say "yedi"
+if x > 100:
+    say "asla"
+else:
+    if x > 6:
+        say "iç içe"
+set not_ = 85
+if not_ >= 90:
+    say "AA"
+else if not_ >= 80:
+    say "BA"
+else if not_ >= 70:
+    say "BB"
+else:
+    say "kaldı"

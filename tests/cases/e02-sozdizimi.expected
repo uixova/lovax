@@ -1,0 +1,5 @@
+# exit: 65
+[Sözdizimi Hatası] satır 1, sütun 5: beklenen isim (identifier) fakat '=' geldi
+[Sözdizimi Hatası] satır 2, sütun 7: beklenen '=' fakat tam sayı geldi
+[Sözdizimi Hatası] satır 3, sütun 7: beklenmeyen jeton: satır sonu (burada bir değer veya ifade olmalı)
+3 sözdizimi hatası bulundu, program çalıştırılmadı.

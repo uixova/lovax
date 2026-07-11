@@ -1,0 +1,10 @@
+say 2 + 3
+say 10 - 4
+say 6 * 7
+say 15 / 4
+say 15.0 / 4
+say 10 % 3
+say -5 % 3
+say 2.5 + 1
+say -7
+say -(2 + 3)

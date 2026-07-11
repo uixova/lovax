@@ -1,0 +1,14 @@
+set l = [1, 3]
+insert(l, 1, 2)
+say l
+clear(l)
+say l
+say merge({"a": 1}, {"a": 9, "b": 2})
+use math: snap, log
+say snap(13, 5), log(8.0, 2)
+use text: count, pad_start, pad_end
+say count("ababab", "ab"), pad_start("7", 3, "0"), pad_end("x", 3, ".")
+use game: timer, timer_done, timer_left, timer_reset
+set t = timer(60)
+say timer_done(t), timer_left(t) > 59.0
+say kind(t)

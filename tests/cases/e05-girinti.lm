@@ -1,0 +1,3 @@
+if true:
+    say 1
+  say 2

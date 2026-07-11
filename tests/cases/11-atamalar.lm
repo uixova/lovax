@@ -1,0 +1,14 @@
+set x = 10
+x = 20
+say x
+x += 5
+x -= 3
+x *= 2
+x /= 4
+say x
+set l = [1, 2]
+l[0] += 100
+say l
+set m = {"p": 5}
+m["p"] *= 3
+say m["p"]

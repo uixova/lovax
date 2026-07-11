@@ -1,0 +1,19 @@
+fn kare(x):
+    return x * x
+say kare(9)
+fn fakt(n):
+    if n < 2:
+        return 1
+    return n * fakt(n - 1)
+say fakt(10)
+fn sayaç_yap():
+    set n = 0
+    fn artır():
+        n += 1
+        return n
+    return artır
+set c = sayaç_yap()
+say c(), c(), c()
+fn bos():
+    return
+say bos() == null

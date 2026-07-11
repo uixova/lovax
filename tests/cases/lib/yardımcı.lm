@@ -1,0 +1,8 @@
+# Test yardımcı modülü (koşucu bunu test olarak GÖRMEZ: alt klasörde)
+set SÜRÜM = 3
+
+fn selamla(isim):
+    return "selam {isim}"
+
+fn topla_hepsi(liste):
+    return sum(liste)

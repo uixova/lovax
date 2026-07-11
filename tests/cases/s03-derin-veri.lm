@@ -1,0 +1,8 @@
+set l = []
+for i in range(1000):
+    push(l, i * 2)
+say len(l), l[500], l[-1]
+set m = {}
+for i in range(100):
+    m[text(i)] = i
+say len(m), m["50"]

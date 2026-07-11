@@ -1,0 +1,4 @@
+if true:
+    say 1
+elif false:
+    say 2

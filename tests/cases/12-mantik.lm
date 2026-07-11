@@ -1,0 +1,15 @@
+say true and true, true and false
+say false or true, false or false
+say not true, not false
+say false or "yedek"
+say null or 5
+say 1 and 2
+say 0 and "asla"
+if "":
+    say "boş string doğru olmamalı"
+else:
+    say "boş string yanlış"
+if [1]:
+    say "dolu liste doğru"
+if not {}:
+    say "boş map yanlış"

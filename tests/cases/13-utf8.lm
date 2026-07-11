@@ -1,0 +1,7 @@
+set isim = "Şükrü"
+say isim, len(isim)
+say isim[0], isim[-1]
+set türkçe_değişken = 42
+say türkçe_değişken
+for harf in "çğı":
+    say harf

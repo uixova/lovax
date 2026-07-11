@@ -1,0 +1,8 @@
+# Function-call cost benchmark
+fn fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+set t0 = clock()
+say fib(24)
+say "süre:", round((clock() - t0) * 1000), "ms"

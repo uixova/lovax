@@ -1,0 +1,17 @@
+fn çift_mi(n):
+    return n % 2 == 0
+say filter([1, 2, 3, 4, 5, 6], çift_mi)
+fn karesi(n):
+    return n * n
+say transform([1, 2, 3], karesi)
+fn negatifi(n):
+    return -n
+say sort_by([3, 1, 2], negatifi)
+set toplam = 0
+fn ekle(n):
+    toplam += n
+each([10, 20, 30], ekle)
+say toplam
+fn uzunluk(s):
+    return len(s)
+say sort_by(["uzun_kelime", "ab", "orta"], uzunluk)

@@ -1,0 +1,15 @@
+use math: lerp, clamp, remap, sign, wrap, move_toward, dist, deg, sin, cos, atan2, PI, TAU
+use game: ease
+say lerp(0, 100, 0.25)
+say clamp(150, 0, 100), clamp(-5, 0, 100), clamp(1.5, 0.0, 1.0)
+say remap(5.0, 0.0, 10.0, 0.0, 100.0)
+say sign(-42), sign(0), sign(3.2)
+say wrap(370, 0, 360), wrap(-30, 0, 360), wrap(7, 0, 5)
+say move_toward(0.0, 10.0, 3.0), move_toward(9.5, 10.0, 3.0)
+say dist(0, 0, 3, 4)
+say round(deg(PI)), round(sin(PI / 2)), round(cos(0.0))
+say round(atan2(1.0, 1.0) * 4 * 100) / 100 == round(PI * 100) / 100
+say TAU == PI * 2
+say ease(0.5, "linear"), ease(0.5, "in_quad"), ease(0.5, "out_quad")
+say ease(0.0, "out_bounce"), ease(1.0, "out_elastic")
+say ease(2.0, "linear")

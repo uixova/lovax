@@ -1,0 +1,19 @@
+# turkish_showcase.lm — Lume is Turkish-friendly: full UTF-8 identifiers,
+# UTF-8-aware len/indexing, and Turkish-aware upper/lower (i → İ, ı → I).
+# Run with:  ./lume examples/turkish_showcase.lm
+
+use text: upper, lower
+
+set oyuncu_adı = "Şükrü"
+say oyuncu_adı, len(oyuncu_adı)          # code points, not bytes -> 5
+say oyuncu_adı[0], oyuncu_adı[-1]        # Ş ü
+
+set düşman_menzilde = true
+if düşman_menzilde:
+    say "Düşman görüldü!"
+
+say upper("ışık hızı")                   # IŞIK HIZI (Turkish casing)
+say lower("İSTANBUL")                    # istanbul
+
+for harf in "çğı":
+    say harf

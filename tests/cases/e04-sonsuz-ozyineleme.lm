@@ -1,0 +1,3 @@
+fn f(n):
+    return f(n)
+say f(1)

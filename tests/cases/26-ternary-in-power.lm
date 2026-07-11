@@ -1,0 +1,11 @@
+set x = 7
+say "az" if x < 5 else "çok"
+say "ölü" if false else ("yaralı" if x < 10 else "sağlam")
+say 2 in [1, 2, 3], 9 in [1, 2]
+say "erha" in "merhaba", "can" in {"can": 1}
+say 4 in range(0, 10, 2), 5 in range(0, 10, 2)
+say not 9 in [1, 2]
+say 2 ** 10, 2 ** 3 ** 2, -2 ** 2
+say 2 ** -1, 2.5 ** 2
+set puan = 85
+say "geçti" if puan >= 50 else "kaldı"

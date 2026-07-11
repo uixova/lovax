@@ -1,0 +1,7 @@
+set b = null
+say b == null, b != null
+say 5 == 5.0
+say "1" == 1
+say null == false
+say [1, [2]] == [1, [2]]
+say {"a": 1} == {"a": 1}, {"a": 1} == {"a": 2}

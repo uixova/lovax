@@ -1,0 +1,8 @@
+set yaş = 20
+set ehliyet_var = true
+
+if yaş > 18 and ehliyet_var == true:
+    say "Araba kullanabilirsin, yol senin!"
+else:
+    say "Gerekli şartlar sağlanamadı."
+    

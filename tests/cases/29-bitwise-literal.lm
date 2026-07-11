@@ -1,0 +1,13 @@
+say 0xFF, 0b1010, 1_000_000, 0xff_ff
+say 1e6, 2.5e-3, 1e-2
+say 5 & 3, 5 | 3, 5 ^ 3, ~5
+say 1 << 4, 256 >> 2
+say 0b1100 & 0b1010, 0b1100 | 0b1010
+say 1 + 2 & 3
+set bayraklar = 0b0001
+bayraklar = bayraklar | 0b0100
+say bayraklar, bayraklar & 0b0100 != 0
+set x = 17
+x %= 5
+say x
+say -7 / 2, -7 % 2, (-7 / 2) * 2 + (-7 % 2) == -7

@@ -1,0 +1,7 @@
+set diyalog = """Merhaba yolcu!
+Zindanda {2 + 3} altın var."""
+say diyalog
+say len("""ab
+c""")
+set tek = """tek satır"""
+say tek

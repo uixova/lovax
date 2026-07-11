@@ -1,0 +1,21 @@
+# Your first Lume program
+# Run with:  ./lume examples/hello_world.lm
+
+set name = "World"
+say "Hello, {name}!"
+
+set age = 20
+set has_license = true
+
+if age > 18 and has_license:
+    say "You can drive!"
+else:
+    say "Not yet."
+
+fn square(x):
+    return x * x
+
+say square(9)
+
+for i in range(3):
+    say i

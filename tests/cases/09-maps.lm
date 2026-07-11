@@ -1,0 +1,13 @@
+set m = {"isim": "Kai", "can": 100, 5: "beş"}
+say m["isim"], m[5]
+m["can"] -= 25
+say m["can"]
+m["yeni"] = true
+say m
+say has(m, "isim"), has(m, "yok")
+say keys(m)
+say values(m)
+say remove(m, "yeni")
+say len(m)
+for k in {"a": 1, "b": 2}:
+    say k

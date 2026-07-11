@@ -1,0 +1,6 @@
+say "merhaba"
+say 42
+say 3.14
+say true
+say null
+say "çoklu", 1, true

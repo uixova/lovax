@@ -1,0 +1,13 @@
+set oyuncu = {"can": 100, "isim": "Kai"}
+say oyuncu.can, oyuncu.isim
+oyuncu.can -= 25
+oyuncu.mana = 50
+say oyuncu
+set iç = {"a": {"b": {"c": 42}}}
+say iç.a.b.c
+iç.a.b.c *= 2
+say iç.a.b.c
+set listeli = {"eşyalar": ["kılıç", "iksir"]}
+say listeli.eşyalar[0], len(listeli.eşyalar)
+push(listeli.eşyalar, "elmas")
+say listeli.eşyalar
