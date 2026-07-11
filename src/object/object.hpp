@@ -177,7 +177,7 @@ public:
     ObjectType type() const override { return ObjectType::MAP; }
     std::string inspect() const override {
         if (!moduleName.empty()) {
-            return "<modül " + moduleName + ": " + std::to_string(entries.size()) + " öğe>";
+            return "<module " + moduleName + ": " + std::to_string(entries.size()) + " items>";
         }
         std::string out = "{";
         for (size_t i = 0; i < entries.size(); ++i) {
@@ -271,7 +271,7 @@ public:
 
     ObjectType type() const override { return ObjectType::SIGNAL; }
     std::string inspect() const override {
-        return "signal(" + std::to_string(listeners.size()) + " dinleyici)";
+        return "signal(" + std::to_string(listeners.size()) + " listeners)";
     }
 };
 
@@ -309,9 +309,9 @@ public:
     ObjectType type() const override { return ObjectType::ERROR; }
     std::string inspect() const override {
         if (srcLine > 0) {
-            return "[Çalışma Hatası] satır " + std::to_string(srcLine) + ": " + message;
+            return "[Runtime Error] line " + std::to_string(srcLine) + ": " + message;
         }
-        return "[Çalışma Hatası] " + message;
+        return "[Runtime Error] " + message;
     }
 };
 

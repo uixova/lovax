@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 2: modül 'math' değiştirilemez (donmuş)
+[Runtime Error] line 2: module 'math' cannot be modified (frozen)

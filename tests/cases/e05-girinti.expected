@@ -1,3 +1,3 @@
 # exit: 65
-[Sözdizimi Hatası] satır 3, sütun 3: hatalı girinti seviyesi: hiçbir üst bloğun hizasıyla eşleşmiyor
-1 sözdizimi hatası bulundu, program çalıştırılmadı.
+[Syntax Error] line 3, column 3: invalid indentation level: matches no enclosing block
+1 syntax error(s) found; the program was not run.

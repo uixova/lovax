@@ -1,0 +1,5 @@
+# A tiny installable package used by the test suite.
+set VERSION = 1
+
+fn greet(name):
+    return "hello {name}!"

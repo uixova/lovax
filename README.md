@@ -171,6 +171,24 @@ use "tools/weapons.lm" as w
 - Modules are **frozen**: `math.lerp = 5` is an error — libraries can't break the language.
 - Discovery: `keys(math)` works; accessing a missing member lists what exists.
 
+### Packages — `lume install` (RFC-007)
+
+Install community libraries with one command and import them by name:
+
+```bash
+lume install someuser/inventory      # GitHub shorthand -> lume_libs/inventory/
+```
+
+```lume
+use inventory                        # imports like a built-in
+say inventory.restock("potion")
+```
+
+`use <name>` resolves built-ins first, then `lume_libs/<name>/<name>.lm` (or `main.lm`).
+Publishing a package = pushing a repo with a `<name>.lm` at its root — nothing else.
+A manifest (`lume.json`) with version pinning and a registry are planned (see
+[rfcs/007-packages.md](rfcs/007-packages.md)).
+
 ### Built-in functions
 
 **Core (no import needed):**
@@ -200,10 +218,13 @@ use "tools/weapons.lm" as w
 ### Errors
 
 Errors are located, human-readable, and suggest the fix. **A file with syntax errors
-never runs** (multiple errors reported in one pass). Exit codes: `0` ok, `65` syntax, `70` runtime.
+never runs** (multiple errors reported in one pass). Exit codes: `0` ok, `64` usage, `65` syntax, `70` runtime.
 
-> Error messages are currently in Turkish (part of Lume's Turkish-friendly identity);
-> an English error locale is on the roadmap.
+```
+[Syntax Error] line 2, column 7: expected '=' but got integer
+[Runtime Error] line 5: undefined variable 'x' (define it with: set x = ...)
+```
+
 
 ## Project Layout
 
@@ -228,7 +249,7 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ## Tests & Benchmarks
 
 ```bash
-./tests/run_tests.sh              # 52 golden-file tests (features + errors + stress)
+./tests/run_tests.sh              # 53 golden-file tests (features + errors + stress)
 ./tests/run_tests.sh --update     # regenerate expected outputs (verify diffs first!)
 ./benchmarks/run_benchmarks.sh
 ```
@@ -267,8 +288,7 @@ geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama 
 - **Temiz çekirdek** — gömülü kütüphaneler (`math`, `game`, `text`, `file`, `os`)
   `use` ile davet edilmeden kapsamına girmez; modüller donmuştur, dil bozulamaz.
 - **Türkçe dostu** — `oyuncu_adı` gibi tanımlayıcılar birinci sınıftır; `len("şey") == 3`;
-  `upper/lower` Türkçe kurallıdır (`i→İ`, `ı→I`); hata mesajları Türkçedir ve satır
-  numarasıyla çözümü söyler.
+  `upper/lower` Türkçe kurallıdır (`i→İ`, `ı→I`); hata mesajları satır numarasıyla çözümü söyler (küresel standart için İngilizcedir).
 
 ### Hızlı Başlangıç
 
@@ -287,7 +307,7 @@ g++ -std=c++17 -O2 -o lume src/main.cpp
 - Kendi kütüphaneni yaz: `use "libs/envanter.lm"` — bir kez yüklenir, döngüsel `use`
   net hatayla yakalanır.
 
-Testler: `./tests/run_tests.sh` (52 golden test). Tasarım kararları: [rfcs/](rfcs/).
+Testler: `./tests/run_tests.sh` (53 golden test). Paket kurma: `lume install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/).
 
 </details>
 

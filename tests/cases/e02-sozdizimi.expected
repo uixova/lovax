@@ -1,5 +1,5 @@
 # exit: 65
-[Sözdizimi Hatası] satır 1, sütun 5: beklenen isim (identifier) fakat '=' geldi
-[Sözdizimi Hatası] satır 2, sütun 7: beklenen '=' fakat tam sayı geldi
-[Sözdizimi Hatası] satır 3, sütun 7: beklenmeyen jeton: satır sonu (burada bir değer veya ifade olmalı)
-3 sözdizimi hatası bulundu, program çalıştırılmadı.
+[Syntax Error] line 1, column 5: expected identifier but got '='
+[Syntax Error] line 2, column 7: expected '=' but got integer
+[Syntax Error] line 3, column 7: unexpected token: newline (a value or expression is expected here)
+3 syntax error(s) found; the program was not run.

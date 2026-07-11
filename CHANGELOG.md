@@ -28,6 +28,10 @@
 - `file`: text/lines/binary/JSON/CSV read-write, exists, list_dir, make_dir, delete_file.
 - `os`: env, set_env, platform, cwd, args, path_join.
 
+### Packages (RFC-007)
+- `lume install user/repo` fetches libraries into `lume_libs/`; `use <name>` imports
+  installed packages exactly like built-ins.
+
 ### Quality
-- Located, helpful (Turkish) error messages; syntax errors prevent execution entirely.
-- 52 golden-file tests, benchmark suite, ASan/UBSan clean.
+- Located, helpful English error messages; syntax errors prevent execution entirely.
+- 53 golden-file tests, benchmark suite, ASan/UBSan clean.

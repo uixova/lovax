@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 1: tanımlanmamış değişken 'tanımsız_şey' (tanımlamak için: set tanımsız_şey = ...)
+[Runtime Error] line 1: undefined variable 'tanımsız_şey' (define it with: set tanımsız_şey = ...)

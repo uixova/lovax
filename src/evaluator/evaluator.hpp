@@ -44,11 +44,11 @@ public:
                         case ObjectType::ERROR:
                             return result; // The first error stops execution
                         case ObjectType::RETURN_VALUE:
-                            return makeError("'return' fonksiyon dışında kullanılamaz", stmt->line());
+                            return makeError("'return' cannot be used outside a function", stmt->line());
                         case ObjectType::BREAK_SIGNAL:
-                            return makeError("'break' döngü dışında kullanılamaz", stmt->line());
+                            return makeError("'break' cannot be used outside a loop", stmt->line());
                         case ObjectType::CONTINUE_SIGNAL:
-                            return makeError("'continue' döngü dışında kullanılamaz", stmt->line());
+                            return makeError("'continue' cannot be used outside a loop", stmt->line());
                         default: break;
                     }
                 }
@@ -109,8 +109,8 @@ public:
                 const auto* ident = static_cast<const Identifier*>(node);
                 auto val = env->get(ident->value);
                 if (val == nullptr) {
-                    return makeError("tanımlanmamış değişken '" + ident->value +
-                                     "' (tanımlamak için: set " + ident->value + " = ...)",
+                    return makeError("undefined variable '" + ident->value +
+                                     "' (define it with: set " + ident->value + " = ...)",
                                      ident->token.line);
                 }
                 return val;
@@ -161,8 +161,8 @@ public:
                     auto key = eval(pair.first.get(), env);
                     if (isError(key)) return key;
                     if (!isValidMapKey(key)) {
-                        return makeError("map anahtarı string, int veya bool olmalı; " +
-                                         typeName(key->type()) + " verildi", lit->token.line);
+                        return makeError("map keys must be string, int or bool; got " +
+                                         typeName(key->type()) + "", lit->token.line);
                     }
                     auto val = eval(pair.second.get(), env);
                     if (isError(val)) return val;
@@ -272,7 +272,7 @@ public:
         }
 
         if (function->type() != ObjectType::FUNCTION) {
-            return makeError("bu bir fonksiyon değil, çağrılamaz: " + typeName(function->type()), line);
+            return makeError("not a function, cannot be called: " + typeName(function->type()), line);
         }
 
         auto* fnObj = static_cast<FunctionObject*>(function.get());
@@ -285,14 +285,14 @@ public:
             std::string expected = (required == total)
                 ? std::to_string(total)
                 : std::to_string(required) + "-" + std::to_string(total);
-            return makeError(fname + " " + expected + " parametre bekler, " +
-                             std::to_string(args.size()) + " verildi", line);
+            return makeError(fname + " expects " + expected + " parameter(s), got " +
+                             std::to_string(args.size()) + "", line);
         }
 
         // Report a clean error before deep recursion overflows the C++ stack
         if (callDepth >= MAX_CALL_DEPTH) {
-            return makeError("maksimum çağrı derinliği aşıldı (" +
-                             std::to_string(MAX_CALL_DEPTH) + ") — sonsuz özyineleme olabilir",
+            return makeError("maximum call depth exceeded (" +
+                             std::to_string(MAX_CALL_DEPTH) + ") — possible infinite recursion",
                              line);
         }
 
@@ -318,11 +318,11 @@ public:
             return static_cast<ReturnValueObject*>(result.get())->value;
         }
         if (result->type() == ObjectType::BREAK_SIGNAL) {
-            return makeError("'break' döngü dışında kullanılamaz",
+            return makeError("'break' cannot be used outside a loop",
                              static_cast<BreakSignalObject*>(result.get())->srcLine);
         }
         if (result->type() == ObjectType::CONTINUE_SIGNAL) {
-            return makeError("'continue' döngü dışında kullanılamaz",
+            return makeError("'continue' cannot be used outside a loop",
                              static_cast<ContinueSignalObject*>(result.get())->srcLine);
         }
         return result; // propagates upward unchanged, including ERROR
@@ -390,8 +390,8 @@ private:
             if (!binOp.empty()) {
                 auto oldVal = env->get(ident->value);
                 if (oldVal == nullptr) {
-                    return makeError("tanımlanmamış değişken '" + ident->value +
-                                     "' (tanımlamak için: set " + ident->value + " = ...)",
+                    return makeError("undefined variable '" + ident->value +
+                                     "' (define it with: set " + ident->value + " = ...)",
                                      stmt->token.line);
                 }
                 newVal = evalInfixExpression(binOp, oldVal, newVal, stmt->token.line);
@@ -401,8 +401,8 @@ private:
             // RFC-001: bare assignment updates an EXISTING variable; error otherwise.
             // (Prevents typos from silently creating new variables.)
             if (!env->assign(ident->value, newVal)) {
-                return makeError("tanımlanmamış değişken '" + ident->value +
-                                 "' (tanımlamak için: set " + ident->value + " = ...)",
+                return makeError("undefined variable '" + ident->value +
+                                 "' (define it with: set " + ident->value + " = ...)",
                                  stmt->token.line);
             }
             return NULL_OBJ_;
@@ -414,19 +414,19 @@ private:
             auto obj = eval(mem->object.get(), env);
             if (isError(obj)) return obj;
             if (obj->type() != ObjectType::MAP) {
-                return makeError("üye ataması (nesne.alan = ...) yalnızca map üzerinde çalışır, " +
-                                 typeName(obj->type()) + " verildi", stmt->token.line);
+                return makeError("member assignment (object.field = ...) only works on maps, got " +
+                                 typeName(obj->type()) + "", stmt->token.line);
             }
             auto* map = static_cast<MapObject*>(obj.get());
             if (map->frozen) {
-                return makeError("modül '" + map->moduleName + "' değiştirilemez (donmuş)", stmt->token.line);
+                return makeError("module '" + map->moduleName + "' cannot be modified (frozen)", stmt->token.line);
             }
             auto key = std::make_shared<StringObject>(mem->property);
             if (!binOp.empty()) {
                 auto oldVal = map->get(key);
                 if (oldVal == nullptr) {
                     return makeError("map'te olmayan anahtar: \"" + mem->property +
-                                     "\" (önce değer ata veya has() ile kontrol et)", stmt->token.line);
+                                     "\" (assign a value first, or check with has())", stmt->token.line);
                 }
                 newVal = evalInfixExpression(binOp, oldVal, newVal, stmt->token.line);
                 if (isError(newVal)) return newVal;
@@ -445,15 +445,15 @@ private:
         if (obj->type() == ObjectType::LIST) {
             auto* list = static_cast<ListObject*>(obj.get());
             if (idx->type() != ObjectType::INTEGER) {
-                return makeError("liste indeksi tam sayı olmalı, " +
-                                 typeName(idx->type()) + " verildi", stmt->token.line);
+                return makeError("list index must be an integer, got " +
+                                 typeName(idx->type()) + "", stmt->token.line);
             }
             long long i = static_cast<IntegerObject*>(idx.get())->value;
             long long n = (long long)list->elements.size();
             if (i < 0) i += n; // negatif indeks: sondan say
             if (i < 0 || i >= n) {
-                return makeError("liste indeksi aralık dışı: " + idx->inspect() +
-                                 " (uzunluk " + std::to_string(n) + ")", stmt->token.line);
+                return makeError("list index out of range: " + idx->inspect() +
+                                 " (length " + std::to_string(n) + ")", stmt->token.line);
             }
             if (!binOp.empty()) {
                 newVal = evalInfixExpression(binOp, list->elements[i], newVal, stmt->token.line);
@@ -466,17 +466,17 @@ private:
         if (obj->type() == ObjectType::MAP) {
             auto* map = static_cast<MapObject*>(obj.get());
             if (map->frozen) {
-                return makeError("modül '" + map->moduleName + "' değiştirilemez (donmuş)", stmt->token.line);
+                return makeError("module '" + map->moduleName + "' cannot be modified (frozen)", stmt->token.line);
             }
             if (!isValidMapKey(idx)) {
-                return makeError("map anahtarı string, int veya bool olmalı; " +
-                                 typeName(idx->type()) + " verildi", stmt->token.line);
+                return makeError("map keys must be string, int or bool; got " +
+                                 typeName(idx->type()) + "", stmt->token.line);
             }
             if (!binOp.empty()) {
                 auto oldVal = map->get(idx);
                 if (oldVal == nullptr) {
-                    return makeError("map'te olmayan anahtar: " + inspectQuoted(idx) +
-                                     " (önce değer ata veya has() ile kontrol et)", stmt->token.line);
+                    return makeError("key not in map: " + inspectQuoted(idx) +
+                                     " (assign a value first, or check with has())", stmt->token.line);
                 }
                 newVal = evalInfixExpression(binOp, oldVal, newVal, stmt->token.line);
                 if (isError(newVal)) return newVal;
@@ -485,8 +485,8 @@ private:
             return NULL_OBJ_;
         }
 
-        return makeError("indeksli atama yalnızca list ve map üzerinde çalışır, " +
-                         typeName(obj->type()) + " verildi", stmt->token.line);
+        return makeError("indexed assignment only works on list and map, got " +
+                         typeName(obj->type()) + "", stmt->token.line);
     }
 
     static std::shared_ptr<Object> evalIfStatement(const IfStatement* ifStmt,
@@ -609,8 +609,8 @@ private:
                 return NULL_OBJ_;
             }
             default:
-                return makeError("for döngüsü list, range, string veya map ister; " +
-                                 typeName(iterable->type()) + " verildi", forStmt->token.line);
+                return makeError("for loops iterate over list, range, string or map; got " +
+                                 typeName(iterable->type()) + "", forStmt->token.line);
         }
     }
 
@@ -695,8 +695,8 @@ private:
     static std::shared_ptr<Object> evalMemberAccess(const std::shared_ptr<Object>& obj,
                                                     const std::string& prop, int line) {
         if (obj->type() != ObjectType::MAP) {
-            return makeError("'.' erişimi map veya modül ister, " +
-                             typeName(obj->type()) + " verildi", line);
+            return makeError("'.' access expects a map or module, got " +
+                             typeName(obj->type()) + "", line);
         }
         auto* map = static_cast<MapObject*>(obj.get());
         auto val = map->get(std::make_shared<StringObject>(prop));
@@ -712,11 +712,11 @@ private:
                 avail += e.first->inspect();
                 shown++;
             }
-            return makeError("'" + map->moduleName + "' modülünde '" + prop +
-                             "' yok (mevcut: " + avail + ")", line);
+            return makeError("'" + map->moduleName + "' module has no member '" + prop +
+                             "' (available: " + avail + ")", line);
         }
         return makeError("map'te olmayan anahtar: \"" + prop +
-                         "\" (kontrol için has() kullan)", line);
+                         "\" (check with has())", line);
     }
 
     static std::shared_ptr<Object> evalUseStatement(const UseStatement* stmt,
@@ -728,10 +728,28 @@ private:
         } else {
             module = StdLib::getBuiltinModule(stmt->target);
             if (module == nullptr) {
-                return makeError("bilinmeyen gömülü modül '" + stmt->target +
-                                 "' (mevcut: " + StdLib::builtinModuleList() +
-                                 "; dosya modülü için tırnak kullan: use \"" + stmt->target + ".lm\")",
-                                 stmt->token.line);
+                // Not a built-in: try an installed package (lume_libs/<name>/, the
+                // node_modules of Lume). Resolved from the project root (entry script dir).
+                namespace fs = std::filesystem;
+                fs::path root(baseDirs.front());
+                fs::path candidates[2] = {
+                    root / "lume_libs" / stmt->target / (stmt->target + ".lm"),
+                    root / "lume_libs" / stmt->target / "main.lm"
+                };
+                for (const auto& cand : candidates) {
+                    std::error_code ec;
+                    if (fs::exists(cand, ec)) {
+                        module = loadFileModule(std::filesystem::absolute(cand).string(), stmt->token.line);
+                        break;
+                    }
+                }
+                if (module == nullptr) {
+                    return makeError("unknown module '" + stmt->target +
+                                     "' (built-ins: " + StdLib::builtinModuleList() +
+                                     "; no package at lume_libs/" + stmt->target + "/" +
+                                     "; for a file module use quotes: use \"" + stmt->target + ".lm\")",
+                                     stmt->token.line);
+                }
             }
         }
         if (isError(module)) return module;
@@ -743,7 +761,7 @@ private:
             for (const auto& name : stmt->names) {
                 auto val = map->get(std::make_shared<StringObject>(name));
                 if (val == nullptr) {
-                    return makeError("'" + map->moduleName + "' modülünde '" + name + "' yok",
+                    return makeError("'" + map->moduleName + "' module has no member '" + name + "'",
                                      stmt->token.line);
                 }
                 env->define(name, val);
@@ -761,7 +779,7 @@ private:
             }
         }
         if (bindName.empty()) {
-            return makeError("modül ismi çözülemedi; 'as' ile isim ver: use \"...\" as isim",
+            return makeError("could not derive a module name; give one with 'as': use \"...\" as name",
                              stmt->token.line);
         }
         env->define(bindName, module);
@@ -782,8 +800,8 @@ private:
         std::string key = resolved.string();
 
         if (!fs::exists(resolved)) {
-            return makeError("modül dosyası bulunamadı: " + rawPath +
-                             " (çözülen yol: " + key + ")", line);
+            return makeError("module file not found: " + rawPath +
+                             " (resolved path: " + key + ")", line);
         }
 
         auto cacheIt = moduleCache.find(key);
@@ -795,12 +813,12 @@ private:
                 std::string chain;
                 for (const auto& l : loadingStack) chain += fs::path(l).filename().string() + " -> ";
                 chain += fs::path(key).filename().string();
-                return makeError("döngüsel use tespit edildi: " + chain, line);
+                return makeError("circular use detected: " + chain, line);
             }
         }
 
         std::ifstream f(resolved, std::ios::binary);
-        if (!f.is_open()) return makeError("modül dosyası açılamadı: " + key, line);
+        if (!f.is_open()) return makeError("cannot open module file: " + key, line);
         std::stringstream buf;
         buf << f.rdbuf();
         std::string source = buf.str();
@@ -809,10 +827,10 @@ private:
         auto parser = std::make_unique<Parser>(lexer);
         auto program = parser->parseProgram();
         if (!parser->errors().empty()) {
-            std::string msg = "modülde sözdizimi hatası [" + rawPath + "]: " +
+            std::string msg = "syntax error in module [" + rawPath + "]: " +
                               parser->errors()[0].toString();
             if (parser->errors().size() > 1) {
-                msg += " (+" + std::to_string(parser->errors().size() - 1) + " hata daha)";
+                msg += " (+" + std::to_string(parser->errors().size() - 1) + " more)";
             }
             return makeError(msg, line);
         }
@@ -829,8 +847,8 @@ private:
 
         if (isError(result)) {
             auto* err = static_cast<ErrorObject*>(result.get());
-            return makeError("modül yüklenirken hata [" + rawPath + "]: " + err->message +
-                             " (modül satırı " + std::to_string(err->srcLine) + ")", line);
+            return makeError("error while loading module [" + rawPath + "]: " + err->message +
+                             " (module line " + std::to_string(err->srcLine) + ")", line);
         }
 
         // Keep the AST alive: module functions hold pointers into it
@@ -866,49 +884,49 @@ private:
                                                    int line) {
         if (obj->type() == ObjectType::LIST) {
             if (idx->type() != ObjectType::INTEGER) {
-                return makeError("liste indeksi tam sayı olmalı, " + typeName(idx->type()) + " verildi", line);
+                return makeError("list index must be an integer, got " + typeName(idx->type()) + "", line);
             }
             auto* list = static_cast<ListObject*>(obj.get());
             long long i = static_cast<IntegerObject*>(idx.get())->value;
             long long n = (long long)list->elements.size();
             if (i < 0) i += n; // negatif indeks: liste[-1] son eleman
             if (i < 0 || i >= n) {
-                return makeError("liste indeksi aralık dışı: " + idx->inspect() +
-                                 " (uzunluk " + std::to_string(n) + ")", line);
+                return makeError("list index out of range: " + idx->inspect() +
+                                 " (length " + std::to_string(n) + ")", line);
             }
             return list->elements[i];
         }
 
         if (obj->type() == ObjectType::MAP) {
             if (!isValidMapKey(idx)) {
-                return makeError("map anahtarı string, int veya bool olmalı; " +
-                                 typeName(idx->type()) + " verildi", line);
+                return makeError("map keys must be string, int or bool; got " +
+                                 typeName(idx->type()) + "", line);
             }
             auto val = static_cast<MapObject*>(obj.get())->get(idx);
             if (val == nullptr) {
-                return makeError("map'te olmayan anahtar: " + inspectQuoted(idx) +
-                                 " (kontrol için has() kullan)", line);
+                return makeError("key not in map: " + inspectQuoted(idx) +
+                                 " (check with has())", line);
             }
             return val;
         }
 
         if (obj->type() == ObjectType::STRING) {
             if (idx->type() != ObjectType::INTEGER) {
-                return makeError("string indeksi tam sayı olmalı, " + typeName(idx->type()) + " verildi", line);
+                return makeError("string index must be an integer, got " + typeName(idx->type()) + "", line);
             }
             const std::string& s = static_cast<StringObject*>(obj.get())->value;
             long long i = static_cast<IntegerObject*>(idx.get())->value;
             long long n = utf8Length(s);
             if (i < 0) i += n;
             if (i < 0 || i >= n) {
-                return makeError("string indeksi aralık dışı: " + idx->inspect() +
-                                 " (uzunluk " + std::to_string(n) + ")", line);
+                return makeError("string index out of range: " + idx->inspect() +
+                                 " (length " + std::to_string(n) + ")", line);
             }
             return std::make_shared<StringObject>(utf8At(s, i));
         }
 
-        return makeError("indeksleme yalnızca list, map ve string üzerinde çalışır; " +
-                         typeName(obj->type()) + " verildi", line);
+        return makeError("indexing only works on list, map and string; got " +
+                         typeName(obj->type()) + "", line);
     }
 
     static std::shared_ptr<Object> evalPrefixExpression(const std::string& op,
@@ -919,8 +937,8 @@ private:
         }
         if (op == "~") {
             if (right->type() != ObjectType::INTEGER) {
-                return makeError("'~' yalnızca tam sayılarla çalışır, " +
-                                 typeName(right->type()) + " verildi", line);
+                return makeError("'~' only works on integers, got " +
+                                 typeName(right->type()) + "", line);
             }
             return std::make_shared<IntegerObject>(~static_cast<IntegerObject*>(right.get())->value);
         }
@@ -931,10 +949,10 @@ private:
             if (right->type() == ObjectType::FLOAT) {
                 return std::make_shared<FloatObject>(-static_cast<FloatObject*>(right.get())->value);
             }
-            return makeError("tekli '-' yalnızca sayılarla çalışır, " +
-                             typeName(right->type()) + " verildi", line);
+            return makeError("unary '-' only works on numbers, got " +
+                             typeName(right->type()) + "", line);
         }
-        return makeError("bilinmeyen tekli operatör: " + op, line);
+        return makeError("unknown unary operator: " + op, line);
     }
 
 public:
@@ -958,7 +976,7 @@ public:
                 }
                 case ObjectType::STRING: {
                     if (left->type() != ObjectType::STRING) {
-                        return makeError("string içinde yalnızca string aranır: " +
+                        return makeError("only a string can be searched inside a string: " +
                                          typeName(left->type()) + " in string", line);
                     }
                     const std::string& hay = static_cast<StringObject*>(right.get())->value;
@@ -977,8 +995,8 @@ public:
                     return boolObj(v <= r->start && v > r->end && (r->start - v) % (-r->step) == 0);
                 }
                 default:
-                    return makeError("'in' sağında list/map/string/range ister, " +
-                                     typeName(right->type()) + " verildi", line);
+                    return makeError("'in' expects list/map/string/range on the right, got " +
+                                     typeName(right->type()) + "", line);
             }
         }
 
@@ -991,7 +1009,7 @@ public:
             if (op == ">")  return boolObj(l > r);
             if (op == "<=") return boolObj(l <= r);
             if (op == ">=") return boolObj(l >= r);
-            return makeError("string üzerinde desteklenmeyen operatör: " + op, line);
+            return makeError("unsupported operator on strings: " + op, line);
         }
 
         // "abc" * 3 -> string repetition (Python model)
@@ -1003,7 +1021,7 @@ public:
                 long long count = static_cast<IntegerObject*>(intObj.get())->value;
                 if (count < 0) count = 0;
                 if (count > 1000000) {
-                    return makeError("string çoğaltma limiti aşıldı (1.000.000)", line);
+                    return makeError("string repetition limit exceeded (1,000,000)", line);
                 }
                 const std::string& s = static_cast<StringObject*>(strObj.get())->value;
                 std::string out;
@@ -1024,7 +1042,7 @@ public:
                 out->elements.insert(out->elements.end(), lb->elements.begin(), lb->elements.end());
                 return out;
             }
-            return makeError("list üzerinde desteklenmeyen operatör: " + op, line);
+            return makeError("unsupported operator on lists: " + op, line);
         }
 
         // Integer operations
@@ -1036,7 +1054,7 @@ public:
             if (op == "-") return std::make_shared<IntegerObject>(l - r);
             if (op == "*") return std::make_shared<IntegerObject>(l * r);
             if (op == "/") {
-                if (r == 0) return makeError("sıfıra bölme", line);
+                if (r == 0) return makeError("division by zero", line);
                 // Floor division: keeps the identity with floor-mod -> (a / b) * b + a % b == a
                 long long q = l / r;
                 if ((l % r != 0) && ((l < 0) != (r < 0))) q--;
@@ -1047,12 +1065,12 @@ public:
             if (op == "^") return std::make_shared<IntegerObject>(l ^ r);
             if (op == "<<" || op == ">>") {
                 if (r < 0 || r > 63) {
-                    return makeError("kaydırma miktarı 0-63 aralığında olmalı: " + std::to_string(r), line);
+                    return makeError("shift amount must be within 0-63: " + std::to_string(r), line);
                 }
                 return std::make_shared<IntegerObject>(op == "<<" ? (l << r) : (l >> r));
             }
             if (op == "%") {
-                if (r == 0) return makeError("sıfıra göre mod alınamaz", line);
+                if (r == 0) return makeError("modulo by zero", line);
                 // Floor mod (Python/Lua rule): the result carries the divisor's sign.
                 // The right behavior for grid/angle wrapping in games: -5 % 3 -> 1
                 long long m = l % r;
@@ -1088,11 +1106,11 @@ public:
             if (op == "-") return std::make_shared<FloatObject>(l - r);
             if (op == "*") return std::make_shared<FloatObject>(l * r);
             if (op == "/") {
-                if (r == 0.0) return makeError("sıfıra bölme", line);
+                if (r == 0.0) return makeError("division by zero", line);
                 return std::make_shared<FloatObject>(l / r);
             }
             if (op == "%") {
-                if (r == 0.0) return makeError("sıfıra göre mod alınamaz", line);
+                if (r == 0.0) return makeError("modulo by zero", line);
                 // Floor mod (Python/Lua rule), float version
                 double m = std::fmod(l, r);
                 if (m != 0.0 && ((m < 0.0) != (r < 0.0))) m += r;
@@ -1107,11 +1125,11 @@ public:
             if (op == ">=") return boolObj(l >= r);
         }
 
-        return makeError("desteklenmeyen işlem: " + typeName(left->type()) + " " + op + " " +
+        return makeError("unsupported operation: " + typeName(left->type()) + " " + op + " " +
                          typeName(right->type()) +
                          (op == "+" && (left->type() == ObjectType::STRING ||
                                         right->type() == ObjectType::STRING)
-                          ? " (metne çevirmek için text() kullan veya \"{...}\" interpolasyonu)"
+                          ? " (use text() or \"{...}\" interpolation to convert)"
                           : ""),
                          line);
     }

@@ -1,4 +1,4 @@
 # exit: 65
-[Sözdizimi Hatası] satır 3, sütun 11: beklenmeyen jeton: ':' (burada bir değer veya ifade olmalı)
-[Sözdizimi Hatası] satır 4, sütun 5: beklenmeyen girinti: bu satır bir bloğa ait değil
-2 sözdizimi hatası bulundu, program çalıştırılmadı.
+[Syntax Error] line 3, column 11: unexpected token: ':' (a value or expression is expected here)
+[Syntax Error] line 4, column 5: unexpected indentation: this line belongs to no block
+2 syntax error(s) found; the program was not run.

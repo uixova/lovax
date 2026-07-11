@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 2: map'te olmayan anahtar: "b" (kontrol için has() kullan)
+[Runtime Error] line 2: key not in map: "b" (check with has())

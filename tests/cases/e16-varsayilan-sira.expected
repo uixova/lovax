@@ -1,4 +1,4 @@
 # exit: 65
-[Sözdizimi Hatası] satır 1, sütun 13: varsayılanlı parametreden sonra varsayılansız parametre gelemez: 'b'
-[Sözdizimi Hatası] satır 2, sütun 5: beklenmeyen girinti: bu satır bir bloğa ait değil
-2 sözdizimi hatası bulundu, program çalıştırılmadı.
+[Syntax Error] line 1, column 13: a parameter without a default cannot follow one with a default: 'b'
+[Syntax Error] line 2, column 5: unexpected indentation: this line belongs to no block
+2 syntax error(s) found; the program was not run.

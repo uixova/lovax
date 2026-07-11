@@ -8,7 +8,7 @@ Thanks for your interest! The process is simple.
 # Build (any C++17 compiler, zero dependencies)
 g++ -std=c++17 -O2 -o lume src/main.cpp
 
-# Run the test suite (52 golden-file tests)
+# Run the test suite (53 golden-file tests)
 ./tests/run_tests.sh
 
 # Sanitizer build
@@ -19,9 +19,8 @@ g++ -std=c++17 -g -fsanitize=address,undefined -o lume_asan src/main.cpp
 
 1. **No change without a test.** New feature → add a `.lm` + `.expected` pair under
    `tests/cases/`. Verify the output by hand, then generate with `./tests/run_tests.sh --update`.
-2. **Error messages are located and helpful.** Include the line number and, where possible,
-   the fix (e.g. `"tanımlamak için: set x = ..."`). Runtime messages are currently Turkish
-   by design (an English locale is planned) — keep new messages consistent.
+2. **Error messages are located, helpful, and in English.** Include the line number and,
+   where possible, the fix (e.g. `"define it with: set x = ..."`).
 3. **Language-changing decisions need an RFC first.** Add a short design doc under `rfcs/`:
    motivation → design → alternatives. Not needed for small fixes.
 4. **Naming philosophy:** short, friendly, Lume-flavored but never confusing

@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 1: tanımlanmamış değişken 'lerp' (tanımlamak için: set lerp = ...)
+[Runtime Error] line 1: undefined variable 'lerp' (define it with: set lerp = ...)

@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 1: tanımlanmamış değişken 'bilinmeyen' (tanımlamak için: set bilinmeyen = ...)
+[Runtime Error] line 1: undefined variable 'bilinmeyen' (define it with: set bilinmeyen = ...)

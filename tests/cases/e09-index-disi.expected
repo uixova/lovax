@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 2: liste indeksi aralık dışı: 3 (uzunluk 1)
+[Runtime Error] line 2: list index out of range: 3 (length 1)

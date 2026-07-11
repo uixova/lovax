@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 1: desteklenmeyen işlem: string + int (metne çevirmek için text() kullan veya "{...}" interpolasyonu)
+[Runtime Error] line 1: unsupported operation: string + int (use text() or "{...}" interpolation to convert)

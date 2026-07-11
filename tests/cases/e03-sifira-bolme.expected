@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 2: sıfıra bölme
+[Runtime Error] line 2: division by zero

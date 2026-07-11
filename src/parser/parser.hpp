@@ -36,8 +36,8 @@ struct ParserError {
     int column;
 
     std::string toString() const {
-        return "[Sözdizimi Hatası] satır " + std::to_string(line) +
-               ", sütun " + std::to_string(column) + ": " + message;
+        return "[Syntax Error] line " + std::to_string(line) +
+               ", column " + std::to_string(column) + ": " + message;
     }
 };
 
@@ -104,7 +104,7 @@ public:
 
         while (curToken.type != TokenType::END_OF_FILE) {
             if (errorList.size() >= MAX_ERRORS) {
-                addError("çok fazla hata, ayrıştırma durduruldu", curToken);
+                addError("too many errors, parsing stopped", curToken);
                 break;
             }
             // Skip blank lines in the main loop
@@ -160,8 +160,8 @@ private:
         if (peekToken.type == TokenType::ILLEGAL) {
             addError(peekToken.literal, peekToken);
         } else {
-            addError("beklenen " + tokenTypeName(t) + " fakat " +
-                     tokenTypeName(peekToken.type) + " geldi", peekToken);
+            addError("expected " + tokenTypeName(t) + " but got " +
+                     tokenTypeName(peekToken.type) + "", peekToken);
         }
         return false;
     }
@@ -184,10 +184,10 @@ private:
                 addError(curToken.literal, curToken);
                 return nullptr;
             case TokenType::ELSE:
-                addError("'else' yalnızca bir 'if' bloğundan sonra gelebilir", curToken);
+                addError("'else' can only follow an 'if' block", curToken);
                 return nullptr;
             case TokenType::INDENT:
-                addError("beklenmeyen girinti: bu satır bir bloğa ait değil", curToken);
+                addError("unexpected indentation: this line belongs to no block", curToken);
                 return nullptr;
             default:
                 if (curToken.type != TokenType::NEWLINE &&
@@ -214,7 +214,7 @@ private:
             if (expr->nodeType() != NodeType::IDENTIFIER &&
                 expr->nodeType() != NodeType::INDEX_EXPRESSION &&
                 expr->nodeType() != NodeType::MEMBER_EXPRESSION) {
-                addError("atama hedefi bir değişken, indeks (liste[i]) veya üye (nesne.alan) olmalı", peekToken);
+                addError("assignment target must be a variable, an index (list[i]) or a member (object.field)", peekToken);
                 return nullptr;
             }
 
@@ -306,7 +306,7 @@ private:
             stmt->isFile = true;
             stmt->target = curToken.literal; // raw path (no escapes/interpolation)
         } else {
-            addError("use bir modül ismi veya \"dosya/yolu.lm\" ister", peekToken);
+            addError("use expects a module name or a \"path/to/file.lm\"", peekToken);
             return nullptr;
         }
 
@@ -318,7 +318,7 @@ private:
 
         if (peekToken.type == TokenType::COLON) {
             if (!stmt->alias.empty()) {
-                addError("use ifadesinde 'as' ile ': isimler' birlikte kullanılamaz", peekToken);
+                addError("'as' and ': names' cannot be combined in a use statement", peekToken);
                 return nullptr;
             }
             nextParserToken(); // ':'
@@ -329,7 +329,7 @@ private:
                 nextParserToken(); // ','
             } while (true);
             if (stmt->names.empty()) {
-                addError("use ... : sonrasında en az bir isim gerekli", peekToken);
+                addError("use ... : requires at least one name", peekToken);
                 return nullptr;
             }
         }
@@ -442,7 +442,7 @@ private:
         }
 
         if (stmt->cases.empty()) {
-            addError("match en az bir desen dalı ister", stmt->token);
+            addError("match requires at least one pattern branch", stmt->token);
             return nullptr;
         }
 
@@ -536,7 +536,7 @@ private:
 
                 for (const auto& p : lit->parameters) {
                     if (p->value == curToken.literal) {
-                        addError("parametre ismi tekrarlı: '" + curToken.literal + "'", curToken);
+                        addError("duplicate parameter name: '" + curToken.literal + "'", curToken);
                         return nullptr;
                     }
                 }
@@ -555,7 +555,7 @@ private:
                     seenDefault = true;
                 } else {
                     if (seenDefault) {
-                        addError("varsayılanlı parametreden sonra varsayılansız parametre gelemez: '" +
+                        addError("a parameter without a default cannot follow one with a default: '" +
                                  lit->parameters.back()->value + "'", curToken);
                         return nullptr;
                     }
@@ -583,8 +583,8 @@ private:
     std::unique_ptr<Expression> parseExpression(Precedence precedence) {
         DepthGuard guard(exprDepth);
         if (exprDepth > MAX_EXPR_DEPTH) {
-            addError("ifade çok derin: iç içe geçme limiti (" +
-                     std::to_string(MAX_EXPR_DEPTH) + ") aşıldı", curToken);
+            addError("expression too deep: nesting limit (" +
+                     std::to_string(MAX_EXPR_DEPTH) + ") exceeded", curToken);
             return nullptr;
         }
 
@@ -660,8 +660,8 @@ private:
                 addError(curToken.literal, curToken);
                 return nullptr;
             default:
-                addError("beklenmeyen jeton: " + tokenTypeName(curToken.type) +
-                         " (burada bir değer veya ifade olmalı)", curToken);
+                addError("unexpected token: " + tokenTypeName(curToken.type) +
+                         " (a value or expression is expected here)", curToken);
                 return nullptr;
         }
     }
@@ -705,8 +705,8 @@ private:
                 lit->value = std::stoll(raw);
             }
         } catch (...) {
-            addError("sayı çok büyük: " + raw +
-                     " (64-bit tam sayı sınırı aşıldı)", curToken);
+            addError("number too large: " + raw +
+                     " (64-bit integer limit exceeded)", curToken);
             return nullptr;
         }
         return lit;
@@ -718,7 +718,7 @@ private:
         try {
             lit->value = std::stod(curToken.literal);
         } catch (...) {
-            addError("ondalık sayı çevrilemedi: " + curToken.literal, curToken);
+            addError("could not parse float: " + curToken.literal, curToken);
             return nullptr;
         }
         return lit;
@@ -765,7 +765,7 @@ private:
                     case '{':  current += '{';  break;
                     case '}':  current += '}';  break;
                     default:
-                        addError(std::string("bilinmeyen kaçış dizisi: \\") + next, strToken);
+                        addError(std::string("unknown escape sequence: \\") + next, strToken);
                         return nullptr;
                 }
                 i += 2;
@@ -794,13 +794,13 @@ private:
                     j++;
                 }
                 if (j >= raw.size()) {
-                    addError("string içinde kapatılmamış '{' (interpolasyon)", strToken);
+                    addError("unclosed '{' inside string (interpolation)", strToken);
                     return nullptr;
                 }
 
                 std::string inner = raw.substr(start, j - start);
                 if (inner.empty()) {
-                    addError("string içinde boş interpolasyon: {}", strToken);
+                    addError("empty interpolation inside string: {}", strToken);
                     return nullptr;
                 }
 
@@ -810,7 +810,7 @@ private:
                 Parser subParser(subLexer);
                 auto innerExpr = subParser.parseSingleExpression();
                 if (innerExpr == nullptr || !subParser.errorList.empty()) {
-                    addError("string interpolasyonu çözümlenemedi: {" + inner + "}", strToken);
+                    addError("could not parse string interpolation: {" + inner + "}", strToken);
                     return nullptr;
                 }
 
@@ -821,7 +821,7 @@ private:
             }
 
             if (c == '}') {
-                addError("string içinde eşleşmeyen '}' (düz süslü için \\} kullan)", strToken);
+                addError("unmatched '}' inside string (use \\} for a literal brace)", strToken);
                 return nullptr;
             }
 

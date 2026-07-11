@@ -93,12 +93,12 @@ struct Token {
 // Prints a human-readable token name instead of a number in error messages
 inline std::string tokenTypeName(TokenType t) {
     switch (t) {
-        case TokenType::ILLEGAL:         return "GECERSIZ";
-        case TokenType::END_OF_FILE:     return "dosya sonu";
-        case TokenType::IDENTIFIER:      return "isim (identifier)";
-        case TokenType::INT:             return "tam sayı";
-        case TokenType::FLOAT:           return "ondalık sayı";
-        case TokenType::STRING:          return "metin (string)";
+        case TokenType::ILLEGAL:         return "ILLEGAL";
+        case TokenType::END_OF_FILE:     return "end of file";
+        case TokenType::IDENTIFIER:      return "identifier";
+        case TokenType::INT:             return "integer";
+        case TokenType::FLOAT:           return "float";
+        case TokenType::STRING:          return "string";
         case TokenType::ASSIGN:          return "'='";
         case TokenType::PLUS:            return "'+'";
         case TokenType::MINUS:           return "'-'";
@@ -132,9 +132,9 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::LBRACE:          return "'{'";
         case TokenType::RBRACE:          return "'}'";
         case TokenType::DOT:             return "'.'";
-        case TokenType::NEWLINE:         return "satır sonu";
-        case TokenType::INDENT:          return "girinti (INDENT)";
-        case TokenType::DEDENT:          return "girinti sonu (DEDENT)";
+        case TokenType::NEWLINE:         return "newline";
+        case TokenType::INDENT:          return "indent (INDENT)";
+        case TokenType::DEDENT:          return "dedent (DEDENT)";
         case TokenType::SET:             return "'set'";
         case TokenType::SAY:             return "'say'";
         case TokenType::IF:              return "'if'";
@@ -156,7 +156,7 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::OR:              return "'or'";
         case TokenType::NOT:             return "'not'";
     }
-    return "bilinmeyen";
+    return "unknown";
 }
 
 } // namespace Lume

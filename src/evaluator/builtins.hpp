@@ -31,7 +31,7 @@ using CallFn = BuiltinObject::CallFn;
 // ===== Helpers =====
 
 inline ObjPtr argCountError(const std::string& fname, const std::string& expected, size_t got, int line) {
-    return makeError(fname + "() " + expected + " argüman bekler, " + std::to_string(got) + " verildi", line);
+    return makeError(fname + "() expects " + expected + " argument(s), got " + std::to_string(got) + "", line);
 }
 
 inline bool isNumeric(const ObjPtr& o) {
@@ -51,7 +51,7 @@ inline std::mt19937_64& rng() {
 
 // Deep copy for clone(): nested lists/maps become fully independent
 inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
-    if (depth > 100) return makeError("clone() çok derin yapı (iç içe limit 100)", line);
+    if (depth > 100) return makeError("clone() structure too deep (nesting limit 100)", line);
     if (v->type() == ObjectType::LIST) {
         auto out = std::make_shared<ListObject>();
         for (const auto& e : static_cast<ListObject*>(v.get())->elements) {
@@ -95,7 +95,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             case ObjectType::RANGE:
                 return std::make_shared<IntegerObject>(static_cast<RangeObject*>(a.get())->length());
             default:
-                return makeError("len() string/list/map/range ister, " + typeName(a->type()) + " verildi", line);
+                return makeError("len() expects string/list/map/range, got " + typeName(a->type()) + "", line);
         }
     });
 
@@ -111,7 +111,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         const auto& a = args[0];
         if (isNumeric(a)) return a;
         if (a->type() != ObjectType::STRING) {
-            return makeError("num() string veya sayı ister, " + typeName(a->type()) + " verildi", line);
+            return makeError("num() expects a string or number, got " + typeName(a->type()) + "", line);
         }
         const std::string& s = static_cast<StringObject*>(a.get())->value;
         try {
@@ -125,7 +125,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             if (pos != s.size()) throw std::invalid_argument("");
             return std::make_shared<IntegerObject>(v);
         } catch (...) {
-            return makeError("num() çeviremedi: \"" + s + "\" geçerli bir sayı değil", line);
+            return makeError("num() could not convert: \"" + s + "\" is not a valid number", line);
         }
     });
 
@@ -139,7 +139,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("push", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("push", "2", args.size(), line);
         if (args[0]->type() != ObjectType::LIST) {
-            return makeError("push() ilk argüman olarak list ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("push() expects a list as its first argument, got " + typeName(args[0]->type()) + "", line);
         }
         static_cast<ListObject*>(args[0].get())->elements.push_back(args[1]);
         return args[0];
@@ -149,10 +149,10 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("pop", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("pop", "1", args.size(), line);
         if (args[0]->type() != ObjectType::LIST) {
-            return makeError("pop() list ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("pop() expects a list, got " + typeName(args[0]->type()) + "", line);
         }
         auto* list = static_cast<ListObject*>(args[0].get());
-        if (list->elements.empty()) return makeError("pop() boş listede çağrılamaz", line);
+        if (list->elements.empty()) return makeError("pop() cannot be called on an empty list", line);
         auto last = list->elements.back();
         list->elements.pop_back();
         return last;
@@ -164,13 +164,13 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() == ObjectType::LIST) {
             auto* list = static_cast<ListObject*>(args[0].get());
             if (args[1]->type() != ObjectType::INTEGER) {
-                return makeError("remove() liste için tam sayı indeks ister", line);
+                return makeError("remove() expects an integer index for lists", line);
             }
             long long idx = static_cast<IntegerObject*>(args[1].get())->value;
             long long n = (long long)list->elements.size();
             if (idx < 0) idx += n;
             if (idx < 0 || idx >= n) {
-                return makeError("remove() indeks aralık dışı: " + std::to_string(idx) + " (uzunluk " + std::to_string(n) + ")", line);
+                return makeError("remove() index out of range: " + std::to_string(idx) + " (length " + std::to_string(n) + ")", line);
             }
             auto removed = list->elements[idx];
             list->elements.erase(list->elements.begin() + idx);
@@ -179,21 +179,21 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() == ObjectType::MAP) {
             auto* map = static_cast<MapObject*>(args[0].get());
             if (map->frozen) {
-                return makeError("modül '" + map->moduleName + "' değiştirilemez (donmuş)", line);
+                return makeError("module '" + map->moduleName + "' cannot be modified (frozen)", line);
             }
             auto val = map->get(args[1]);
             if (val == nullptr) return NULL_OBJ_;
             map->remove(args[1]);
             return val;
         }
-        return makeError("remove() list veya map ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("remove() expects a list or map, got " + typeName(args[0]->type()) + "", line);
     });
 
     // --- keys(map): returns keys as a list in insertion order ---
     def("keys", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("keys", "1", args.size(), line);
         if (args[0]->type() != ObjectType::MAP) {
-            return makeError("keys() map ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("keys() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
         auto list = std::make_shared<ListObject>();
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
@@ -206,7 +206,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("values", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("values", "1", args.size(), line);
         if (args[0]->type() != ObjectType::MAP) {
-            return makeError("values() map ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("values() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
         auto list = std::make_shared<ListObject>();
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
@@ -219,7 +219,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("has", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("has", "2", args.size(), line);
         if (args[0]->type() != ObjectType::MAP) {
-            return makeError("has() map ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("has() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
         return boolObj(static_cast<MapObject*>(args[0].get())->get(args[1]) != nullptr);
     });
@@ -231,14 +231,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         long long vals[3] = {0, 0, 1};
         for (size_t i = 0; i < args.size(); ++i) {
             if (args[i]->type() != ObjectType::INTEGER) {
-                return makeError("range() tam sayı argümanlar ister", line);
+                return makeError("range() expects integer arguments", line);
             }
             vals[i] = static_cast<IntegerObject*>(args[i].get())->value;
         }
         long long start = 0, end = 0, step = 1;
         if (args.size() == 1) { end = vals[0]; }
         else { start = vals[0]; end = vals[1]; if (args.size() == 3) step = vals[2]; }
-        if (step == 0) return makeError("range() adımı 0 olamaz", line);
+        if (step == 0) return makeError("range() step cannot be 0", line);
         return std::make_shared<RangeObject>(start, end, step);
     });
 
@@ -253,7 +253,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() == ObjectType::FLOAT) {
             return std::make_shared<FloatObject>(std::fabs(asDouble(args[0])));
         }
-        return makeError("abs() sayı ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("abs() expects a number, got " + typeName(args[0]->type()) + "", line);
     });
 
     auto minMax = [](const Args& rawArgs, int line, bool isMin) -> ObjPtr {
@@ -263,18 +263,18 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (rawArgs.size() == 1 && rawArgs[0]->type() == ObjectType::LIST) {
             expanded = static_cast<ListObject*>(rawArgs[0].get())->elements;
             if (expanded.empty()) {
-                return makeError(std::string(isMin ? "min" : "max") + "() boş listeyle çağrılamaz", line);
+                return makeError(std::string(isMin ? "min" : "max") + "() cannot be called with an empty list", line);
             }
             argsPtr = &expanded;
         }
         const Args& args = *argsPtr;
         if (args.size() < 2 && argsPtr == &rawArgs) {
-            return argCountError(isMin ? "min" : "max", "en az 2 (veya bir liste)", args.size(), line);
+            return argCountError(isMin ? "min" : "max", "at least 2 (or one list)", args.size(), line);
         }
         bool allInt = true;
         for (const auto& a : args) {
             if (!isNumeric(a)) {
-                return makeError(std::string(isMin ? "min" : "max") + "() yalnızca sayılarla çalışır", line);
+                return makeError(std::string(isMin ? "min" : "max") + "() only works with numbers", line);
             }
             if (a->type() == ObjectType::FLOAT) allInt = false;
         }
@@ -292,10 +292,10 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("sqrt", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("sqrt", "1", args.size(), line);
         if (!isNumeric(args[0])) {
-            return makeError("sqrt() sayı ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("sqrt() expects a number, got " + typeName(args[0]->type()) + "", line);
         }
         double v = asDouble(args[0]);
-        if (v < 0) return makeError("sqrt() negatif sayı alamaz", line);
+        if (v < 0) return makeError("sqrt() cannot take a negative number", line);
         return std::make_shared<FloatObject>(std::sqrt(v));
     });
 
@@ -304,7 +304,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         return [name, f](const Args& args, int line, const CallFn&) -> ObjPtr {
             if (args.size() != 1) return argCountError(name, "1", args.size(), line);
             if (!isNumeric(args[0])) {
-                return makeError(name + "() sayı ister, " + typeName(args[0]->type()) + " verildi", line);
+                return makeError(name + "() expects a number, got " + typeName(args[0]->type()) + "", line);
             }
             return std::make_shared<IntegerObject>((long long)f(asDouble(args[0])));
         };
@@ -316,7 +316,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("pow", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("pow", "2", args.size(), line);
         if (!isNumeric(args[0]) || !isNumeric(args[1])) {
-            return makeError("pow() iki sayı ister", line);
+            return makeError("pow() expects two numbers", line);
         }
         double result = std::pow(asDouble(args[0]), asDouble(args[1]));
         // Two ints with an integral result stay int (pow(2,10) -> 1024)
@@ -342,13 +342,13 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             std::uniform_int_distribution<long long> dist(a, b);
             return std::make_shared<IntegerObject>(dist(rng()));
         }
-        return makeError("random() ya argümansız ya da iki tam sayıyla çağrılır: random(1, 6)", line);
+        return makeError("random() takes no arguments or two integers: random(1, 6)", line);
     });
 
     // --- seed(n): makes randomness deterministic (tests + game replays) ---
     def("seed", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::INTEGER) {
-            return makeError("seed() bir tam sayı ister", line);
+            return makeError("seed() expects an integer", line);
         }
         rng().seed((unsigned long long)static_cast<IntegerObject*>(args[0].get())->value);
         return NULL_OBJ_;
@@ -380,7 +380,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 2) return argCountError("contains", "2", args.size(), line);
         if (args[0]->type() == ObjectType::STRING) {
             if (args[1]->type() != ObjectType::STRING) {
-                return makeError("contains(): string içinde string aranır", line);
+                return makeError("contains(): only a string can be searched inside a string", line);
             }
             const std::string& s = static_cast<StringObject*>(args[0].get())->value;
             const std::string& sub = static_cast<StringObject*>(args[1].get())->value;
@@ -395,7 +395,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() == ObjectType::MAP) {
             return boolObj(static_cast<MapObject*>(args[0].get())->get(args[1]) != nullptr);
         }
-        return makeError("contains() string/list/map ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("contains() expects string/list/map, got " + typeName(args[0]->type()) + "", line);
     });
 
     // find(x, needle): first position (string: code-point index, list: index); -1 if absent
@@ -403,7 +403,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 2) return argCountError("find", "2", args.size(), line);
         if (args[0]->type() == ObjectType::STRING) {
             if (args[1]->type() != ObjectType::STRING) {
-                return makeError("find(): string içinde string aranır", line);
+                return makeError("find(): only a string can be searched inside a string", line);
             }
             const std::string& s = static_cast<StringObject*>(args[0].get())->value;
             const std::string& sub = static_cast<StringObject*>(args[1].get())->value;
@@ -418,7 +418,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             }
             return std::make_shared<IntegerObject>(-1);
         }
-        return makeError("find() string veya list ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("find() expects a string or list, got " + typeName(args[0]->type()) + "", line);
     });
 
     // slice(x, start[, end]): slicing — Python rules (negative index, end exclusive, clamped)
@@ -426,7 +426,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() < 2 || args.size() > 3) return argCountError("slice", "2-3", args.size(), line);
         if (args[1]->type() != ObjectType::INTEGER ||
             (args.size() == 3 && args[2]->type() != ObjectType::INTEGER)) {
-            return makeError("slice() indeksleri tam sayı olmalı", line);
+            return makeError("slice() indices must be integers", line);
         }
         auto normalize = [](long long idx, long long n) -> long long {
             if (idx < 0) idx += n;
@@ -456,7 +456,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             for (long long i = a; i < b; ++i) out->elements.push_back(els[i]);
             return out;
         }
-        return makeError("slice() string veya list ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("slice() expects a string or list, got " + typeName(args[0]->type()) + "", line);
     });
 
     // reverse(x): reverses a list in place / returns a reversed string (UTF-8 aware)
@@ -477,14 +477,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             }
             return std::make_shared<StringObject>(out);
         }
-        return makeError("reverse() list veya string ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("reverse() expects a list or string, got " + typeName(args[0]->type()) + "", line);
     });
 
     // sort(list): sorts in place (all numbers OR all strings), returns the list
     def("sort", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("sort", "1", args.size(), line);
         if (args[0]->type() != ObjectType::LIST) {
-            return makeError("sort() list ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("sort() expects a list, got " + typeName(args[0]->type()) + "", line);
         }
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return args[0];
@@ -503,8 +503,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                        static_cast<StringObject*>(b.get())->value;
             });
         } else {
-            return makeError("sort() karışık tipleri sıralayamaz (tümü sayı veya tümü string olmalı; "
-                             "özel sıralama için sort_by kullan)", line);
+            return makeError("sort() cannot sort mixed types (all numbers or all strings; "
+                             "use sort_by for custom ordering)", line);
         }
         return args[0];
     });
@@ -514,7 +514,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 2) return argCountError("sort_by", "2", args.size(), line);
         if (args[0]->type() != ObjectType::LIST ||
             (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
-            return makeError("sort_by(liste, fn) bir list ve bir fonksiyon ister", line);
+            return makeError("sort_by(list, fn) expects a list and a function", line);
         }
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return args[0];
@@ -530,7 +530,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             keyed.push_back({key, e});
         }
         if (!allNum && !allStr) {
-            return makeError("sort_by() anahtarları tümü sayı veya tümü string olmalı", line);
+            return makeError("sort_by() keys must be all numbers or all strings", line);
         }
         std::stable_sort(keyed.begin(), keyed.end(),
             [allNum](const std::pair<ObjPtr, ObjPtr>& a, const std::pair<ObjPtr, ObjPtr>& b) {
@@ -546,14 +546,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("sum", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("sum", "1", args.size(), line);
         if (args[0]->type() != ObjectType::LIST) {
-            return makeError("sum() list ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("sum() expects a list, got " + typeName(args[0]->type()) + "", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         bool allInt = true;
         double total = 0;
         long long totalInt = 0;
         for (const auto& e : els) {
-            if (!isNumeric(e)) return makeError("sum() yalnızca sayı listesiyle çalışır", line);
+            if (!isNumeric(e)) return makeError("sum() only works with a list of numbers", line);
             if (e->type() == ObjectType::FLOAT) allInt = false;
             total += asDouble(e);
             if (e->type() == ObjectType::INTEGER) totalInt += static_cast<IntegerObject*>(e.get())->value;
@@ -567,7 +567,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 2) return argCountError("each", "2", args.size(), line);
         if (args[0]->type() != ObjectType::LIST ||
             (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
-            return makeError("each(liste, fn) bir list ve bir fonksiyon ister", line);
+            return makeError("each(list, fn) expects a list and a function", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         for (size_t i = 0; i < els.size(); ++i) {
@@ -582,7 +582,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 2) return argCountError("filter", "2", args.size(), line);
         if (args[0]->type() != ObjectType::LIST ||
             (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
-            return makeError("filter(liste, fn) bir list ve bir fonksiyon ister", line);
+            return makeError("filter(list, fn) expects a list and a function", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         auto out = std::make_shared<ListObject>();
@@ -599,7 +599,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 2) return argCountError("transform", "2", args.size(), line);
         if (args[0]->type() != ObjectType::LIST ||
             (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
-            return makeError("transform(liste, fn) bir list ve bir fonksiyon ister", line);
+            return makeError("transform(list, fn) expects a list and a function", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         auto out = std::make_shared<ListObject>();
@@ -618,7 +618,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("check", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.empty() || args.size() > 2) return argCountError("check", "1-2", args.size(), line);
         if (objectTruthy(args[0])) return NULL_OBJ_;
-        std::string msg = "kontrol başarısız";
+        std::string msg = "check failed";
         if (args.size() == 2) msg += ": " + args[1]->inspect();
         return makeError(msg, line);
     });
@@ -626,7 +626,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // sleep(seconds): pauses execution (demos/tool scripts)
     def("sleep", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || !isNumeric(args[0])) {
-            return makeError("sleep(saniye) bir sayı ister", line);
+            return makeError("sleep(seconds) expects a number", line);
         }
         double secs = asDouble(args[0]);
         if (secs > 0) {
@@ -664,15 +664,15 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("insert", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 3) return argCountError("insert", "3", args.size(), line);
         if (args[0]->type() != ObjectType::LIST || args[1]->type() != ObjectType::INTEGER) {
-            return makeError("insert(liste, indeks, eleman) bir list ve tam sayı indeks ister", line);
+            return makeError("insert(list, index, element) expects a list and an integer index", line);
         }
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         long long idx = static_cast<IntegerObject*>(args[1].get())->value;
         long long n = (long long)els.size();
         if (idx < 0) idx += n;
         if (idx < 0 || idx > n) {
-            return makeError("insert() indeks aralık dışı: " + args[1]->inspect() +
-                             " (uzunluk " + std::to_string(n) + ")", line);
+            return makeError("insert() index out of range: " + args[1]->inspect() +
+                             " (length " + std::to_string(n) + ")", line);
         }
         els.insert(els.begin() + idx, args[2]);
         return args[0];
@@ -688,20 +688,20 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() == ObjectType::MAP) {
             auto* m = static_cast<MapObject*>(args[0].get());
             if (m->frozen) {
-                return makeError("modül '" + m->moduleName + "' değiştirilemez (donmuş)", line);
+                return makeError("module '" + m->moduleName + "' cannot be modified (frozen)", line);
             }
             m->entries.clear();
             m->index.clear();
             return args[0];
         }
-        return makeError("clear() list veya map ister, " + typeName(args[0]->type()) + " verildi", line);
+        return makeError("clear() expects a list or map, got " + typeName(args[0]->type()) + "", line);
     });
 
     // merge(m1, m2): merges two maps into a NEW map (m2 wins on conflict)
     def("merge", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("merge", "2", args.size(), line);
         if (args[0]->type() != ObjectType::MAP || args[1]->type() != ObjectType::MAP) {
-            return makeError("merge(m1, m2) iki map ister", line);
+            return makeError("merge(m1, m2) expects two maps", line);
         }
         auto out = std::make_shared<MapObject>();
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) out->set(e.first, e.second);

@@ -90,7 +90,7 @@ inline std::string caseConvert(const std::string& s, bool toUpper) {
 // ===== JSON writer (save_data) =====
 
 inline bool jsonWrite(const ObjPtr& v, std::string& out, std::string& err, int depth) {
-    if (depth > 100) { err = "veri çok derin (iç içe limit 100)"; return false; }
+    if (depth > 100) { err = "data too deep (nesting limit 100)"; return false; }
     switch (v->type()) {
         case ObjectType::NULL_OBJ: out += "null"; return true;
         case ObjectType::BOOLEAN:
@@ -99,7 +99,7 @@ inline bool jsonWrite(const ObjPtr& v, std::string& out, std::string& err, int d
         case ObjectType::INTEGER: out += v->inspect(); return true;
         case ObjectType::FLOAT: {
             double d = static_cast<FloatObject*>(v.get())->value;
-            if (!std::isfinite(d)) { err = "sonsuz/NaN float JSON'a yazılamaz"; return false; }
+            if (!std::isfinite(d)) { err = "infinite/NaN float cannot be written to JSON"; return false; }
             out += formatFloat(d);
             return true;
         }
@@ -141,8 +141,8 @@ inline bool jsonWrite(const ObjPtr& v, std::string& out, std::string& err, int d
             for (size_t i = 0; i < m->entries.size(); ++i) {
                 if (i > 0) out += ", ";
                 if (m->entries[i].first->type() != ObjectType::STRING) {
-                    err = "JSON map anahtarları string olmalı (" +
-                          typeName(m->entries[i].first->type()) + " bulundu)";
+                    err = "JSON map keys must be strings (found " +
+                          typeName(m->entries[i].first->type()) + ")";
                     return false;
                 }
                 if (!jsonWrite(m->entries[i].first, out, err, depth + 1)) return false;
@@ -153,7 +153,7 @@ inline bool jsonWrite(const ObjPtr& v, std::string& out, std::string& err, int d
             return true;
         }
         default:
-            err = typeName(v->type()) + " tipi kaydedilemez (yalnızca veri: null/bool/sayı/string/list/map)";
+            err = typeName(v->type()) + " cannot be saved (data only: null/bool/number/string/list/map)";
             return false;
     }
 }
@@ -168,12 +168,12 @@ struct JsonParser {
     JsonParser(const std::string& src) : s(src) {}
 
     void skipWs() { while (i < s.size() && (s[i]==' '||s[i]=='\t'||s[i]=='\n'||s[i]=='\r')) i++; }
-    bool fail(const std::string& msg) { if (err.empty()) err = msg + " (konum " + std::to_string(i) + ")"; return false; }
+    bool fail(const std::string& msg) { if (err.empty()) err = msg + " (position " + std::to_string(i) + ")"; return false; }
 
     bool parseValue(ObjPtr& out, int depth) {
-        if (depth > 100) return fail("JSON çok derin");
+        if (depth > 100) return fail("JSON too deep");
         skipWs();
-        if (i >= s.size()) return fail("beklenmedik veri sonu");
+        if (i >= s.size()) return fail("unexpected end of data");
         char c = s[i];
         if (c == 'n') return parseLit("null", NULL_OBJ_, out);
         if (c == 't') return parseLit("true", TRUE_OBJ, out);
@@ -182,12 +182,12 @@ struct JsonParser {
         if (c == '[') return parseArray(out, depth);
         if (c == '{') return parseObject(out, depth);
         if (c == '-' || (c >= '0' && c <= '9')) return parseNumber(out);
-        return fail(std::string("beklenmeyen karakter '") + c + "'");
+        return fail(std::string("unexpected character '") + c + "'");
     }
 
     bool parseLit(const char* lit, const ObjPtr& val, ObjPtr& out) {
         size_t n = std::string(lit).size();
-        if (s.compare(i, n, lit) != 0) return fail("bozuk değer");
+        if (s.compare(i, n, lit) != 0) return fail("malformed value");
         i += n;
         out = val;
         return true;
@@ -214,7 +214,7 @@ struct JsonParser {
             if (isFloat) out = std::make_shared<FloatObject>(std::stod(numStr));
             else out = std::make_shared<IntegerObject>(std::stoll(numStr));
         } catch (...) {
-            return fail("sayı çevrilemedi: " + numStr);
+            return fail("could not parse number: " + numStr);
         }
         return true;
     }
@@ -237,7 +237,7 @@ struct JsonParser {
     }
 
     bool readHex4(unsigned int& out) {
-        if (i + 4 > s.size()) return fail("eksik \\u dizisi");
+        if (i + 4 > s.size()) return fail("incomplete \\u sequence");
         out = 0;
         for (int k = 0; k < 4; ++k) {
             char c = s[i++];
@@ -245,7 +245,7 @@ struct JsonParser {
             if (c >= '0' && c <= '9') out |= (unsigned)(c - '0');
             else if (c >= 'a' && c <= 'f') out |= (unsigned)(c - 'a' + 10);
             else if (c >= 'A' && c <= 'F') out |= (unsigned)(c - 'A' + 10);
-            else return fail("bozuk \\u dizisi");
+            else return fail("malformed \\u sequence");
         }
         return true;
     }
@@ -257,7 +257,7 @@ struct JsonParser {
             char c = s[i];
             if (c == '\\') {
                 i++;
-                if (i >= s.size()) return fail("string sonlanmadı");
+                if (i >= s.size()) return fail("unterminated string");
                 char e = s[i++];
                 switch (e) {
                     case '"':  str += '"';  break;
@@ -277,21 +277,21 @@ struct JsonParser {
                                 i += 2;
                                 unsigned int lo;
                                 if (!readHex4(lo)) return false;
-                                if (lo < 0xDC00 || lo > 0xDFFF) return fail("bozuk vekil çifti");
+                                if (lo < 0xDC00 || lo > 0xDFFF) return fail("malformed surrogate pair");
                                 cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                            } else return fail("eksik vekil çifti");
+                            } else return fail("missing surrogate pair");
                         }
                         appendUtf8(str, cp);
                         break;
                     }
-                    default: return fail(std::string("bilinmeyen kaçış: \\") + e);
+                    default: return fail(std::string("unknown escape: \\") + e);
                 }
             } else {
                 str += c;
                 i++;
             }
         }
-        if (i >= s.size()) return fail("string sonlanmadı");
+        if (i >= s.size()) return fail("unterminated string");
         i++; // closing quote
         out = std::make_shared<StringObject>(str);
         return true;
@@ -309,7 +309,7 @@ struct JsonParser {
             skipWs();
             if (i < s.size() && s[i] == ',') { i++; continue; }
             if (i < s.size() && s[i] == ']') { i++; break; }
-            return fail("',' veya ']' bekleniyor");
+            return fail("expected ',' or ']'");
         }
         out = list;
         return true;
@@ -322,11 +322,11 @@ struct JsonParser {
         if (i < s.size() && s[i] == '}') { i++; out = map; return true; }
         while (true) {
             skipWs();
-            if (i >= s.size() || s[i] != '"') return fail("anahtar string bekleniyor");
+            if (i >= s.size() || s[i] != '"') return fail("expected a string key");
             ObjPtr key;
             if (!parseString(key)) return false;
             skipWs();
-            if (i >= s.size() || s[i] != ':') return fail("':' bekleniyor");
+            if (i >= s.size() || s[i] != ':') return fail("expected ':'");
             i++;
             ObjPtr val;
             if (!parseValue(val, depth + 1)) return false;
@@ -334,7 +334,7 @@ struct JsonParser {
             skipWs();
             if (i < s.size() && s[i] == ',') { i++; continue; }
             if (i < s.size() && s[i] == '}') { i++; break; }
-            return fail("',' veya '}' bekleniyor");
+            return fail("expected ',' or '}'");
         }
         out = map;
         return true;
@@ -402,7 +402,7 @@ inline ObjPtr makeMathModule() {
     def("lerp", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 3) return argCountError("lerp", "3", args.size(), line);
         if (!isNumeric(args[0]) || !isNumeric(args[1]) || !isNumeric(args[2])) {
-            return makeError("lerp(a, b, t) üç sayı ister", line);
+            return makeError("lerp(a, b, t) expects three numbers", line);
         }
         double a = asDouble(args[0]), b = asDouble(args[1]), t = asDouble(args[2]);
         return std::make_shared<FloatObject>(a + (b - a) * t);
@@ -413,11 +413,11 @@ inline ObjPtr makeMathModule() {
         if (args.size() != 3) return argCountError("clamp", "3", args.size(), line);
         bool allInt = true;
         for (const auto& a : args) {
-            if (!isNumeric(a)) return makeError("clamp(x, alt, üst) üç sayı ister", line);
+            if (!isNumeric(a)) return makeError("clamp(x, lo, hi) expects three numbers", line);
             if (a->type() == ObjectType::FLOAT) allInt = false;
         }
         double x = asDouble(args[0]), lo = asDouble(args[1]), hi = asDouble(args[2]);
-        if (lo > hi) return makeError("clamp() alt sınır üst sınırdan büyük olamaz", line);
+        if (lo > hi) return makeError("clamp() lower bound cannot exceed the upper bound", line);
         double r = x < lo ? lo : (x > hi ? hi : x);
         if (allInt) return std::make_shared<IntegerObject>((long long)r);
         return std::make_shared<FloatObject>(r);
@@ -427,19 +427,19 @@ inline ObjPtr makeMathModule() {
     def("remap", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 5) return argCountError("remap", "5", args.size(), line);
         for (const auto& a : args) {
-            if (!isNumeric(a)) return makeError("remap() beş sayı ister", line);
+            if (!isNumeric(a)) return makeError("remap() expects five numbers", line);
         }
         double x = asDouble(args[0]);
         double a1 = asDouble(args[1]), b1 = asDouble(args[2]);
         double a2 = asDouble(args[3]), b2 = asDouble(args[4]);
-        if (b1 == a1) return makeError("remap() kaynak aralığı sıfır genişlikte (a1 == b1)", line);
+        if (b1 == a1) return makeError("remap() source range has zero width (a1 == b1)", line);
         return std::make_shared<FloatObject>(a2 + (x - a1) * (b2 - a2) / (b1 - a1));
     });
 
     // sign(x): -1, 0, or 1
     def("sign", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("sign", "1", args.size(), line);
-        if (!isNumeric(args[0])) return makeError("sign() sayı ister", line);
+        if (!isNumeric(args[0])) return makeError("sign() expects a number", line);
         double v = asDouble(args[0]);
         return std::make_shared<IntegerObject>(v > 0 ? 1 : (v < 0 ? -1 : 0));
     });
@@ -449,18 +449,18 @@ inline ObjPtr makeMathModule() {
         if (args.size() != 3) return argCountError("wrap", "3", args.size(), line);
         bool allInt = true;
         for (const auto& a : args) {
-            if (!isNumeric(a)) return makeError("wrap(x, min, maks) üç sayı ister", line);
+            if (!isNumeric(a)) return makeError("wrap(x, min, max) expects three numbers", line);
             if (a->type() == ObjectType::FLOAT) allInt = false;
         }
         if (allInt) {
             long long x = static_cast<IntegerObject*>(args[0].get())->value;
             long long lo = static_cast<IntegerObject*>(args[1].get())->value;
             long long hi = static_cast<IntegerObject*>(args[2].get())->value;
-            if (hi <= lo) return makeError("wrap() maks, min'den büyük olmalı", line);
+            if (hi <= lo) return makeError("wrap() max must be greater than min", line);
             return std::make_shared<IntegerObject>(lo + floorMod(x - lo, hi - lo));
         }
         double x = asDouble(args[0]), lo = asDouble(args[1]), hi = asDouble(args[2]);
-        if (hi <= lo) return makeError("wrap() maks, min'den büyük olmalı", line);
+        if (hi <= lo) return makeError("wrap() max must be greater than min", line);
         return std::make_shared<FloatObject>(lo + floorModF(x - lo, hi - lo));
     });
 
@@ -468,7 +468,7 @@ inline ObjPtr makeMathModule() {
     def("move_toward", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 3) return argCountError("move_toward", "3", args.size(), line);
         for (const auto& a : args) {
-            if (!isNumeric(a)) return makeError("move_toward() üç sayı ister", line);
+            if (!isNumeric(a)) return makeError("move_toward() expects three numbers", line);
         }
         double cur = asDouble(args[0]), target = asDouble(args[1]), delta = asDouble(args[2]);
         if (std::fabs(target - cur) <= delta) return std::make_shared<FloatObject>(target);
@@ -479,7 +479,7 @@ inline ObjPtr makeMathModule() {
     def("dist", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 4) return argCountError("dist", "4", args.size(), line);
         for (const auto& a : args) {
-            if (!isNumeric(a)) return makeError("dist(x1, y1, x2, y2) dört sayı ister", line);
+            if (!isNumeric(a)) return makeError("dist(x1, y1, x2, y2) expects four numbers", line);
         }
         double dx = asDouble(args[2]) - asDouble(args[0]);
         double dy = asDouble(args[3]) - asDouble(args[1]);
@@ -490,7 +490,7 @@ inline ObjPtr makeMathModule() {
     auto floatFn1 = [](const std::string& name, double(*f)(double)) {
         return [name, f](const Args& args, int line, const CallFn&) -> ObjPtr {
             if (args.size() != 1) return argCountError(name, "1", args.size(), line);
-            if (!isNumeric(args[0])) return makeError(name + "() sayı ister", line);
+            if (!isNumeric(args[0])) return makeError(name + "() expects a number", line);
             return std::make_shared<FloatObject>(f(asDouble(args[0])));
         };
     };
@@ -499,44 +499,44 @@ inline ObjPtr makeMathModule() {
     def("tan", floatFn1("tan", std::tan));
     def("atan2", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("atan2", "2", args.size(), line);
-        if (!isNumeric(args[0]) || !isNumeric(args[1])) return makeError("atan2(y, x) iki sayı ister", line);
+        if (!isNumeric(args[0]) || !isNumeric(args[1])) return makeError("atan2(y, x) expects two numbers", line);
         return std::make_shared<FloatObject>(std::atan2(asDouble(args[0]), asDouble(args[1])));
     });
     def("deg", floatFn1("deg", [](double r) { return r * 180.0 / 3.14159265358979323846; }));
     def("rad", floatFn1("rad", [](double d) { return d * 3.14159265358979323846 / 180.0; }));
     def("asin", [](const Args& args, int line, const CallFn&) -> ObjPtr {
-        if (args.size() != 1 || !isNumeric(args[0])) return makeError("asin() sayı ister", line);
+        if (args.size() != 1 || !isNumeric(args[0])) return makeError("asin() expects a number", line);
         double v = asDouble(args[0]);
-        if (v < -1 || v > 1) return makeError("asin() -1..1 aralığında değer ister", line);
+        if (v < -1 || v > 1) return makeError("asin() expects a value in -1..1", line);
         return std::make_shared<FloatObject>(std::asin(v));
     });
     def("acos", [](const Args& args, int line, const CallFn&) -> ObjPtr {
-        if (args.size() != 1 || !isNumeric(args[0])) return makeError("acos() sayı ister", line);
+        if (args.size() != 1 || !isNumeric(args[0])) return makeError("acos() expects a number", line);
         double v = asDouble(args[0]);
-        if (v < -1 || v > 1) return makeError("acos() -1..1 aralığında değer ister", line);
+        if (v < -1 || v > 1) return makeError("acos() expects a value in -1..1", line);
         return std::make_shared<FloatObject>(std::acos(v));
     });
     def("exp", floatFn1("exp", std::exp));
     // log(x): natural log | log(x, base)
     def("log", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.empty() || args.size() > 2 || !isNumeric(args[0])) {
-            return makeError("log(x[, taban]) bir veya iki sayı ister", line);
+            return makeError("log(x[, base]) expects one or two numbers", line);
         }
         double v = asDouble(args[0]);
-        if (v <= 0) return makeError("log() pozitif sayı ister", line);
+        if (v <= 0) return makeError("log() expects a positive number", line);
         if (args.size() == 1) return std::make_shared<FloatObject>(std::log(v));
-        if (!isNumeric(args[1])) return makeError("log() tabanı sayı olmalı", line);
+        if (!isNumeric(args[1])) return makeError("log() base must be a number", line);
         double base = asDouble(args[1]);
-        if (base <= 0 || base == 1) return makeError("log() tabanı pozitif ve 1'den farklı olmalı", line);
+        if (base <= 0 || base == 1) return makeError("log() base must be positive and not 1", line);
         return std::make_shared<FloatObject>(std::log(v) / std::log(base));
     });
     // snap(x, step): rounds to the nearest multiple (grid alignment) — snap(13, 5) -> 15.0
     def("snap", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || !isNumeric(args[0]) || !isNumeric(args[1])) {
-            return makeError("snap(x, adım) iki sayı ister", line);
+            return makeError("snap(x, step) expects two numbers", line);
         }
         double step = asDouble(args[1]);
-        if (step == 0) return makeError("snap() adımı 0 olamaz", line);
+        if (step == 0) return makeError("snap() step cannot be 0", line);
         return std::make_shared<FloatObject>(std::round(asDouble(args[0]) / step) * step);
     });
 
@@ -561,7 +561,7 @@ inline ObjPtr makeGameModule() {
     def("ease", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("ease", "2", args.size(), line);
         if (!isNumeric(args[0]) || args[1]->type() != ObjectType::STRING) {
-            return makeError("ease(t, isim) bir sayı ve bir string ister", line);
+            return makeError("ease(t, name) expects a number and a string", line);
         }
         double t = asDouble(args[0]);
         if (t < 0) t = 0;
@@ -569,7 +569,7 @@ inline ObjPtr makeGameModule() {
         const std::string& name = static_cast<StringObject*>(args[1].get())->value;
         double out;
         if (!easeByName(name, t, out)) {
-            return makeError("bilinmeyen easing: \"" + name + "\" (geçerli: linear, in_quad, out_quad, "
+            return makeError("unknown easing: \"" + name + "\" (valid: linear, in_quad, out_quad, "
                              "in_out_quad, in_cubic, out_cubic, in_out_cubic, in_sine, out_sine, "
                              "in_out_sine, out_back, out_elastic, out_bounce)", line);
         }
@@ -580,10 +580,10 @@ inline ObjPtr makeGameModule() {
     def("pick", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("pick", "1", args.size(), line);
         if (args[0]->type() != ObjectType::LIST) {
-            return makeError("pick() list ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("pick() expects a list, got " + typeName(args[0]->type()) + "", line);
         }
         auto* l = static_cast<ListObject*>(args[0].get());
-        if (l->elements.empty()) return makeError("pick() boş listeden seçemez", line);
+        if (l->elements.empty()) return makeError("pick() cannot pick from an empty list", line);
         std::uniform_int_distribution<size_t> dist(0, l->elements.size() - 1);
         return l->elements[dist(rng())];
     });
@@ -592,20 +592,20 @@ inline ObjPtr makeGameModule() {
     def("pick_weighted", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("pick_weighted", "1", args.size(), line);
         if (args[0]->type() != ObjectType::MAP) {
-            return makeError("pick_weighted() map ister: {\"ödül\": ağırlık, ...}", line);
+            return makeError("pick_weighted() expects a map: {\"reward\": weight, ...}", line);
         }
         auto* m = static_cast<MapObject*>(args[0].get());
-        if (m->entries.empty()) return makeError("pick_weighted() boş map'ten seçemez", line);
+        if (m->entries.empty()) return makeError("pick_weighted() cannot pick from an empty map", line);
         double total = 0;
         for (const auto& e : m->entries) {
             if (!isNumeric(e.second)) {
-                return makeError("pick_weighted() ağırlıkları sayı olmalı", line);
+                return makeError("pick_weighted() weights must be numbers", line);
             }
             double w = asDouble(e.second);
-            if (w < 0) return makeError("pick_weighted() ağırlıkları negatif olamaz", line);
+            if (w < 0) return makeError("pick_weighted() weights cannot be negative", line);
             total += w;
         }
-        if (total <= 0) return makeError("pick_weighted() ağırlık toplamı 0'dan büyük olmalı", line);
+        if (total <= 0) return makeError("pick_weighted() total weight must be greater than 0", line);
         std::uniform_real_distribution<double> dist(0.0, total);
         double r = dist(rng());
         double acc = 0;
@@ -620,7 +620,7 @@ inline ObjPtr makeGameModule() {
     def("shuffle", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("shuffle", "1", args.size(), line);
         if (args[0]->type() != ObjectType::LIST) {
-            return makeError("shuffle() list ister, " + typeName(args[0]->type()) + " verildi", line);
+            return makeError("shuffle() expects a list, got " + typeName(args[0]->type()) + "", line);
         }
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         for (size_t i = els.size(); i > 1; --i) {
@@ -641,7 +641,7 @@ inline ObjPtr makeGameModule() {
         if (args.size() != 2) return argCountError("connect", "2", args.size(), line);
         if (args[0]->type() != ObjectType::SIGNAL ||
             (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
-            return makeError("connect(sinyal, fn) bir signal ve bir fonksiyon ister", line);
+            return makeError("connect(signal, fn) expects a signal and a function", line);
         }
         auto* sig = static_cast<SignalObject*>(args[0].get());
         for (const auto& l : sig->listeners) {
@@ -655,7 +655,7 @@ inline ObjPtr makeGameModule() {
     def("disconnect", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("disconnect", "2", args.size(), line);
         if (args[0]->type() != ObjectType::SIGNAL) {
-            return makeError("disconnect(sinyal, fn) ilk argüman olarak signal ister", line);
+            return makeError("disconnect(signal, fn) expects a signal as its first argument", line);
         }
         auto* sig = static_cast<SignalObject*>(args[0].get());
         for (size_t i = 0; i < sig->listeners.size(); ++i) {
@@ -669,9 +669,9 @@ inline ObjPtr makeGameModule() {
 
     // emit(signal, ...args): calls every listener in order
     def("emit", [](const Args& args, int line, const CallFn& call) -> ObjPtr {
-        if (args.empty()) return argCountError("emit", "en az 1", args.size(), line);
+        if (args.empty()) return argCountError("emit", "at least 1", args.size(), line);
         if (args[0]->type() != ObjectType::SIGNAL) {
-            return makeError("emit(sinyal, ...) ilk argüman olarak signal ister", line);
+            return makeError("emit(signal, ...) expects a signal as its first argument", line);
         }
         auto* sig = static_cast<SignalObject*>(args[0].get());
         Args fwd(args.begin() + 1, args.end());
@@ -694,12 +694,12 @@ inline ObjPtr makeGameModule() {
     // timer(seconds): creates a countdown object (map)
     def("timer", [nowSeconds](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || !isNumeric(args[0])) {
-            return makeError("timer(saniye) bir sayı ister", line);
+            return makeError("timer(seconds) expects a number", line);
         }
         auto t = std::make_shared<MapObject>();
-        t->set(std::make_shared<StringObject>("süre"),
+        t->set(std::make_shared<StringObject>("duration"),
                std::make_shared<FloatObject>(asDouble(args[0])));
-        t->set(std::make_shared<StringObject>("başlangıç"),
+        t->set(std::make_shared<StringObject>("start"),
                std::make_shared<FloatObject>(nowSeconds()));
         return t;
     });
@@ -707,8 +707,8 @@ inline ObjPtr makeGameModule() {
     auto timerFields = [](const ObjPtr& t, double& süre, double& start) -> bool {
         if (t->type() != ObjectType::MAP) return false;
         auto* m = static_cast<MapObject*>(t.get());
-        auto s = m->get(std::make_shared<StringObject>("süre"));
-        auto b = m->get(std::make_shared<StringObject>("başlangıç"));
+        auto s = m->get(std::make_shared<StringObject>("duration"));
+        auto b = m->get(std::make_shared<StringObject>("start"));
         if (s == nullptr || b == nullptr || !isNumeric(s) || !isNumeric(b)) return false;
         süre = asDouble(s);
         start = asDouble(b);
@@ -719,7 +719,7 @@ inline ObjPtr makeGameModule() {
     def("timer_done", [nowSeconds, timerFields](const Args& args, int line, const CallFn&) -> ObjPtr {
         double süre, start;
         if (args.size() != 1 || !timerFields(args[0], süre, start)) {
-            return makeError("timer_done() timer() ile oluşturulmuş bir nesne ister", line);
+            return makeError("timer_done() expects an object created by timer()", line);
         }
         return boolObj(nowSeconds() - start >= süre);
     });
@@ -728,7 +728,7 @@ inline ObjPtr makeGameModule() {
     def("timer_left", [nowSeconds, timerFields](const Args& args, int line, const CallFn&) -> ObjPtr {
         double süre, start;
         if (args.size() != 1 || !timerFields(args[0], süre, start)) {
-            return makeError("timer_left() timer() ile oluşturulmuş bir nesne ister", line);
+            return makeError("timer_left() expects an object created by timer()", line);
         }
         double left = süre - (nowSeconds() - start);
         return std::make_shared<FloatObject>(left > 0 ? left : 0.0);
@@ -738,10 +738,10 @@ inline ObjPtr makeGameModule() {
     def("timer_reset", [nowSeconds, timerFields](const Args& args, int line, const CallFn&) -> ObjPtr {
         double süre, start;
         if (args.size() != 1 || !timerFields(args[0], süre, start)) {
-            return makeError("timer_reset() timer() ile oluşturulmuş bir nesne ister", line);
+            return makeError("timer_reset() expects an object created by timer()", line);
         }
         static_cast<MapObject*>(args[0].get())->set(
-            std::make_shared<StringObject>("başlangıç"),
+            std::make_shared<StringObject>("start"),
             std::make_shared<FloatObject>(nowSeconds()));
         return args[0];
     });
@@ -767,7 +767,7 @@ inline ObjPtr makeTextModule() {
     def("split", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("split", "2", args.size(), line);
         if (args[0]->type() != ObjectType::STRING || args[1]->type() != ObjectType::STRING) {
-            return makeError("split(metin, ayırıcı) iki string ister", line);
+            return makeError("split(text, separator) expects two strings", line);
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         const std::string& sep = static_cast<StringObject*>(args[1].get())->value;
@@ -798,7 +798,7 @@ inline ObjPtr makeTextModule() {
     def("join", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("join", "2", args.size(), line);
         if (args[0]->type() != ObjectType::LIST || args[1]->type() != ObjectType::STRING) {
-            return makeError("join(liste, ayırıcı) bir list ve bir string ister", line);
+            return makeError("join(list, separator) expects a list and a string", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         const std::string& sep = static_cast<StringObject*>(args[1].get())->value;
@@ -813,14 +813,14 @@ inline ObjPtr makeTextModule() {
     // upper/lower: Turkish-aware (i→İ, ı→I, ş→Ş ...)
     def("upper", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
-            return makeError("upper() bir string ister", line);
+            return makeError("upper() expects a string", line);
         }
         return std::make_shared<StringObject>(
             caseConvert(static_cast<StringObject*>(args[0].get())->value, true));
     });
     def("lower", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
-            return makeError("lower() bir string ister", line);
+            return makeError("lower() expects a string", line);
         }
         return std::make_shared<StringObject>(
             caseConvert(static_cast<StringObject*>(args[0].get())->value, false));
@@ -829,7 +829,7 @@ inline ObjPtr makeTextModule() {
     // trim(text): strips leading/trailing whitespace
     def("trim", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
-            return makeError("trim() bir string ister", line);
+            return makeError("trim() expects a string", line);
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         size_t a = s.find_first_not_of(" \t\r\n");
@@ -842,12 +842,12 @@ inline ObjPtr makeTextModule() {
     def("replace", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 3) return argCountError("replace", "3", args.size(), line);
         for (const auto& a : args) {
-            if (a->type() != ObjectType::STRING) return makeError("replace(metin, eski, yeni) üç string ister", line);
+            if (a->type() != ObjectType::STRING) return makeError("replace(text, old, new) expects three strings", line);
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         const std::string& from = static_cast<StringObject*>(args[1].get())->value;
         const std::string& to = static_cast<StringObject*>(args[2].get())->value;
-        if (from.empty()) return makeError("replace() boş 'eski' metinle çalışamaz", line);
+        if (from.empty()) return makeError("replace() cannot work with an empty 'old' text", line);
         std::string out;
         size_t pos = 0;
         while (true) {
@@ -862,7 +862,7 @@ inline ObjPtr makeTextModule() {
 
     def("starts_with", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[0]->type() != ObjectType::STRING || args[1]->type() != ObjectType::STRING) {
-            return makeError("starts_with(metin, önek) iki string ister", line);
+            return makeError("starts_with(text, prefix) expects two strings", line);
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         const std::string& p = static_cast<StringObject*>(args[1].get())->value;
@@ -871,7 +871,7 @@ inline ObjPtr makeTextModule() {
 
     def("ends_with", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[0]->type() != ObjectType::STRING || args[1]->type() != ObjectType::STRING) {
-            return makeError("ends_with(metin, sonek) iki string ister", line);
+            return makeError("ends_with(text, suffix) expects two strings", line);
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         const std::string& p = static_cast<StringObject*>(args[1].get())->value;
@@ -881,11 +881,11 @@ inline ObjPtr makeTextModule() {
     // chr(code): converts a Unicode code point to a one-character string; ord() is the inverse
     def("chr", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::INTEGER) {
-            return makeError("chr() bir tam sayı (Unicode kod noktası) ister", line);
+            return makeError("chr() expects an integer (Unicode code point)", line);
         }
         long long cp = static_cast<IntegerObject*>(args[0].get())->value;
         if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-            return makeError("chr() geçersiz kod noktası: " + std::to_string(cp), line);
+            return makeError("chr() invalid code point: " + std::to_string(cp), line);
         }
         std::string out;
         unsigned int u = (unsigned int)cp;
@@ -909,12 +909,12 @@ inline ObjPtr makeTextModule() {
     // ord(char): Unicode code point of a single character
     def("ord", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
-            return makeError("ord() tek karakterlik bir string ister", line);
+            return makeError("ord() expects a single-character string", line);
         }
         const std::string& sv = static_cast<StringObject*>(args[0].get())->value;
         if (sv.empty() || utf8Length(sv) != 1) {
-            return makeError("ord() tam olarak BİR karakter ister, " +
-                             std::to_string(utf8Length(sv)) + " verildi", line);
+            return makeError("ord() expects exactly ONE character, got " +
+                             std::to_string(utf8Length(sv)) + "", line);
         }
         unsigned int cp = 0;
         unsigned char c0 = (unsigned char)sv[0];
@@ -932,11 +932,11 @@ inline ObjPtr makeTextModule() {
     def("count", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[0]->type() != ObjectType::STRING ||
             args[1]->type() != ObjectType::STRING) {
-            return makeError("count(metin, aranan) iki string ister", line);
+            return makeError("count(text, needle) expects two strings", line);
         }
         const std::string& hay = static_cast<StringObject*>(args[0].get())->value;
         const std::string& needle = static_cast<StringObject*>(args[1].get())->value;
-        if (needle.empty()) return makeError("count() boş metin arayamaz", line);
+        if (needle.empty()) return makeError("count() cannot search for an empty text", line);
         long long n = 0;
         size_t pos = 0;
         while ((pos = hay.find(needle, pos)) != std::string::npos) {
@@ -953,13 +953,13 @@ inline ObjPtr makeTextModule() {
             if (args.size() < 2 || args.size() > 3 ||
                 args[0]->type() != ObjectType::STRING ||
                 args[1]->type() != ObjectType::INTEGER) {
-                return makeError(fname + "(metin, uzunluk[, dolgu]) ister", line);
+                return makeError(fname + "(text, length[, fill]) expected", line);
             }
             std::string dolgu = " ";
             if (args.size() == 3) {
                 if (args[2]->type() != ObjectType::STRING ||
                     utf8Length(static_cast<StringObject*>(args[2].get())->value) != 1) {
-                    return makeError(fname + "() dolgusu tek karakterlik string olmalı", line);
+                    return makeError(fname + "() fill must be a single-character string", line);
                 }
                 dolgu = static_cast<StringObject*>(args[2].get())->value;
             }
@@ -979,11 +979,11 @@ inline ObjPtr makeTextModule() {
     def("fixed", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || !isNumeric(args[0]) ||
             args[1]->type() != ObjectType::INTEGER) {
-            return makeError("fixed(sayı, basamak) bir sayı ve bir tam sayı ister", line);
+            return makeError("fixed(number, digits) expects a number and an integer", line);
         }
         long long digits = static_cast<IntegerObject*>(args[1].get())->value;
         if (digits < 0 || digits > 17) {
-            return makeError("fixed() basamak sayısı 0-17 aralığında olmalı", line);
+            return makeError("fixed() digit count must be within 0-17", line);
         }
         char buf[64];
         std::snprintf(buf, sizeof(buf), "%.*f", (int)digits, asDouble(args[0]));
@@ -1026,7 +1026,7 @@ inline ObjPtr makeFileModule() {
     auto pathArg = [](const Args& args, const std::string& fname, int line,
                       std::string& out) -> ObjPtr {
         if (args.empty() || args[0]->type() != ObjectType::STRING) {
-            return makeError(fname + "() ilk argüman olarak string yol ister", line);
+            return makeError(fname + "() expects a string path as its first argument", line);
         }
         out = static_cast<StringObject*>(args[0].get())->value;
         return nullptr;
@@ -1047,7 +1047,7 @@ inline ObjPtr makeFileModule() {
         std::string path;
         if (auto err = pathArg(args, "read_text", line, path)) return err;
         std::ifstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya açılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot open file: " + path, line);
         std::stringstream buf;
         buf << f.rdbuf();
         return std::make_shared<StringObject>(buf.str());
@@ -1056,12 +1056,12 @@ inline ObjPtr makeFileModule() {
     // write_text(path, text): writes the string to a file (overwrites)
     def("write_text", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[1]->type() != ObjectType::STRING) {
-            return makeError("write_text(yol, metin) iki string ister", line);
+            return makeError("write_text(path, text) expects two strings", line);
         }
         std::string path;
         if (auto err = pathArg(args, "write_text", line, path)) return err;
         std::ofstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya yazılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot write file: " + path, line);
         f << static_cast<StringObject*>(args[1].get())->value;
         return NULL_OBJ_;
     });
@@ -1069,12 +1069,12 @@ inline ObjPtr makeFileModule() {
     // append_text(path, text): appends to the file (for log files)
     def("append_text", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[1]->type() != ObjectType::STRING) {
-            return makeError("append_text(yol, metin) iki string ister", line);
+            return makeError("append_text(path, text) expects two strings", line);
         }
         std::string path;
         if (auto err = pathArg(args, "append_text", line, path)) return err;
         std::ofstream f(path, std::ios::binary | std::ios::app);
-        if (!f.is_open()) return makeError("dosya yazılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot write file: " + path, line);
         f << static_cast<StringObject*>(args[1].get())->value;
         return NULL_OBJ_;
     });
@@ -1085,7 +1085,7 @@ inline ObjPtr makeFileModule() {
         std::string path;
         if (auto err = pathArg(args, "read_lines", line, path)) return err;
         std::ifstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya açılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot open file: " + path, line);
         auto list = std::make_shared<ListObject>();
         std::string ln;
         while (std::getline(f, ln)) {
@@ -1121,7 +1121,7 @@ inline ObjPtr makeFileModule() {
         if (auto err = pathArg(args, "list_dir", line, path)) return err;
         std::error_code ec;
         if (!std::filesystem::is_directory(path, ec)) {
-            return makeError("klasör değil veya yok: " + path, line);
+            return makeError("not a directory or does not exist: " + path, line);
         }
         std::vector<std::string> names;
         for (const auto& entry : std::filesystem::directory_iterator(path, ec)) {
@@ -1142,10 +1142,10 @@ inline ObjPtr makeFileModule() {
         if (auto err = pathArg(args, "save_data", line, path)) return err;
         std::string json, err;
         if (!jsonWrite(args[1], json, err, 0)) {
-            return makeError("save_data() başarısız: " + err, line);
+            return makeError("save_data() failed: " + err, line);
         }
         std::ofstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya yazılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot write file: " + path, line);
         f << json << "\n";
         return NULL_OBJ_;
     });
@@ -1156,7 +1156,7 @@ inline ObjPtr makeFileModule() {
         std::string path;
         if (auto err = pathArg(args, "load_data", line, path)) return err;
         std::ifstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya açılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot open file: " + path, line);
         std::stringstream buf;
         buf << f.rdbuf();
         std::string content = buf.str();
@@ -1164,11 +1164,11 @@ inline ObjPtr makeFileModule() {
         JsonParser parser(content);
         ObjPtr result;
         if (!parser.parseValue(result, 0)) {
-            return makeError("load_data() JSON çözümlenemedi: " + parser.err + " [" + path + "]", line);
+            return makeError("load_data() could not parse JSON: " + parser.err + " [" + path + "]", line);
         }
         parser.skipWs();
         if (parser.i != content.size()) {
-            return makeError("load_data() JSON sonrası fazladan veri var [" + path + "]", line);
+            return makeError("load_data() trailing data after JSON [" + path + "]", line);
         }
         return result;
     });
@@ -1181,10 +1181,10 @@ inline ObjPtr makeFileModule() {
         std::string path;
         if (auto err = pathArg(args, "read_bytes", line, path)) return err;
         std::ifstream f(path, std::ios::binary | std::ios::ate);
-        if (!f.is_open()) return makeError("dosya açılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot open file: " + path, line);
         auto size = f.tellg();
         if (size > 10 * 1024 * 1024) {
-            return makeError("read_bytes() dosya çok büyük (limit 10 MB): " + path, line);
+            return makeError("read_bytes() file too large (10 MB limit): " + path, line);
         }
         f.seekg(0);
         std::vector<char> buf((size_t)size);
@@ -1204,23 +1204,23 @@ inline ObjPtr makeFileModule() {
         std::string path;
         if (auto err = pathArg(args, "write_bytes", line, path)) return err;
         if (args[1]->type() != ObjectType::LIST) {
-            return makeError("write_bytes(yol, liste) bayt listesi ister", line);
+            return makeError("write_bytes(path, list) expects a list of bytes", line);
         }
         std::string buf;
         const auto& els = static_cast<ListObject*>(args[1].get())->elements;
         buf.reserve(els.size());
         for (const auto& e : els) {
             if (e->type() != ObjectType::INTEGER) {
-                return makeError("write_bytes() elemanları tam sayı olmalı (0-255)", line);
+                return makeError("write_bytes() elements must be integers (0-255)", line);
             }
             long long v = static_cast<IntegerObject*>(e.get())->value;
             if (v < 0 || v > 255) {
-                return makeError("write_bytes() bayt aralık dışı: " + std::to_string(v), line);
+                return makeError("write_bytes() byte out of range: " + std::to_string(v), line);
             }
             buf += (char)(unsigned char)v;
         }
         std::ofstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya yazılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot write file: " + path, line);
         f << buf;
         return NULL_OBJ_;
     });
@@ -1235,12 +1235,12 @@ inline ObjPtr makeFileModule() {
         if (args.size() == 2) {
             if (args[1]->type() != ObjectType::STRING ||
                 static_cast<StringObject*>(args[1].get())->value.size() != 1) {
-                return makeError("read_csv() ayırıcısı tek karakterlik string olmalı", line);
+                return makeError("read_csv() separator must be a single-character string", line);
             }
             sep = static_cast<StringObject*>(args[1].get())->value;
         }
         std::ifstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya açılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot open file: " + path, line);
         std::stringstream buf;
         buf << f.rdbuf();
         std::string content = buf.str();
@@ -1297,21 +1297,21 @@ inline ObjPtr makeFileModule() {
         std::string path;
         if (auto err = pathArg(args, "write_csv", line, path)) return err;
         if (args[1]->type() != ObjectType::LIST) {
-            return makeError("write_csv() satırlar için list ister (liste listesi)", line);
+            return makeError("write_csv() expects a list of rows (list of lists)", line);
         }
         std::string sep = ",";
         if (args.size() == 3) {
             if (args[2]->type() != ObjectType::STRING ||
                 static_cast<StringObject*>(args[2].get())->value.size() != 1) {
-                return makeError("write_csv() ayırıcısı tek karakterlik string olmalı", line);
+                return makeError("write_csv() separator must be a single-character string", line);
             }
             sep = static_cast<StringObject*>(args[2].get())->value;
         }
         std::ofstream f(path, std::ios::binary);
-        if (!f.is_open()) return makeError("dosya yazılamadı: " + path, line);
+        if (!f.is_open()) return makeError("cannot write file: " + path, line);
         for (const auto& rowObj : static_cast<ListObject*>(args[1].get())->elements) {
             if (rowObj->type() != ObjectType::LIST) {
-                return makeError("write_csv() her satır bir list olmalı", line);
+                return makeError("write_csv() every row must be a list", line);
             }
             const auto& cells = static_cast<ListObject*>(rowObj.get())->elements;
             for (size_t i = 0; i < cells.size(); ++i) {
@@ -1352,7 +1352,7 @@ inline ObjPtr makeOsModule() {
     // env(name): reads an environment variable; null if unset
     def("env", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
-            return makeError("env(isim) bir string ister", line);
+            return makeError("env(name) expects a string", line);
         }
         const char* v = std::getenv(static_cast<StringObject*>(args[0].get())->value.c_str());
         if (v == nullptr) return NULL_OBJ_;
@@ -1363,7 +1363,7 @@ inline ObjPtr makeOsModule() {
     def("set_env", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[0]->type() != ObjectType::STRING ||
             args[1]->type() != ObjectType::STRING) {
-            return makeError("set_env(isim, değer) iki string ister", line);
+            return makeError("set_env(name, value) expects two strings", line);
         }
 #if defined(_WIN32)
         _putenv_s(static_cast<StringObject*>(args[0].get())->value.c_str(),
@@ -1392,7 +1392,7 @@ inline ObjPtr makeOsModule() {
         if (!args.empty()) return argCountError("cwd", "0", args.size(), line);
         std::error_code ec;
         auto p = std::filesystem::current_path(ec);
-        if (ec) return makeError("çalışma dizini okunamadı", line);
+        if (ec) return makeError("cannot read the working directory", line);
         return std::make_shared<StringObject>(p.string());
     });
 
@@ -1408,11 +1408,11 @@ inline ObjPtr makeOsModule() {
 
     // path_join(a, b, ...): joins path segments with the platform separator
     def("path_join", [](const Args& args, int line, const CallFn&) -> ObjPtr {
-        if (args.size() < 2) return argCountError("path_join", "en az 2", args.size(), line);
+        if (args.size() < 2) return argCountError("path_join", "at least 2", args.size(), line);
         std::filesystem::path p;
         for (const auto& a : args) {
             if (a->type() != ObjectType::STRING) {
-                return makeError("path_join() yalnızca string parçalar ister", line);
+                return makeError("path_join() expects only string segments", line);
             }
             p /= static_cast<StringObject*>(a.get())->value;
         }

@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 1: 'break' döngü dışında kullanılamaz
+[Runtime Error] line 1: 'break' cannot be used outside a loop

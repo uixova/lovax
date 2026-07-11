@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 3: 'topla' 2 parametre bekler, 1 verildi
+[Runtime Error] line 3: 'topla' expects 2 parameter(s), got 1

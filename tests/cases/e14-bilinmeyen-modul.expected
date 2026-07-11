@@ -1,2 +1,2 @@
 # exit: 70
-[Çalışma Hatası] satır 1: bilinmeyen gömülü modül 'fizik' (mevcut: math, game, text, file, os; dosya modülü için tırnak kullan: use "fizik.lm")
+[Runtime Error] line 1: unknown module 'fizik' (built-ins: math, game, text, file, os; no package at lume_libs/fizik/; for a file module use quotes: use "fizik.lm")

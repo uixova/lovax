@@ -144,7 +144,7 @@ public:
                 // If the spacing matches no level (alignment error)
                 if (spaces != indentStack.back()) {
                     return makeToken(TokenType::ILLEGAL,
-                        "hatalı girinti seviyesi: hiçbir üst bloğun hizasıyla eşleşmiyor");
+                        "invalid indentation level: matches no enclosing block");
                 }
             }
 
@@ -176,7 +176,7 @@ public:
                 break;
             case '!':
                 if (peekChar() == '=') { tok = twoCharToken(TokenType::NOT_EQUAL); }
-                else                   { tok = makeToken(TokenType::ILLEGAL, "beklenmeyen karakter '!' (değil için 'not' kullan)"); }
+                else                   { tok = makeToken(TokenType::ILLEGAL, "unexpected character '!' (use 'not' for negation)"); }
                 break;
             case '+':
                 if (peekChar() == '=') { tok = twoCharToken(TokenType::PLUS_ASSIGN); }
@@ -200,11 +200,11 @@ public:
                 else                   { tok = makeToken(TokenType::PERCENT, "%"); }
                 break;
             case '&':
-                if (peekChar() == '&') { tok = makeToken(TokenType::ILLEGAL, "'&&' yok; mantıksal ve için 'and' kullan"); readChar(); }
+                if (peekChar() == '&') { tok = makeToken(TokenType::ILLEGAL, "there is no '&&'; use 'and' for logical and"); readChar(); }
                 else                   { tok = makeToken(TokenType::AMPERSAND, "&"); }
                 break;
             case '|':
-                if (peekChar() == '|') { tok = makeToken(TokenType::ILLEGAL, "'||' yok; mantıksal veya için 'or' kullan"); readChar(); }
+                if (peekChar() == '|') { tok = makeToken(TokenType::ILLEGAL, "there is no '||'; use 'or' for logical or"); readChar(); }
                 else                   { tok = makeToken(TokenType::PIPE, "|"); }
                 break;
             case '^': tok = makeToken(TokenType::CARET, "^"); break;
@@ -264,7 +264,7 @@ public:
                     return readNumber();
                 } else {
                     tok = makeToken(TokenType::ILLEGAL,
-                        std::string("beklenmeyen karakter '") + ch + "'");
+                        std::string("unexpected character '") + ch + "'");
                 }
                 break;
         }
@@ -337,13 +337,13 @@ private:
             }
             if (digits == 0) {
                 t.type = TokenType::ILLEGAL;
-                t.literal = "hatalı sayı formatı: " + lit + " (basamak eksik)";
+                t.literal = "invalid number format: " + lit + " (digits missing)";
                 return t;
             }
             // Adjacent invalid character like '0b12' or '0xFG': error instead of a silently wrong value
             if (isDigit(ch) || isLetter(ch)) {
                 t.type = TokenType::ILLEGAL;
-                t.literal = std::string("hatalı sayı formatı: ") + lit + ch;
+                t.literal = std::string("invalid number format: ") + lit + ch;
                 return t;
             }
             t.type = TokenType::INT;
@@ -384,7 +384,7 @@ private:
 
         if (badFormat) {
             t.type = TokenType::ILLEGAL;
-            t.literal = "hatalı sayı formatı: " + lit;
+            t.literal = "invalid number format: " + lit;
             return t;
         }
 
@@ -450,7 +450,7 @@ private:
         if (ch != '"') {
             // Hit end of line or end of file: unterminated string
             t.type = TokenType::ILLEGAL;
-            t.literal = "kapatılmamış string (kapanış '\"' eksik)";
+            t.literal = "unterminated string (closing '\"' missing)";
             // if we sit on '\n', keep the line-start logic intact
             if (ch == '\n') isAtLineStart = true;
             if (ch != 0) readChar();
@@ -479,7 +479,7 @@ private:
             if (ch == 0) {
                 Token t;
                 t.type = TokenType::ILLEGAL;
-                t.literal = "kapatılmamış çok satırlı string (kapanış \"\"\" eksik)";
+                t.literal = "unterminated multiline string (closing \"\"\" missing)";
                 t.line = startLine;
                 t.column = startCol;
                 return t;
