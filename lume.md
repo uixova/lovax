@@ -37,7 +37,7 @@ Lume is currently a **tree-walking interpreter**:
 The language surface is rich and frozen: conditionals (`if/else if`, `match`, ternary),
 loops (`while`, `for/in`, `break/continue`), functions (closures, default parameters,
 anonymous functions), list/map/range, string interpolation, `in` and `**` operators,
-the module system (`use`) and the built-in `math`/`game`/`text`/`file`/`os` libraries —
+the module system (`use`) and the built-in `math`/`game`/`strings`/`file`/`os` libraries —
 all documented in the README and protected by 53 golden tests.
 
 This phase proves **correctness**, not speed. Speed comes from the journey in §4.

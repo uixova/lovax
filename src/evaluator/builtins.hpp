@@ -19,7 +19,7 @@
 //   text -> convert to string      num  -> convert to number
 //   kind -> type name              len  -> length (UTF-8 aware)
 //   push/pop/remove -> list/map editing
-// Built-in modules (math/game/text/file) live in stdlib.hpp — loaded with 'use'
+// Built-in modules (math/game/strings/file/os) live in stdlib.hpp — loaded with 'use'
 
 namespace Lume {
 namespace Builtins {

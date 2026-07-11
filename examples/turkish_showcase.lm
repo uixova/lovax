@@ -2,7 +2,7 @@
 # UTF-8-aware len/indexing, and Turkish-aware upper/lower (i → İ, ı → I).
 # Run with:  ./lume examples/turkish_showcase.lm
 
-use text: upper, lower
+use strings: upper, lower
 
 set oyuncu_adı = "Şükrü"
 say oyuncu_adı, len(oyuncu_adı)          # code points, not bytes -> 5

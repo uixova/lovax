@@ -18,6 +18,7 @@
 // Modules NEVER enter the global scope until invited with 'use':
 //   use math   -> math.lerp(0, 10, 0.5)
 //   use game: pick_weighted, signal
+//   use strings: upper, split
 //   use file as f -> f.save_data(...)
 // Every module is a FROZEN map: contents are immutable, the language cannot be broken.
 
@@ -752,7 +753,7 @@ inline ObjPtr makeGameModule() {
     return mod;
 }
 
-// ===== text module =====
+// ===== strings module =====
 
 inline ObjPtr makeTextModule() {
     static ObjPtr cached = nullptr;
@@ -991,7 +992,7 @@ inline ObjPtr makeTextModule() {
     });
 
     mod->frozen = true;
-    mod->moduleName = "text";
+    mod->moduleName = "strings";
     cached = mod;
     return mod;
 }
@@ -1429,14 +1430,14 @@ inline ObjPtr makeOsModule() {
 inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "math") return makeMathModule();
     if (name == "game") return makeGameModule();
-    if (name == "text") return makeTextModule();
+    if (name == "strings") return makeTextModule();
     if (name == "file") return makeFileModule();
     if (name == "os")   return makeOsModule();
     return nullptr;
 }
 
 inline std::string builtinModuleList() {
-    return "math, game, text, file, os";
+    return "math, game, strings, file, os";
 }
 
 } // namespace StdLib

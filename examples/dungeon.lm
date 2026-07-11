@@ -6,7 +6,7 @@
 
 use math: clamp
 use game: pick_weighted, signal, connect, emit
-use text: upper, join
+use strings: upper, join
 use file
 
 seed(2026)  # deterministic: same dungeon every run (replay/test friendly)

@@ -24,7 +24,7 @@
 ### Built-in Modules
 - `math`: lerp, clamp, remap, wrap, move_toward, dist, snap, full trig, exp/log, PI/TAU.
 - `game`: Penner easing, pick/pick_weighted/shuffle (loot), signals, poll-based timers.
-- `text`: split, join, Turkish-aware upper/lower, trim, replace, count, padding, chr/ord, fixed.
+- `strings`: split, join, Turkish-aware upper/lower, trim, replace, count, padding, chr/ord, fixed.
 - `file`: text/lines/binary/JSON/CSV read-write, exists, list_dir, make_dir, delete_file.
 - `os`: env, set_env, platform, cwd, args, path_join.
 

@@ -208,7 +208,7 @@ A manifest (`lume.json`) with version pinning and a registry are planned (see
 |--------|----------|
 | **`math`** | `lerp` `clamp` `remap` `sign` `wrap` `move_toward` `dist` `snap` `sin` `cos` `tan` `asin` `acos` `atan2` `exp` `log` `deg` `rad` + `PI` `TAU` |
 | **`game`** | `ease(t, "out_bounce")` (Penner set) · `pick` `pick_weighted` `shuffle` (loot) · `signal` `connect` `disconnect` `emit` (events) · `timer` `timer_done` `timer_left` `timer_reset` (cooldowns) |
-| **`text`** | `split` `join` `upper` `lower` (Turkish-aware) `trim` `replace` `starts_with` `ends_with` `count` `pad_start` `pad_end` `chr` `ord` `fixed` |
+| **`strings`** | `split` `join` `upper` `lower` (Turkish-aware) `trim` `replace` `starts_with` `ends_with` `count` `pad_start` `pad_end` `chr` `ord` `fixed` |
 | **`file`** | `exists` `read_text` `write_text` `append_text` `read_lines` `read_bytes` `write_bytes` (binary) `delete_file` `make_dir` `list_dir` · `save_data`/`load_data` (JSON) · `read_csv`/`write_csv` |
 | **`os`** | `env` `set_env` `platform` `cwd` `args` `path_join` |
 
@@ -285,7 +285,7 @@ geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama 
 - **Oyun-öncelikli** — loot tabloları (`pick_weighted`), sinyaller (`signal/connect/emit`),
   easing eğrileri, zamanlayıcılar, kayıt sistemi (`save_data/load_data`) ve deterministik
   rastgelelik (`seed`) dilin içinde gelir.
-- **Temiz çekirdek** — gömülü kütüphaneler (`math`, `game`, `text`, `file`, `os`)
+- **Temiz çekirdek** — gömülü kütüphaneler (`math`, `game`, `strings`, `file`, `os`)
   `use` ile davet edilmeden kapsamına girmez; modüller donmuştur, dil bozulamaz.
 - **Türkçe dostu** — `oyuncu_adı` gibi tanımlayıcılar birinci sınıftır; `len("şey") == 3`;
   `upper/lower` Türkçe kurallıdır (`i→İ`, `ı→I`); hata mesajları satır numarasıyla çözümü söyler (küresel standart için İngilizcedir).

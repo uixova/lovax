@@ -1,4 +1,4 @@
-use text: split, join, upper, lower, trim, replace, starts_with, ends_with
+use strings: split, join, upper, lower, trim, replace, starts_with, ends_with
 say split("elma,armut,kiraz", ",")
 say split("şey", "")
 say join(["a", 1, true], "-")

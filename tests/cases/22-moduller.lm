@@ -6,6 +6,6 @@ use math as m
 say m.clamp(5, 0, 3)
 use game: ease
 say ease(0.5, "linear")
-use text
-say text.upper("abc"), text.lower("İĞ")
+use strings
+say strings.upper("abc"), strings.lower("İĞ")
 say math

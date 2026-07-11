@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Step 3: create the global scope; only CORE builtins are installed.
-    // Built-in libraries (math/game/text/file) are invited with 'use' in the script (RFC-006).
+    // Built-in libraries (math/game/strings/file/os) are invited with 'use' in the script (RFC-006).
     auto globalEnv = std::make_shared<Lume::Environment>();
     Lume::Builtins::installBuiltins(globalEnv);
 

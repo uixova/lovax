@@ -6,7 +6,7 @@ say l
 say merge({"a": 1}, {"a": 9, "b": 2})
 use math: snap, log
 say snap(13, 5), log(8.0, 2)
-use text: count, pad_start, pad_end
+use strings: count, pad_start, pad_end
 say count("ababab", "ab"), pad_start("7", 3, "0"), pad_end("x", 3, ".")
 use game: timer, timer_done, timer_left, timer_reset
 set t = timer(60)

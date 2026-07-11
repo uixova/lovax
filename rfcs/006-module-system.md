@@ -37,7 +37,7 @@ pop, insert, remove, clear, keys, values, has, merge, range, contains, find, sli
 sort, sort_by, sum, each, filter, transform, abs, min, max, floor, ceil, round, sqrt, pow,
 random, seed, clock, sleep, check, copy, clone.
 
-**Built-in modules (via use):** `math`, `game`, `text`, `file`, `os` — see README.
+**Built-in modules (via use):** `math`, `game`, `strings`, `file`, `os` — see README.
 
 ## Decision 4: File formats
 - JSON (save_data/load_data), CSV (quoted-field aware), plain text/lines, raw bytes
