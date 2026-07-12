@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.5.0 — first public release · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v0.6.0 — bytecode VM · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -229,7 +229,7 @@ never runs** (multiple errors reported in one pass). Exit codes: `0` ok, `64` us
 ## Project Layout
 
 ```
-src/            # the whole language: lexer, parser, AST, evaluator, stdlib (header-only)
+src/            # the whole language: lexer, parser, AST, bytecode compiler, VM, stdlib
 examples/       # runnable sample scripts
 tests/          # golden-file test runner + 52 cases (tests/tmp/ is scratch, gitignored)
 benchmarks/     # fib / mandelbrot / game-loop measurements
@@ -254,12 +254,30 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ./benchmarks/run_benchmarks.sh
 ```
 
+## Performance
+
+Lume compiles to bytecode and runs on a stack VM with immediate numeric values
+(no heap allocation for ints/floats) and closed upvalues. Best-of-3, `-O3`, same
+machine, against the retired tree-walker and CPython 3.14:
+
+| Benchmark | tree-walker | **VM (v0.6)** | CPython 3.14 |
+|-----------|------------:|--------------:|-------------:|
+| `fib(24)` (call-heavy) | 140 ms | **22 ms** | 7 ms |
+| `mandelbrot` (numeric loops) | 41 ms | **5 ms** | 6 ms |
+| `game-loop` (1k entities x 60 frames) | 34 ms | **9 ms** | 8 ms |
+| `string-concat` (10k) | 8 ms | **5 ms** | 2 ms |
+
+Numeric workloads already beat the fastest CPython ever shipped; call-heavy and
+string-heavy paths close the rest of the gap in VM phase 2 (register-based
+instructions, NaN-boxing, computed-goto dispatch).
+
 ## Architecture & Roadmap
 
-Tree-walking interpreter: `Lexer → Parser (Pratt) → AST → Evaluator`.
-The language surface is complete and frozen; next milestones:
+`Lexer -> Parser (Pratt) -> AST -> Compiler -> Bytecode -> Stack VM`.
+The language surface is complete and frozen (53 golden tests pin every behavior,
+including error messages). Next milestones:
 
-1. **Bytecode VM** — register-based, NaN-boxing, computed-goto dispatch (10-100× speedup).
+1. **VM phase 2** — register instructions, NaN-boxing, computed goto (fib/string parity and beyond).
 2. Game-friendly memory (incremental GC + frame arenas) and coroutines (`wait`/`yield`).
 3. `struct` + optional type hints; REPL, LSP, formatter.
 4. **v1.0**: engine embedding API, hot-reload, determinism guarantees.

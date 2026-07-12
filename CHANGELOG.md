@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.6.0 — bytecode VM
+
+The tree-walking interpreter is retired. Lume now compiles to bytecode and runs on
+a stack-based VM:
+
+- Immediate numeric values (ints/floats/bools/null never touch the heap).
+- Function-scoped local slots, closed upvalues for closures, own call frames.
+- Fast paths for arithmetic/comparisons and list indexing; object-typed operations
+  reuse the exact tree-era semantics, so every error message stays identical.
+- All 53 golden tests pass bit-for-bit against the previous release.
+- Speed vs the tree-walker: fib 6.4x, mandelbrot 8x, game-loop 3.8x.
+  Mandelbrot now beats CPython 3.14; the game-loop matches it. Call-heavy paths
+  (fib) close the remaining gap in VM phase 2 (register instructions, NaN-boxing).
+
 ## v0.5.0 — first public release
 
 ### Language

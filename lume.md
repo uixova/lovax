@@ -28,10 +28,10 @@ feature richness.** A fast language that hurts to write slows game development d
 
 ## 2. Where We Are
 
-Lume is currently a **tree-walking interpreter**:
+Lume compiles to **bytecode running on a stack VM** (the tree-walker is retired):
 
 ```
-.lm  →  Lexer  →  Parser (Pratt)  →  AST  →  Evaluator (walks the tree)  →  Output
+.lm  →  Lexer  →  Parser (Pratt)  →  AST  →  Compiler  →  Bytecode  →  Stack VM
 ```
 
 The language surface is rich and frozen: conditionals (`if/else if`, `match`, ternary),
@@ -73,7 +73,7 @@ This phase proves **correctness**, not speed. Speed comes from the journey in §
 NodeType-tag switch instead of dynamic_cast chains; shared true/false/null singletons;
 `-O2`/LTO builds. Gains: 2-5×, still within interpreted-language limits.
 
-### 4.2 Stage II — bytecode compiler + VM *(the real leap, next)*
+### 4.2 Stage II — bytecode compiler + VM *(phase 1 shipped: stack VM, immediate values, closed upvalues — mandelbrot beats CPython 3.14; phase 2: register + NaN-boxing)*
 
 Compile the AST into compact bytecode executed by a tight dispatch loop, like Lua,
 Python, Wren, and C# do.

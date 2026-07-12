@@ -2,17 +2,15 @@
 #include <fstream>
 #include <sstream>
 #include <memory>
+#include <cstdlib>
+#include <filesystem>
 #include "lexer/token.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
-#include "object/environment.hpp"
-#include "evaluator/evaluator.hpp"
-#include <cstdlib>
-#include <filesystem>
-#include "evaluator/builtins.hpp"
+#include "vm/vm.hpp"
 #include "utils/colors.hpp"
 
-static const char* LUME_VERSION = "0.5.0";
+static const char* LUME_VERSION = "0.6.0";
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -39,7 +37,6 @@ int main(int argc, char* argv[]) {
         if (url.find("://") == std::string::npos && url.rfind("git@", 0) != 0) {
             url = "https://github.com/" + target + ".git"; // user/repo shorthand
         }
-        // Package folder name = repository name
         std::string name = url;
         if (name.size() > 4 && name.compare(name.size() - 4, 4, ".git") == 0) {
             name = name.substr(0, name.size() - 4);
@@ -85,15 +82,12 @@ int main(int argc, char* argv[]) {
     buffer << file.rdbuf();
     std::string input = buffer.str();
 
-    // Step 1: feed the source code to the lexer for tokenization
+    // Step 1: tokenize.  Step 2: parse into an AST.
     Lume::Lexer lexer(input);
-
-    // Step 2: run the parser to build the AST (Abstract Syntax Tree)
     Lume::Parser parser(lexer);
     auto program = parser.parseProgram();
 
     // If there are syntax errors, DO NOT run: list them all and exit.
-    // (Half-running a broken AST and producing wrong output is the most dangerous behavior.)
     if (!parser.errors().empty()) {
         for (const auto& err : parser.errors()) {
             std::cerr << Lume::Color::errRed() << err.toString()
@@ -101,30 +95,25 @@ int main(int argc, char* argv[]) {
         }
         std::cerr << parser.errors().size() << " syntax error(s) found; the program was not run."
                   << std::endl;
-        return 65; // EX_DATAERR: invalid input data
+        return 65; // EX_DATAERR
     }
 
-    // Step 3: create the global scope; only CORE builtins are installed.
-    // Built-in libraries (math/game/strings/file/os) are invited with 'use' in the script (RFC-006).
-    auto globalEnv = std::make_shared<Lume::Environment>();
-    Lume::Builtins::installBuiltins(globalEnv);
-
-    // Relative module paths resolve from the entry script's directory
-    Lume::Evaluator::setBaseDir(std::filesystem::path(arg).parent_path().string());
+    // Relative module paths resolve from the entry script's directory.
+    Lume::VM::setBaseDir(std::filesystem::path(arg).parent_path().string());
 
     // Extra CLI arguments after the script path are exposed via os.args()
     for (int i = 2; i < argc; ++i) {
         Lume::StdLib::scriptArgs().push_back(argv[i]);
     }
 
-    // Step 4: run the evaluator
-    auto result = Lume::Evaluator::eval(program.get(), globalEnv);
+    // Step 3: compile to bytecode and run on the VM.
+    Lume::VM vm;
+    auto result = vm.interpret(program.get());
 
-    // Runtime error: print the message and exit with an error code
     if (Lume::isError(result)) {
         std::cerr << Lume::Color::errRed() << result->inspect()
                   << Lume::Color::errReset() << std::endl;
-        return 70; // EX_SOFTWARE: runtime error
+        return 70; // EX_SOFTWARE
     }
 
     return 0;

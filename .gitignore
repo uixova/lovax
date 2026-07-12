@@ -21,3 +21,6 @@ tests/tmp/
 
 # Claude Code local settings
 .claude/
+
+# Local research notes (not part of the repo)
+terms.txt
