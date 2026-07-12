@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.7.1 — per-iteration loop capture + try/finally
+
+- **Closures in `for` loops now capture the loop variable per iteration**
+  (`0,1,2`, like C#/Lua/GDScript/JS-`let`) instead of Python's late binding
+  (`2,2,2`). Game-critical: `for enemy in enemies: connect(enemy.died, fn() ->
+  drop_loot(enemy))` now binds each handler to *its* enemy. Outer variables
+  captured in the loop stay shared; the loop variable still leaks after the
+  loop. Rationale and survey: [RFC-011](rfcs/011-loop-capture.md).
+- Loop variables are real local slots in every scope, including the top-level
+  script frame — script-level and function-level loops behave identically, and
+  a top-level closure can now capture a top-level loop variable.
+- `try:` may be followed by `finally:` alone (no `catch`); the finally block
+  runs on the throw path before the error re-raises. Fixed a compiler crash
+  (null catch-name deref) and missing local collection inside `finally`.
+- New stress suite `examples/stress/` (roguelike, BFS pathfinding, particles,
+  economy, edge cases, heavy_loop) + `tests/bench.sh` timing harness — the
+  v0.8 performance baseline. 60 golden tests, ASan/UBSan clean.
+
 ## v0.7.0 — rich core
 
 The core stops being minimal. New language constructs, a much bigger standard

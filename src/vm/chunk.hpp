@@ -58,7 +58,8 @@ enum class Op : uint8_t {
     SAY,            // u8 value count (pops, prints)
 
     FOR_SETUP,      // iterable -> iterator object (validates type)
-    FOR_NEXT,       // u8 flags(1=global,2=pair,4=discard), u16 var1, u16 var2, u16 exit offset
+    FOR_NEXT,       // u8 flags(2=pair), u16 var1, u16 var2, u16 exit offset
+    CLOSE_UPVALUE,  // u16 slot: close open upvalues >= slot (per-iteration loop capture)
 
     USE,            // u16 use-spec index (module import, binds globals)
     RUNTIME_ERROR,  // u16 message const index ('break' outside loop etc., kept as runtime errors)
