@@ -1,0 +1,17 @@
+# enum: inline and block forms produce integer constants
+enum State: IDLE, WALK, ATTACK
+say State.IDLE
+say State.WALK
+say State.ATTACK
+
+enum Dir:
+    NORTH
+    EAST
+    SOUTH
+    WEST
+say Dir.NORTH
+say Dir.WEST
+
+set s = State.WALK
+if s == State.WALK:
+    say "walking"

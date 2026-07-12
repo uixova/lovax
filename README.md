@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.6.0 — bytecode VM · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v0.7.0 — rich core (struct · enum · try/catch/finally · REPL) · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -36,6 +36,40 @@ set reward = pick_weighted({"common": 80, "rare": 19, "legendary": 1})
 say "HP: {player.hp}, you found: {reward}"
 file.save_data("save.json", player)
 ```
+
+## New in v0.7 — a real core
+
+```lume
+struct Player:
+    hp = 100
+    name = "hero"
+    fn hurt(amount):          # 'this' is implicit
+        this.hp -= amount
+    fn status():
+        return "{this.name}: {this.hp} hp"
+
+enum State: IDLE, WALK, ATTACK
+
+set p = Player(80, "Aria")
+p.hurt(30)
+say p.status()                # Aria: 50 hp
+say State.ATTACK              # 2
+
+try:
+    set data = file.load_data("save.json")
+catch e:
+    say "no save yet: {e}"
+finally:
+    say "boot complete"
+
+set weapon = p.weapon?.name ?? "bare hands"   # null-safe + coalesce
+set double = fn(x) -> x * 2                    # arrow lambda
+```
+
+Run `lume` with no arguments for an interactive **REPL**. Full rationale for what
+earned a keyword (and what was rejected) is in
+[RFC-009](rfcs/009-rich-core.md); `struct`/`enum` in [RFC-010](rfcs/010-struct-enum.md),
+error handling in [RFC-008](rfcs/008-error-handling.md).
 
 ## Quick Start
 

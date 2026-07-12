@@ -1,0 +1,18 @@
+# compound bitwise/shift assignment + null-coalescing
+set flags = 0b0001
+flags |= 0b0100
+say flags
+flags <<= 2
+say flags
+flags >>= 1
+say flags
+flags ^= 0b1010
+say flags
+flags &= 0b1100
+say flags
+
+set v = null
+v ??= 42
+say v
+v ??= 99
+say v

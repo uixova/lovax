@@ -42,7 +42,7 @@ namespace Runtime {
             return makeError("'" + map->moduleName + "' module has no member '" + prop +
                              "' (available: " + avail + ")", line);
         }
-        return makeError("map'te olmayan anahtar: \"" + prop +
+        return makeError("key not in map: \"" + prop +
                          "\" (check with has())", line);
     }
 

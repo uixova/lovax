@@ -13,10 +13,12 @@ namespace Lume {
 enum Precedence {
     LOWEST = 1,
     TERNARY,       // a if condition else b
+    P_COALESCE,    // a ?? b (null-coalescing)
     P_OR,          // or (lowest-precedence logical operator)
     P_AND,         // and
     EQUALS,        // == and !=
-    LESSGREATER,   // < > <= >= in
+    LESSGREATER,   // < > <= >= in is
+    P_RANGE,       // a..b (end-exclusive range)
     P_BITOR,       // |
     P_BITXOR,      // ^
     P_BITAND,      // &
@@ -62,6 +64,9 @@ private:
         {TokenType::LESS_EQUAL, Precedence::LESSGREATER},
         {TokenType::GREATER_EQUAL, Precedence::LESSGREATER},
         {TokenType::IN, Precedence::LESSGREATER},
+        {TokenType::IS, Precedence::LESSGREATER},
+        {TokenType::DOTDOT, Precedence::P_RANGE},
+        {TokenType::QQ, Precedence::P_COALESCE},
         {TokenType::PIPE, Precedence::P_BITOR},
         {TokenType::CARET, Precedence::P_BITXOR},
         {TokenType::AMPERSAND, Precedence::P_BITAND},
@@ -76,7 +81,8 @@ private:
         {TokenType::PERCENT, Precedence::PRODUCT},
         {TokenType::LPAREN, Precedence::CALL},
         {TokenType::LBRACKET, Precedence::INDEX},
-        {TokenType::DOT, Precedence::INDEX}
+        {TokenType::DOT, Precedence::INDEX},
+        {TokenType::QDOT, Precedence::INDEX}
     };
 
     // RAII guard for parseExpression depth protection
@@ -170,16 +176,24 @@ private:
 
     std::unique_ptr<Statement> parseStatement() {
         switch (curToken.type) {
-            case TokenType::SET:      return parseSetStatement();
+            case TokenType::SET:      return parseSetStatement(false);
             case TokenType::SAY:      return parseSayStatement();
             case TokenType::IF:       return parseIfStatement();
             case TokenType::MATCH:    return parseMatchStatement();
-            case TokenType::WHILE:    return parseWhileStatement();
+            case TokenType::WHILE:    return parseWhileStatement(false);
             case TokenType::FOR:      return parseForStatement();
             case TokenType::BREAK:    return parseBreakStatement();
             case TokenType::CONTINUE: return parseContinueStatement();
             case TokenType::RETURN:   return parseReturnStatement();
             case TokenType::USE:      return parseUseStatement();
+            case TokenType::CONST:    return parseSetStatement(true);
+            case TokenType::TRY:      return parseTryStatement();
+            case TokenType::THROW:    return parseThrowStatement();
+            case TokenType::PASS:     return parsePassStatement();
+            case TokenType::REPEAT:   return parseRepeatStatement();
+            case TokenType::UNTIL:    return parseWhileStatement(true);
+            case TokenType::ENUM:     return parseEnumStatement();
+            case TokenType::STRUCT:   return parseStructStatement();
             case TokenType::ILLEGAL:
                 addError(curToken.literal, curToken);
                 return nullptr;
@@ -209,7 +223,10 @@ private:
         TokenType pt = peekToken.type;
         if (pt == TokenType::ASSIGN || pt == TokenType::PLUS_ASSIGN ||
             pt == TokenType::MINUS_ASSIGN || pt == TokenType::ASTERISK_ASSIGN ||
-            pt == TokenType::SLASH_ASSIGN || pt == TokenType::PERCENT_ASSIGN) {
+            pt == TokenType::SLASH_ASSIGN || pt == TokenType::PERCENT_ASSIGN ||
+            pt == TokenType::AMP_ASSIGN || pt == TokenType::PIPE_ASSIGN ||
+            pt == TokenType::CARET_ASSIGN || pt == TokenType::SHL_ASSIGN ||
+            pt == TokenType::SHR_ASSIGN || pt == TokenType::QQ_ASSIGN) {
 
             if (expr->nodeType() != NodeType::IDENTIFIER &&
                 expr->nodeType() != NodeType::INDEX_EXPRESSION &&
@@ -236,9 +253,10 @@ private:
         return stmt;
     }
 
-    std::unique_ptr<SetStatement> parseSetStatement() {
+    std::unique_ptr<SetStatement> parseSetStatement(bool isConst) {
         auto stmt = std::make_unique<SetStatement>();
         stmt->token = curToken;
+        stmt->isConst = isConst;
 
         if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
 
@@ -247,12 +265,172 @@ private:
         ident->value = curToken.literal;
         stmt->name = std::move(ident);
 
+        // Parallel targets: set a, b, c = ...
+        while (peekToken.type == TokenType::COMMA) {
+            nextParserToken(); // comma
+            if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+            auto extra = std::make_unique<Identifier>();
+            extra->token = curToken;
+            extra->value = curToken.literal;
+            stmt->extraNames.push_back(std::move(extra));
+        }
+
         if (!expectPeek(TokenType::ASSIGN)) return nullptr;
 
         nextParserToken();
         stmt->value = parseExpression(Precedence::LOWEST);
         if (stmt->value == nullptr) return nullptr;
 
+        // Parallel values: ... = 1, 2, 3
+        while (peekToken.type == TokenType::COMMA) {
+            nextParserToken(); // comma
+            nextParserToken();
+            auto extra = parseExpression(Precedence::LOWEST);
+            if (extra == nullptr) return nullptr;
+            stmt->extraValues.push_back(std::move(extra));
+        }
+
+        // Count check: n targets need n values, or a single value (list unpacking)
+        size_t targets = 1 + stmt->extraNames.size();
+        size_t values = 1 + stmt->extraValues.size();
+        if (values != 1 && values != targets) {
+            addError("parallel assignment mismatch: " + std::to_string(targets) +
+                     " target(s) but " + std::to_string(values) + " value(s)", stmt->token);
+            return nullptr;
+        }
+
+        return stmt;
+    }
+
+    // try: block catch err: block  (RFC-008)
+    std::unique_ptr<TryStatement> parseTryStatement() {
+        auto stmt = std::make_unique<TryStatement>();
+        stmt->token = curToken;
+
+        stmt->tryBlock = parseColonBlock();
+        if (stmt->tryBlock == nullptr) return nullptr;
+
+        if (!expectPeek(TokenType::CATCH)) return nullptr;
+        if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+        stmt->catchName = std::make_unique<Identifier>();
+        stmt->catchName->token = curToken;
+        stmt->catchName->value = curToken.literal;
+
+        stmt->catchBlock = parseColonBlock();
+        if (stmt->catchBlock == nullptr) return nullptr;
+
+        if (peekToken.type == TokenType::FINALLY) {
+            nextParserToken(); // 'finally'
+            stmt->finallyBlock = parseColonBlock();
+            if (stmt->finallyBlock == nullptr) return nullptr;
+        }
+        return stmt;
+    }
+
+    // enum State: IDLE, WALK, ATTACK  (members separated by commas and/or newlines)
+    std::unique_ptr<EnumStatement> parseEnumStatement() {
+        auto stmt = std::make_unique<EnumStatement>();
+        stmt->token = curToken;
+        if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+        stmt->name = curToken.literal;
+        if (!expectPeek(TokenType::COLON)) return nullptr;
+        if (peekToken.type == TokenType::NEWLINE) {
+            // Block form: one member per line (commas optional).
+            nextParserToken(); // newline
+            if (!expectPeek(TokenType::INDENT)) return nullptr;
+            nextParserToken();
+            while (curToken.type != TokenType::DEDENT && curToken.type != TokenType::END_OF_FILE) {
+                if (curToken.type == TokenType::NEWLINE || curToken.type == TokenType::COMMA) {
+                    nextParserToken();
+                    continue;
+                }
+                if (curToken.type != TokenType::IDENTIFIER) {
+                    addError("enum members must be identifiers", curToken);
+                    return nullptr;
+                }
+                stmt->members.push_back(curToken.literal);
+                nextParserToken();
+            }
+        } else {
+            // Inline form: enum State: IDLE, WALK, ATTACK
+            if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+            stmt->members.push_back(curToken.literal);
+            while (peekToken.type == TokenType::COMMA) {
+                nextParserToken(); // comma
+                if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+                stmt->members.push_back(curToken.literal);
+            }
+        }
+        if (stmt->members.empty()) {
+            addError("enum needs at least one member", stmt->token);
+            return nullptr;
+        }
+        return stmt;
+    }
+
+    // struct Player: field defaults + methods (RFC-003)
+    std::unique_ptr<StructStatement> parseStructStatement() {
+        auto stmt = std::make_unique<StructStatement>();
+        stmt->token = curToken;
+        if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+        stmt->name = curToken.literal;
+        if (!expectPeek(TokenType::COLON)) return nullptr;
+        if (peekToken.type == TokenType::NEWLINE) nextParserToken();
+        if (!expectPeek(TokenType::INDENT)) return nullptr;
+        nextParserToken();
+        while (curToken.type != TokenType::DEDENT && curToken.type != TokenType::END_OF_FILE) {
+            if (curToken.type == TokenType::NEWLINE) { nextParserToken(); continue; }
+            if (curToken.type == TokenType::FN) {
+                auto method = parseFunctionLiteral();
+                if (method == nullptr) return nullptr;
+                if (!method->name) { addError("struct methods must be named", stmt->token); return nullptr; }
+                stmt->methods.push_back(std::move(method));
+                nextParserToken();
+                continue;
+            }
+            if (curToken.type == TokenType::IDENTIFIER) {
+                stmt->fields.push_back(curToken.literal);
+                if (peekToken.type == TokenType::ASSIGN) {
+                    nextParserToken(); // '='
+                    nextParserToken();
+                    auto def = parseExpression(Precedence::LOWEST);
+                    if (def == nullptr) return nullptr;
+                    stmt->fieldDefaults.push_back(std::move(def));
+                } else {
+                    stmt->fieldDefaults.push_back(nullptr);
+                }
+                nextParserToken();
+                continue;
+            }
+            addError("struct body expects fields or 'fn' methods", curToken);
+            return nullptr;
+        }
+        return stmt;
+    }
+
+    std::unique_ptr<ThrowStatement> parseThrowStatement() {
+        auto stmt = std::make_unique<ThrowStatement>();
+        stmt->token = curToken;
+        nextParserToken();
+        stmt->value = parseExpression(Precedence::LOWEST);
+        if (stmt->value == nullptr) return nullptr;
+        return stmt;
+    }
+
+    std::unique_ptr<PassStatement> parsePassStatement() {
+        auto stmt = std::make_unique<PassStatement>();
+        stmt->token = curToken;
+        return stmt;
+    }
+
+    std::unique_ptr<RepeatStatement> parseRepeatStatement() {
+        auto stmt = std::make_unique<RepeatStatement>();
+        stmt->token = curToken;
+        nextParserToken();
+        stmt->count = parseExpression(Precedence::LOWEST);
+        if (stmt->count == nullptr) return nullptr;
+        stmt->body = parseColonBlock();
+        if (stmt->body == nullptr) return nullptr;
         return stmt;
     }
 
@@ -449,11 +627,12 @@ private:
         return stmt;
     }
 
-    std::unique_ptr<WhileStatement> parseWhileStatement() {
+    std::unique_ptr<WhileStatement> parseWhileStatement(bool untilForm) {
         auto stmt = std::make_unique<WhileStatement>();
         stmt->token = curToken;
+        stmt->untilForm = untilForm;
 
-        nextParserToken(); // skip the 'while' token
+        nextParserToken(); // skip the 'while'/'until' token
         stmt->condition = parseExpression(Precedence::LOWEST);
         if (stmt->condition == nullptr) return nullptr;
 
@@ -473,6 +652,15 @@ private:
         stmt->variable = std::make_unique<Identifier>();
         stmt->variable->token = curToken;
         stmt->variable->value = curToken.literal;
+
+        // Pair form: for i, x in ... / for k, v in ...
+        if (peekToken.type == TokenType::COMMA) {
+            nextParserToken(); // comma
+            if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+            stmt->variable2 = std::make_unique<Identifier>();
+            stmt->variable2->token = curToken;
+            stmt->variable2->value = curToken.literal;
+        }
 
         if (!expectPeek(TokenType::IN)) return nullptr;
 
@@ -546,6 +734,18 @@ private:
                 param->value = curToken.literal;
                 lit->parameters.push_back(std::move(param));
 
+                // Variadic rest parameter: fn f(a, more...) — must be last, no default
+                if (peekToken.type == TokenType::ELLIPSIS) {
+                    nextParserToken(); // '...'
+                    lit->variadic = true;
+                    lit->defaults.push_back(nullptr);
+                    if (peekToken.type == TokenType::COMMA) {
+                        addError("the rest parameter (name...) must be the last parameter", peekToken);
+                        return nullptr;
+                    }
+                    break;
+                }
+
                 if (peekToken.type == TokenType::ASSIGN) {
                     nextParserToken(); // '='
                     nextParserToken(); // advance to the default expression
@@ -571,6 +771,21 @@ private:
         }
 
         if (!expectPeek(TokenType::RPAREN)) return nullptr;
+
+        // Arrow form: fn(x) -> expr  ==  fn(x): return expr
+        if (peekToken.type == TokenType::ARROW) {
+            nextParserToken(); // '->'
+            nextParserToken(); // start of the expression
+            auto body = std::make_unique<BlockStatement>();
+            body->token = curToken;
+            auto ret = std::make_unique<ReturnStatement>();
+            ret->token = lit->token;
+            ret->returnValue = parseExpression(Precedence::LOWEST);
+            if (ret->returnValue == nullptr) return nullptr;
+            body->statements.push_back(std::move(ret));
+            lit->body = std::move(body);
+            return lit;
+        }
 
         lit->body = parseColonBlock();
         if (lit->body == nullptr) return nullptr;
@@ -603,7 +818,11 @@ private:
                     break;
                 case TokenType::DOT:
                     nextParserToken();
-                    leftExp = parseMemberExpression(std::move(leftExp));
+                    leftExp = parseMemberExpression(std::move(leftExp), false);
+                    break;
+                case TokenType::QDOT:
+                    nextParserToken();
+                    leftExp = parseMemberExpression(std::move(leftExp), true);
                     break;
                 case TokenType::PLUS: case TokenType::MINUS:
                 case TokenType::ASTERISK: case TokenType::SLASH: case TokenType::PERCENT:
@@ -612,6 +831,7 @@ private:
                 case TokenType::LESS_THAN: case TokenType::GREATER_THAN:
                 case TokenType::LESS_EQUAL: case TokenType::GREATER_EQUAL:
                 case TokenType::AND: case TokenType::OR: case TokenType::IN:
+                case TokenType::IS: case TokenType::DOTDOT: case TokenType::QQ:
                 case TokenType::AMPERSAND: case TokenType::PIPE: case TokenType::CARET:
                 case TokenType::SHIFT_LEFT: case TokenType::SHIFT_RIGHT:
                     nextParserToken();
@@ -648,6 +868,12 @@ private:
                 auto lit = std::make_unique<NullLiteral>();
                 lit->token = curToken;
                 return lit;
+            }
+            case TokenType::THIS: {
+                auto ident = std::make_unique<Identifier>();
+                ident->token = curToken;
+                ident->value = "this";
+                return ident;
             }
             case TokenType::FN:         return parseFunctionLiteral();
             case TokenType::MINUS:
@@ -914,10 +1140,11 @@ private:
     }
 
     // Member access: object.name (RFC-006)
-    std::unique_ptr<Expression> parseMemberExpression(std::unique_ptr<Expression> object) {
+    std::unique_ptr<Expression> parseMemberExpression(std::unique_ptr<Expression> object, bool safe) {
         auto expr = std::make_unique<MemberExpression>();
-        expr->token = curToken; // '.' token
+        expr->token = curToken; // '.' or '?.' token
         expr->object = std::move(object);
+        expr->safe = safe;
 
         if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
         expr->property = curToken.literal;
@@ -929,9 +1156,25 @@ private:
         expr->token = curToken; // '[' token
         expr->object = std::move(object);
 
-        nextParserToken(); // advance to the index expression
-        expr->index = parseExpression(Precedence::LOWEST);
-        if (expr->index == nullptr) return nullptr;
+        // Slice starting at 0: a[:end]
+        if (peekToken.type == TokenType::COLON) {
+            expr->isSlice = true;
+            nextParserToken(); // ':'
+        } else {
+            nextParserToken(); // advance to the index expression
+            expr->index = parseExpression(Precedence::LOWEST);
+            if (expr->index == nullptr) return nullptr;
+            if (peekToken.type == TokenType::COLON) {
+                expr->isSlice = true;
+                nextParserToken(); // ':'
+            }
+        }
+
+        if (expr->isSlice && peekToken.type != TokenType::RBRACKET) {
+            nextParserToken();
+            expr->indexEnd = parseExpression(Precedence::LOWEST);
+            if (expr->indexEnd == nullptr) return nullptr;
+        }
 
         if (!expectPeek(TokenType::RBRACKET)) return nullptr;
         return expr;

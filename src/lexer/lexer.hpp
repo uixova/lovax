@@ -36,6 +36,19 @@ private:
         {"match", TokenType::MATCH},
         {"use", TokenType::USE},
         {"as", TokenType::AS},
+        {"try", TokenType::TRY},
+        {"catch", TokenType::CATCH},
+        {"throw", TokenType::THROW},
+        {"const", TokenType::CONST},
+        {"pass", TokenType::PASS},
+        {"repeat", TokenType::REPEAT},
+        {"until", TokenType::UNTIL},
+        {"is", TokenType::IS},
+        {"struct", TokenType::STRUCT},
+        {"enum", TokenType::ENUM},
+        {"this", TokenType::THIS},
+        {"new", TokenType::NEW},
+        {"finally", TokenType::FINALLY},
         {"while", TokenType::WHILE},
         {"for", TokenType::FOR},
         {"in", TokenType::IN},
@@ -108,6 +121,11 @@ public:
             // Skip blank lines, lone newlines, and comment lines
             // (so indentation is preserved; lines starting with '#' are ignored entirely)
             if (ch == '\n' || ch == '\r' || ch == '#') {
+                if (ch == '#' && peekChar() == '#' && peekChar2() == '#') {
+                    skipBlockComment();
+                    isAtLineStart = true;
+                    return nextToken();
+                }
                 // If it is a comment line, advance to end of line
                 while (ch != '\n' && ch != '\r' && ch != 0) {
                     readChar();
@@ -160,8 +178,13 @@ public:
         // Skip ordinary whitespace
         skipWhitespace();
 
-        // Inline comment: on '#', skip to end of line without disturbing NEWLINE emission
+        // Inline comment: on '#', skip to end of line without disturbing NEWLINE emission.
+        // '###' opens a block comment that runs until the next '###'.
         if (ch == '#') {
+            if (peekChar() == '#' && peekChar2() == '#') {
+                skipBlockComment();
+                return nextToken();
+            }
             while (ch != '\n' && ch != 0) {
                 readChar();
             }
@@ -183,8 +206,9 @@ public:
                 else                   { tok = makeToken(TokenType::PLUS, "+"); }
                 break;
             case '-':
-                if (peekChar() == '=') { tok = twoCharToken(TokenType::MINUS_ASSIGN); }
-                else                   { tok = makeToken(TokenType::MINUS, "-"); }
+                if (peekChar() == '>')      { tok = twoCharToken(TokenType::ARROW); }
+                else if (peekChar() == '=') { tok = twoCharToken(TokenType::MINUS_ASSIGN); }
+                else                        { tok = makeToken(TokenType::MINUS, "-"); }
                 break;
             case '*':
                 if (peekChar() == '*')      { tok = twoCharToken(TokenType::POWER); }
@@ -200,27 +224,49 @@ public:
                 else                   { tok = makeToken(TokenType::PERCENT, "%"); }
                 break;
             case '&':
-                if (peekChar() == '&') { tok = makeToken(TokenType::ILLEGAL, "there is no '&&'; use 'and' for logical and"); readChar(); }
-                else                   { tok = makeToken(TokenType::AMPERSAND, "&"); }
+                if (peekChar() == '=')      { tok = twoCharToken(TokenType::AMP_ASSIGN); }
+                else if (peekChar() == '&') { tok = makeToken(TokenType::ILLEGAL, "there is no '&&'; use 'and' for logical and"); readChar(); }
+                else                        { tok = makeToken(TokenType::AMPERSAND, "&"); }
                 break;
             case '|':
-                if (peekChar() == '|') { tok = makeToken(TokenType::ILLEGAL, "there is no '||'; use 'or' for logical or"); readChar(); }
-                else                   { tok = makeToken(TokenType::PIPE, "|"); }
+                if (peekChar() == '=')      { tok = twoCharToken(TokenType::PIPE_ASSIGN); }
+                else if (peekChar() == '|') { tok = makeToken(TokenType::ILLEGAL, "there is no '||'; use 'or' for logical or"); readChar(); }
+                else                        { tok = makeToken(TokenType::PIPE, "|"); }
                 break;
-            case '^': tok = makeToken(TokenType::CARET, "^"); break;
+            case '^':
+                if (peekChar() == '=') { tok = twoCharToken(TokenType::CARET_ASSIGN); }
+                else                   { tok = makeToken(TokenType::CARET, "^"); }
+                break;
             case '~': tok = makeToken(TokenType::TILDE, "~"); break;
             case '<':
-                if (peekChar() == '<')      { tok = twoCharToken(TokenType::SHIFT_LEFT); }
-                else if (peekChar() == '=') { tok = twoCharToken(TokenType::LESS_EQUAL); }
-                else                        { tok = makeToken(TokenType::LESS_THAN, "<"); }
+                if (peekChar() == '<' && peekChar2() == '=') { tok = threeCharToken(TokenType::SHL_ASSIGN); }
+                else if (peekChar() == '<')                  { tok = twoCharToken(TokenType::SHIFT_LEFT); }
+                else if (peekChar() == '=')                  { tok = twoCharToken(TokenType::LESS_EQUAL); }
+                else                                         { tok = makeToken(TokenType::LESS_THAN, "<"); }
                 break;
             case '>':
-                if (peekChar() == '>')      { tok = twoCharToken(TokenType::SHIFT_RIGHT); }
-                else if (peekChar() == '=') { tok = twoCharToken(TokenType::GREATER_EQUAL); }
-                else                        { tok = makeToken(TokenType::GREATER_THAN, ">"); }
+                if (peekChar() == '>' && peekChar2() == '=') { tok = threeCharToken(TokenType::SHR_ASSIGN); }
+                else if (peekChar() == '>')                  { tok = twoCharToken(TokenType::SHIFT_RIGHT); }
+                else if (peekChar() == '=')                  { tok = twoCharToken(TokenType::GREATER_EQUAL); }
+                else                                         { tok = makeToken(TokenType::GREATER_THAN, ">"); }
                 break;
             case ':': tok = makeToken(TokenType::COLON, ":"); break;
-            case '.': tok = makeToken(TokenType::DOT, "."); break;
+            case '.':
+                if (peekChar() == '.' && peekChar2() == '.') {
+                    tok = makeToken(TokenType::ELLIPSIS, "...");
+                    readChar(); readChar();
+                } else if (peekChar() == '.') {
+                    tok = twoCharToken(TokenType::DOTDOT);
+                } else {
+                    tok = makeToken(TokenType::DOT, ".");
+                }
+                break;
+            case '?':
+                if (peekChar() == '?' && peekChar2() == '=') { tok = threeCharToken(TokenType::QQ_ASSIGN); }
+                else if (peekChar() == '?')                  { tok = twoCharToken(TokenType::QQ); }
+                else if (peekChar() == '.')                  { tok = twoCharToken(TokenType::QDOT); }
+                else { tok = makeToken(TokenType::ILLEGAL, "unexpected character '?' (did you mean '?\?' or '?.')"); }
+                break;
             case ',': tok = makeToken(TokenType::COMMA, ","); break;
             case '(': bracketDepth++; tok = makeToken(TokenType::LPAREN, "("); break;
             case ')': if (bracketDepth > 0) bracketDepth--; tok = makeToken(TokenType::RPAREN, ")"); break;
@@ -283,6 +329,18 @@ private:
         return t;
     }
 
+    // For three-character operators (<<=, >>=, ??=)
+    Token threeCharToken(TokenType type) {
+        char c1 = ch; int startCol = column;
+        readChar(); char c2 = ch;
+        readChar();
+        Token t;
+        t.type = type;
+        t.literal = std::string(1, c1) + c2 + ch;
+        t.line = line; t.column = startCol;
+        return t;
+    }
+
     // For two-character operators: joins the current and next characters
     Token twoCharToken(TokenType type) {
         char first = ch;
@@ -294,6 +352,18 @@ private:
         t.line = line;
         t.column = startCol;
         return t;
+    }
+
+    // Block comment: ### ... ### (may span lines; unterminated simply runs to EOF)
+    void skipBlockComment() {
+        readChar(); readChar(); readChar(); // consume opening ###
+        while (ch != 0) {
+            if (ch == '#' && peekChar() == '#' && peekChar2() == '#') {
+                readChar(); readChar(); readChar(); // consume closing ###
+                return;
+            }
+            readChar();
+        }
     }
 
     void skipWhitespace() {

@@ -59,6 +59,15 @@ public:
         return isError(result) ? result : NULL_OBJ_;
     }
 
+    // REPL: wipe the value stack / frames so a fresh top-level program runs cleanly
+    // while globals (names, values, defined-flags) persist across entered lines.
+    void resetReplState() {
+        sp_ = stackMem_.get();
+        frames_.clear();
+        handlers_.clear();
+        openUpvalues_.clear();
+    }
+
     // Native -> Lume call bridge (builtins calling closures: filter/emit/sort_by).
     std::shared_ptr<Object> callFromNative(const std::shared_ptr<Object>& fn,
                                            const std::vector<std::shared_ptr<Object>>& args,
@@ -235,6 +244,14 @@ private:
     std::vector<Frame> frames_;
     std::vector<std::shared_ptr<UpvalueCell>> openUpvalues_; // sorted by slot
 
+    // Active try handlers (RFC-008): where to jump when a value is thrown.
+    struct Handler {
+        size_t frameDepth;   // frames_.size() at the try
+        size_t stackTop;     // sp_ offset at the try
+        const uint8_t* catchIp;
+    };
+    std::vector<Handler> handlers_;
+
     static std::unordered_map<std::string, std::shared_ptr<MapObject>>& moduleCache() {
         static std::unordered_map<std::string, std::shared_ptr<MapObject>> c;
         return c;
@@ -315,7 +332,21 @@ private:
             auto* closure = static_cast<ClosureObject*>(callee.obj.get());
             const auto& proto = *closure->proto;
 
-            if (argc < proto.requiredCount || argc > proto.paramCount) {
+            if (proto.variadic) {
+                // Last parameter collects the extra args into a list.
+                int fixed = proto.paramCount - 1;
+                if (argc < fixed) {
+                    std::string fname = proto.name.empty() ? "function" : "'" + proto.name + "'";
+                    return makeError(fname + " expects at least " + std::to_string(fixed) +
+                                     " parameter(s), got " + std::to_string(argc), line);
+                }
+                int extra = argc - fixed;
+                auto rest = std::make_shared<ListObject>();
+                for (int i = extra - 1; i >= 0; --i) rest->elements.push_back(toObject(peek(i)));
+                sp_ -= extra;
+                push(Value::object(rest));
+                argc = proto.paramCount;
+            } else if (argc < proto.requiredCount || argc > proto.paramCount) {
                 std::string fname = proto.name.empty() ? "function" : "'" + proto.name + "'";
                 std::string expected = (proto.requiredCount == proto.paramCount)
                     ? std::to_string(proto.paramCount)
@@ -392,6 +423,29 @@ private:
             return err;
         };
 
+        // Error dispatch (RFC-008): if a try handler is active within this run's
+        // frame window, unwind to it, bind the error message, and resume in catch.
+        auto tryHandle = [&](const std::shared_ptr<Object>& err) -> bool {
+            if (handlers_.empty() || handlers_.back().frameDepth < exitFrameDepth) return false;
+            Handler h = handlers_.back();
+            handlers_.pop_back();
+            while (frames_.size() > h.frameDepth) {
+                if (!openUpvalues_.empty()) closeUpvalues((int)frames_.back().base);
+                frames_.pop_back();
+            }
+            sp_ = stackMem_.get() + h.stackTop;
+            std::string msg = isError(err) ? static_cast<ErrorObject*>(err.get())->message
+                                           : valueInspect(fromObject(err));
+            push(Value::object(std::make_shared<StringObject>(msg)));
+            frame = &frames_.back();
+            ip = h.catchIp;
+            consts = frame->closure->proto->chunk.consts.data();
+            slots = stackAt(frame->base + 1);
+            return true;
+        };
+        // Raises err: jump to the nearest handler, or unwind and return it.
+        #define VM_THROW(E) { std::shared_ptr<Object> _e = (E); if (tryHandle(_e)) continue; frames_.resize(exitFrameDepth); return _e; }
+
         for (;;) {
             Op op = (Op)readByte();
             switch (op) {
@@ -409,7 +463,7 @@ private:
                     uint16_t slot = readU16();
                     if (!globalDefined_[slot]) {
                         const std::string& name = globalsTable_.names[slot];
-                        return runtimeError(makeError(
+                        VM_THROW(makeError(
                             "undefined variable '" + name +
                             "' (define it with: set " + name + " = ...)", currentLine()));
                     }
@@ -426,7 +480,7 @@ private:
                     uint16_t slot = readU16();
                     if (!globalDefined_[slot]) {
                         const std::string& name = globalsTable_.names[slot];
-                        return runtimeError(makeError(
+                        VM_THROW(makeError(
                             "undefined variable '" + name +
                             "' (define it with: set " + name + " = ...)", currentLine()));
                     }
@@ -467,7 +521,7 @@ private:
                     } else {                                                                \
                         auto res = Runtime::evalInfixExpression(opChar, toObject(a),        \
                                                                 toObject(b), currentLine());\
-                        if (isError(res)) return runtimeError(res);                         \
+                        if (isError(res)) VM_THROW(res);                         \
                         push(fromObject(res));                                              \
                     }
 
@@ -477,17 +531,17 @@ private:
                 case Op::DIV: {
                     Value b = pop(), a = pop();
                     if (a.kind == VKind::INT && b.kind == VKind::INT) {
-                        if (b.i == 0) return runtimeError(makeError("division by zero", currentLine()));
+                        if (b.i == 0) VM_THROW(makeError("division by zero", currentLine()));
                         long long q = a.i / b.i;
                         if ((a.i % b.i != 0) && ((a.i < 0) != (b.i < 0))) q--;
                         push(Value::integer(q));
                     } else if (a.isNumber() && b.isNumber()) {
                         double r = b.asDouble();
-                        if (r == 0.0) return runtimeError(makeError("division by zero", currentLine()));
+                        if (r == 0.0) VM_THROW(makeError("division by zero", currentLine()));
                         push(Value::real(a.asDouble() / r));
                     } else {
                         auto res = Runtime::evalInfixExpression("/", toObject(a), toObject(b), currentLine());
-                        if (isError(res)) return runtimeError(res);
+                        if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
                     break;
@@ -495,19 +549,19 @@ private:
                 case Op::MOD: {
                     Value b = pop(), a = pop();
                     if (a.kind == VKind::INT && b.kind == VKind::INT) {
-                        if (b.i == 0) return runtimeError(makeError("modulo by zero", currentLine()));
+                        if (b.i == 0) VM_THROW(makeError("modulo by zero", currentLine()));
                         long long m = a.i % b.i;
                         if (m != 0 && ((m < 0) != (b.i < 0))) m += b.i;
                         push(Value::integer(m));
                     } else if (a.isNumber() && b.isNumber()) {
                         double r = b.asDouble();
-                        if (r == 0.0) return runtimeError(makeError("modulo by zero", currentLine()));
+                        if (r == 0.0) VM_THROW(makeError("modulo by zero", currentLine()));
                         double m = std::fmod(a.asDouble(), r);
                         if (m != 0.0 && ((m < 0.0) != (r < 0.0))) m += r;
                         push(Value::real(m));
                     } else {
                         auto res = Runtime::evalInfixExpression("%", toObject(a), toObject(b), currentLine());
-                        if (isError(res)) return runtimeError(res);
+                        if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
                     break;
@@ -524,7 +578,7 @@ private:
                         }
                     } else {
                         auto res = Runtime::evalInfixExpression("**", toObject(a), toObject(b), currentLine());
-                        if (isError(res)) return runtimeError(res);
+                        if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
                     break;
@@ -542,7 +596,7 @@ private:
                     } else {                                                                \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),         \
                                                                 toObject(b), currentLine());\
-                        if (isError(res)) return runtimeError(res);                         \
+                        if (isError(res)) VM_THROW(res);                         \
                         push(fromObject(res));                                              \
                     }
 
@@ -554,14 +608,14 @@ private:
                     const char* opStr = (op == Op::SHL) ? "<<" : ">>";
                     if (a.kind == VKind::INT && b.kind == VKind::INT) {
                         if (b.i < 0 || b.i > 63) {
-                            return runtimeError(makeError(
+                            VM_THROW(makeError(
                                 "shift amount must be within 0-63: " + std::to_string(b.i),
                                 currentLine()));
                         }
                         push(Value::integer(op == Op::SHL ? (a.i << b.i) : (a.i >> b.i)));
                     } else {
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a), toObject(b), currentLine());
-                        if (isError(res)) return runtimeError(res);
+                        if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
                     break;
@@ -569,7 +623,7 @@ private:
                 case Op::IN: {
                     Value b = pop(), a = pop();
                     auto res = Runtime::evalInfixExpression("in", toObject(a), toObject(b), currentLine());
-                    if (isError(res)) return runtimeError(res);
+                    if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
                     break;
                 }
@@ -579,7 +633,7 @@ private:
                     if (a.kind == VKind::INT)        push(Value::integer(-a.i));
                     else if (a.kind == VKind::FLOAT) push(Value::real(-a.d));
                     else {
-                        return runtimeError(makeError(
+                        VM_THROW(makeError(
                             "unary '-' only works on numbers, got " + valueTypeName(a),
                             currentLine()));
                     }
@@ -594,7 +648,7 @@ private:
                     Value a = pop();
                     if (a.kind == VKind::INT) push(Value::integer(~a.i));
                     else {
-                        return runtimeError(makeError(
+                        VM_THROW(makeError(
                             "'~' only works on integers, got " + valueTypeName(a),
                             currentLine()));
                     }
@@ -626,7 +680,34 @@ private:
                     int line = currentLine();
                     syncOut();
                     auto err = callValue(argc, line);
-                    if (err != nullptr && isError(err)) return runtimeError(err);
+                    if (err != nullptr && isError(err)) VM_THROW(err);
+                    syncIn();
+                    break;
+                }
+                case Op::CALL_METHOD: {
+                    int argc = readByte();
+                    int line = currentLine();
+                    // Stack: [recv, method, a1..aN]. Pass recv as 'this' only when it
+                    // is a struct instance (a map tagged with __type__); otherwise call
+                    // plainly (module/plain-map field call keeps its original arity).
+                    static const std::shared_ptr<StringObject> typeKey =
+                        std::make_shared<StringObject>("__type__");
+                    Value recv = peek(argc + 1);
+                    bool isStruct = recv.isObjType(ObjectType::MAP) &&
+                        static_cast<MapObject*>(recv.obj.get())->get(typeKey) != nullptr;
+                    syncOut();
+                    std::shared_ptr<Object> err;
+                    if (isStruct) {
+                        Value* basep = sp_ - argc - 2;   // [0]=recv, [1]=method
+                        std::swap(basep[0], basep[1]);   // -> [method, recv, args..]
+                        err = callValue(argc + 1, line);
+                    } else {
+                        Value* basep = sp_ - argc - 2;
+                        for (int i = 0; i <= argc; ++i) basep[i] = basep[i + 1]; // drop recv
+                        --sp_;
+                        err = callValue(argc, line);
+                    }
+                    if (err != nullptr && isError(err)) VM_THROW(err);
                     syncIn();
                     break;
                 }
@@ -682,7 +763,7 @@ private:
                         auto key = toObject(peek((n - i) * 2 - 1));
                         auto val = toObject(peek((n - i) * 2 - 2));
                         if (!Runtime::isValidMapKey(key)) {
-                            return runtimeError(makeError(
+                            VM_THROW(makeError(
                                 "map keys must be string, int or bool; got " +
                                 typeName(key->type()), line));
                         }
@@ -706,7 +787,7 @@ private:
                         }
                     }
                     auto res = Runtime::evalIndexAccess(toObject(obj), toObject(idx), currentLine());
-                    if (isError(res)) return runtimeError(res);
+                    if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
                     break;
                 }
@@ -725,7 +806,7 @@ private:
                     }
                     auto res = Runtime::evalIndexAccess(toObject(peek(1)), toObject(peek(0)),
                                                         currentLine());
-                    if (isError(res)) return runtimeError(res);
+                    if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
                     break;
                 }
@@ -742,7 +823,7 @@ private:
                         }
                     }
                     auto err = indexSet(toObject(obj), toObject(idx), toObject(val), currentLine());
-                    if (err != nullptr) return runtimeError(err);
+                    if (err != nullptr) VM_THROW(err);
                     break;
                 }
                 case Op::MEMBER_GET: {
@@ -751,7 +832,18 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
                     auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
-                    if (isError(res)) return runtimeError(res);
+                    if (isError(res)) VM_THROW(res);
+                    push(fromObject(res));
+                    break;
+                }
+                case Op::MEMBER_GET_SAFE: {
+                    uint16_t nameC = readU16();
+                    Value obj = pop();
+                    if (obj.isNil()) { push(Value::nil()); break; } // a?.b -> null
+                    const std::string& prop =
+                        static_cast<StringObject*>(constant(nameC).obj.get())->value;
+                    auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
+                    if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
                     break;
                 }
@@ -760,7 +852,7 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
                     auto res = Runtime::evalMemberAccess(toObject(peek(0)), prop, currentLine());
-                    if (isError(res)) return runtimeError(res);
+                    if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
                     break;
                 }
@@ -770,7 +862,7 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
                     auto err = memberSet(toObject(obj), prop, toObject(val), currentLine());
-                    if (err != nullptr) return runtimeError(err);
+                    if (err != nullptr) VM_THROW(err);
                     break;
                 }
 
@@ -833,13 +925,14 @@ private:
                             break;
                         case ObjectType::MAP: {
                             iter->kind = IterObject::Kind::MAP_KEYS;
+                            iter->source = obj; // for the pair form's value lookup
                             for (const auto& e : static_cast<MapObject*>(obj.get())->entries) {
                                 iter->snapshot.push_back(e.first);
                             }
                             break;
                         }
                         default:
-                            return runtimeError(makeError(
+                            VM_THROW(makeError(
                                 "for loops iterate over list, range, string or map; got " +
                                 typeName(obj->type()), currentLine()));
                     }
@@ -847,57 +940,73 @@ private:
                     break;
                 }
                 case Op::FOR_NEXT: {
-                    uint8_t isGlobal = readByte();
-                    uint16_t varOperand = readU16();
+                    uint8_t flags = readByte();
+                    uint16_t v1 = readU16();
+                    uint16_t v2 = readU16();
                     uint16_t exitJump = readU16();
+                    bool isGlobal = flags & 1;
+                    bool pair = flags & 2;
                     auto iter = std::static_pointer_cast<IterObject>(peek().obj);
 
-                    Value next;
+                    Value first, second;
                     bool done = false;
+                    long long curIndex = iter->index;
                     switch (iter->kind) {
                         case IterObject::Kind::LIST: {
                             auto* list = static_cast<ListObject*>(iter->source.get());
                             if (iter->index >= (long long)list->elements.size()) done = true;
-                            else next = fromObject(list->elements[iter->index++]);
+                            else { second = fromObject(list->elements[iter->index]);
+                                   first = Value::integer(iter->index); iter->index++; }
                             break;
                         }
                         case IterObject::Kind::RANGE: {
                             auto* r = static_cast<RangeObject*>(iter->source.get());
-                            if (r->step > 0 ? iter->index >= r->end : iter->index <= r->end) {
-                                done = true;
-                            } else {
-                                next = Value::integer(iter->index);
-                                iter->index += r->step;
-                            }
+                            if (r->step > 0 ? iter->index >= r->end : iter->index <= r->end) done = true;
+                            else { second = Value::integer(iter->index);
+                                   first = Value::integer(curIndex); iter->index += r->step; }
                             break;
                         }
                         case IterObject::Kind::STRING: {
-                            const std::string& s =
-                                static_cast<StringObject*>(iter->source.get())->value;
-                            if (iter->bytePos >= s.size()) done = true;
+                            const std::string& sv = static_cast<StringObject*>(iter->source.get())->value;
+                            if (iter->bytePos >= sv.size()) done = true;
                             else {
-                                int len = utf8CharLen((unsigned char)s[iter->bytePos]);
-                                next = Value::object(std::make_shared<StringObject>(
-                                    s.substr(iter->bytePos, len)));
-                                iter->bytePos += len;
+                                int len = utf8CharLen((unsigned char)sv[iter->bytePos]);
+                                second = Value::object(std::make_shared<StringObject>(sv.substr(iter->bytePos, len)));
+                                first = Value::integer(iter->index);
+                                iter->bytePos += len; iter->index++;
                             }
                             break;
                         }
                         case IterObject::Kind::MAP_KEYS: {
                             if (iter->index >= (long long)iter->snapshot.size()) done = true;
-                            else next = fromObject(iter->snapshot[iter->index++]);
+                            else {
+                                auto key = iter->snapshot[iter->index];
+                                first = fromObject(key);
+                                if (pair) {
+                                    // pair over a map yields key, value
+                                    auto* mp = static_cast<MapObject*>(iter->source.get());
+                                    auto val = mp ? mp->get(key) : nullptr;
+                                    second = val ? fromObject(val) : Value::nil();
+                                }
+                                iter->index++;
+                            }
                             break;
                         }
                     }
 
                     if (done) {
                         ip += exitJump;
-                    } else if (isGlobal) {
-                        globals_[varOperand] = next;
-                        globalDefined_[varOperand] = 1;
-                    } else {
-                        slots[varOperand] = next;
+                        break;
                     }
+                    // Single form: the variable receives the element (map -> key).
+                    Value primary = pair ? first
+                        : (iter->kind == IterObject::Kind::MAP_KEYS ? first : second);
+                    auto store = [&](uint16_t slot, const Value& val) {
+                        if (isGlobal) { globals_[slot] = val; globalDefined_[slot] = 1; }
+                        else slots[slot] = val;
+                    };
+                    store(v1, primary);
+                    if (pair) store(v2, second);
                     break;
                 }
 
@@ -908,14 +1017,14 @@ private:
                     int line = currentLine();
 
                     auto module = loadModule(spec, line);
-                    if (isError(module)) return runtimeError(module);
+                    if (isError(module)) VM_THROW(module);
                     auto* map = static_cast<MapObject*>(module.get());
 
                     if (!spec.names.empty()) {
                         for (size_t i = 0; i < spec.names.size(); ++i) {
                             auto val = map->get(std::make_shared<StringObject>(spec.names[i]));
                             if (val == nullptr) {
-                                return runtimeError(makeError(
+                                VM_THROW(makeError(
                                     "'" + map->moduleName + "' module has no member '" +
                                     spec.names[i] + "'", line));
                             }
@@ -924,7 +1033,7 @@ private:
                         }
                     } else {
                         if (spec.bindName.empty()) {
-                            return runtimeError(makeError(
+                            VM_THROW(makeError(
                                 "could not derive a module name; give one with 'as': "
                                 "use \"...\" as name", line));
                         }
@@ -934,11 +1043,71 @@ private:
                     break;
                 }
 
+                case Op::TRY_PUSH: {
+                    uint16_t off = readU16();
+                    handlers_.push_back({frames_.size(), stackSize(), ip + off});
+                    break;
+                }
+                case Op::TRY_POP:
+                    if (!handlers_.empty()) handlers_.pop_back();
+                    break;
+                case Op::THROW_: {
+                    Value v = pop();
+                    std::string msg = valueInspect(v);
+                    VM_THROW(makeError(msg, currentLine()));
+                }
+                case Op::COALESCE: {
+                    uint16_t off = readU16();
+                    if (!peek().isNil()) ip += off;
+                    else pop();
+                    break;
+                }
+                case Op::RANGE_NEW: {
+                    Value b = pop(), a = pop();
+                    if (a.kind != VKind::INT || b.kind != VKind::INT) {
+                        VM_THROW(makeError("range operator '..' expects two integers", currentLine()));
+                    }
+                    push(Value::object(std::make_shared<RangeObject>(a.i, b.i, 1)));
+                    break;
+                }
+                case Op::IS_TYPE: {
+                    Value name = pop(), val = pop();
+                    if (!name.isObjType(ObjectType::STRING)) {
+                        VM_THROW(makeError("'is' expects a type name string on the right "
+                                           "(e.g. x is \"int\")", currentLine()));
+                    }
+                    const std::string& want = static_cast<StringObject*>(name.obj.get())->value;
+                    push(Value::boolean(valueTypeName(val) == want));
+                    break;
+                }
+                case Op::UNPACK: {
+                    uint16_t n = readU16();
+                    Value v = pop();
+                    if (!v.isObjType(ObjectType::LIST)) {
+                        VM_THROW(makeError("unpacking assignment expects a list, got " +
+                                           valueTypeName(v), currentLine()));
+                    }
+                    auto* list = static_cast<ListObject*>(v.obj.get());
+                    if (list->elements.size() != n) {
+                        VM_THROW(makeError("unpacking mismatch: " + std::to_string(n) +
+                                           " target(s) but list has " +
+                                           std::to_string(list->elements.size()), currentLine()));
+                    }
+                    for (uint16_t i = 0; i < n; ++i) push(fromObject(list->elements[i]));
+                    break;
+                }
+                case Op::SLICE: {
+                    Value endV = pop(), startV = pop(), obj = pop();
+                    auto res = sliceOp(toObject(obj), startV, endV, currentLine());
+                    if (isError(res)) VM_THROW(res);
+                    push(fromObject(res));
+                    break;
+                }
                 case Op::RUNTIME_ERROR: {
                     uint16_t msgC = readU16();
                     const std::string& msg =
                         static_cast<StringObject*>(constant(msgC).obj.get())->value;
-                    return runtimeError(makeError(msg, currentLine()));
+                    VM_THROW(makeError(msg, currentLine()));
                 }
 
                 case Op::HALT:
@@ -947,6 +1116,7 @@ private:
                     return NULL_OBJ_;
             }
         }
+        #undef VM_THROW
     }
 
     // ===== Assignment targets (same messages as the tree-walker) =====
@@ -983,6 +1153,42 @@ private:
         }
         return makeError("indexed assignment only works on list and map, got " +
                          typeName(obj->type()), line);
+    }
+
+    // list[a:b] / string[a:b] with Python rules (negative indices, clamped, end-exclusive)
+    std::shared_ptr<Object> sliceOp(const std::shared_ptr<Object>& obj,
+                                    const Value& startV, const Value& endV, int line) {
+        if (startV.kind != VKind::NIL && startV.kind != VKind::INT)
+            return makeError("slice bounds must be integers", line);
+        if (endV.kind != VKind::NIL && endV.kind != VKind::INT)
+            return makeError("slice bounds must be integers", line);
+
+        auto norm = [](long long idx, long long n) {
+            if (idx < 0) idx += n;
+            if (idx < 0) idx = 0;
+            if (idx > n) idx = n;
+            return idx;
+        };
+
+        if (obj->type() == ObjectType::LIST) {
+            auto* list = static_cast<ListObject*>(obj.get());
+            long long n = (long long)list->elements.size();
+            long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
+            long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
+            auto out = std::make_shared<ListObject>();
+            for (long long i = a; i < b; ++i) out->elements.push_back(list->elements[i]);
+            return out;
+        }
+        if (obj->type() == ObjectType::STRING) {
+            const std::string& s = static_cast<StringObject*>(obj.get())->value;
+            auto offs = utf8Offsets(s);
+            long long n = (long long)offs.size() - 1;
+            long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
+            long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
+            if (a >= b) return std::make_shared<StringObject>("");
+            return std::make_shared<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
+        }
+        return makeError("slicing only works on list and string, got " + typeName(obj->type()), line);
     }
 
     std::shared_ptr<Object> memberSet(const std::shared_ptr<Object>& obj,
