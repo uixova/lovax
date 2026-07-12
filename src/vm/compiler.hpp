@@ -49,6 +49,9 @@ public:
             compileStatement(stmt.get());
         }
         emitOp(Op::HALT, lastLine_);
+        // Script-frame locals (for-loop variables) must be reserved on the stack
+        // before the script runs; see VM::interpret.
+        script.proto->localCount = (int)script.locals.size();
         return script.proto;
     }
 
@@ -136,7 +139,10 @@ private:
     }
 
     int resolveUpvalue(FnCtx* ctx, const std::string& name) {
-        if (ctx->enclosing == nullptr || ctx->enclosing->isScript) return -1;
+        // The script frame is a real closure frame, so its locals (for-loop
+        // variables) are capturable. Names that are script globals aren't in its
+        // locals, so they still fall through to GET_GLOBAL.
+        if (ctx->enclosing == nullptr) return -1;
         int local = resolveLocal(ctx->enclosing, name);
         if (local != -1) return addUpvalue(ctx, true, (uint16_t)local);
         int up = resolveUpvalue(ctx->enclosing, name);
@@ -443,38 +449,36 @@ private:
     }
 
     void emitNameGet(const std::string& name, int line) {
-        if (!ctx_->isScript) {
-            int slot = resolveLocal(ctx_, name);
-            if (slot != -1) {
-                emitOp(Op::GET_LOCAL, line);
-                emitU16((uint16_t)slot, line);
-                return;
-            }
-            int up = resolveUpvalue(ctx_, name);
-            if (up != -1) {
-                emitOp(Op::GET_UPVALUE, line);
-                emitU16((uint16_t)up, line);
-                return;
-            }
+        // Locals are tried in every scope: the top-level script frame can hold
+        // for-loop variables even though 'set' still defines globals there.
+        int slot = resolveLocal(ctx_, name);
+        if (slot != -1) {
+            emitOp(Op::GET_LOCAL, line);
+            emitU16((uint16_t)slot, line);
+            return;
+        }
+        int up = resolveUpvalue(ctx_, name);
+        if (up != -1) {
+            emitOp(Op::GET_UPVALUE, line);
+            emitU16((uint16_t)up, line);
+            return;
         }
         emitOp(Op::GET_GLOBAL, line);
         emitU16(globals_.slot(name), line);
     }
 
     void emitNameSet(const std::string& name, int line) {
-        if (!ctx_->isScript) {
-            int slot = resolveLocal(ctx_, name);
-            if (slot != -1) {
-                emitOp(Op::SET_LOCAL, line);
-                emitU16((uint16_t)slot, line);
-                return;
-            }
-            int up = resolveUpvalue(ctx_, name);
-            if (up != -1) {
-                emitOp(Op::SET_UPVALUE, line);
-                emitU16((uint16_t)up, line);
-                return;
-            }
+        int slot = resolveLocal(ctx_, name);
+        if (slot != -1) {
+            emitOp(Op::SET_LOCAL, line);
+            emitU16((uint16_t)slot, line);
+            return;
+        }
+        int up = resolveUpvalue(ctx_, name);
+        if (up != -1) {
+            emitOp(Op::SET_UPVALUE, line);
+            emitU16((uint16_t)up, line);
+            return;
         }
         emitOp(Op::SET_GLOBAL, line);
         emitU16(globals_.slot(name), line);
@@ -695,18 +699,26 @@ private:
         compileExpression(f->iterable.get());
         emitOp(Op::FOR_SETUP, line);           // iterable -> iterator (stays on stack)
 
-        auto varOperand = [&](const Identifier* id) -> uint16_t {
-            return ctx_->isScript ? globals_.slot(id->value) : (uint16_t)resolveLocal(ctx_, id->value);
+        // The loop variable is a local slot in every scope (including the top-level
+        // script frame), so closures capture it and it can be closed per iteration.
+        auto declareVar = [&](const Identifier* id) -> uint16_t {
+            int slot = resolveLocal(ctx_, id->value);
+            if (slot == -1) {
+                ctx_->locals.push_back({id->value});
+                slot = (int)ctx_->locals.size() - 1;
+                if ((int)ctx_->locals.size() > ctx_->proto->localCount)
+                    ctx_->proto->localCount = (int)ctx_->locals.size();
+            }
+            return (uint16_t)slot;
         };
-        uint16_t v1 = varOperand(f->variable.get());
-        uint16_t v2 = f->variable2 ? varOperand(f->variable2.get()) : 0;
+        uint16_t v1 = declareVar(f->variable.get());
+        uint16_t v2 = f->variable2 ? declareVar(f->variable2.get()) : 0;
 
         int loopStart = (int)chunk().code.size();
         ctx_->loops.push_back({loopStart, {}, 1});
 
         uint8_t flags = 0;
-        if (ctx_->isScript) flags |= 1;        // write into globals
-        if (f->variable2)   flags |= 2;        // pair form
+        if (f->variable2) flags |= 2;          // pair form
         emitOp(Op::FOR_NEXT, line);
         emitU8(flags, line);
         emitU16(v1, line);
@@ -715,6 +727,11 @@ private:
         emitU16(0xFFFF, line);                 // patched below
 
         compileBlock(f->body.get());
+        // Per-iteration closure capture (C#/Lua/GDScript semantics, not Python's
+        // late binding): snapshot any upvalues captured this pass before the slot
+        // is reused for the next element.
+        emitOp(Op::CLOSE_UPVALUE, line);
+        emitU16(v1, line);
         emitLoop(loopStart, line);
         patchJump(exitJump);
         emitOp(Op::POP, line);                 // discard the iterator

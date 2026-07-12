@@ -1,10 +1,10 @@
 # ---- Edge-case probe: closures, aliasing, nested try, control flow ----
 
-# 1) closures capturing per-iteration values
+# 1) closures capture the loop variable per-iteration (C#/Lua/GDScript, not Python)
 set fns = []
 for i in 0..3:
     push(fns, fn() -> i)
-say "closures: {fns[0]()}, {fns[1]()}, {fns[2]()}"   # expect 0,1,2 or 2,2,2?
+say "closures: {fns[0]()}, {fns[1]()}, {fns[2]()}"   # 0, 1, 2
 
 # 2) struct reference aliasing (maps are references)
 struct Box:

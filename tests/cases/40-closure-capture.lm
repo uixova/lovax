@@ -1,0 +1,25 @@
+# Per-iteration loop capture (C#/Lua/GDScript, not Python's late binding):
+# each iteration's closure sees its own loop value; other captured outer
+# variables stay shared.
+set fns = []
+for i in 0..3:
+    push(fns, fn() -> i)
+say "{fns[0]()},{fns[1]()},{fns[2]()}"      # 0,1,2
+
+fn build():
+    set total = 0
+    set gs = []
+    for n in 0..4:
+        push(gs, fn() -> n)                 # per-iteration
+        total += n
+    return [gs, total]
+set r = build()
+set gs = r[0]
+say "{gs[0]()},{gs[1]()},{gs[2]()},{gs[3]()}"   # 0,1,2,3
+say "shared total: {r[1]}"                       # 6
+
+set names = ["a", "b", "c"]
+set hs = []
+for name in names:
+    push(hs, fn() -> name)
+say "{hs[0]()}{hs[1]()}{hs[2]()}"           # abc

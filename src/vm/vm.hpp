@@ -53,6 +53,9 @@ public:
 
         auto closure = std::make_shared<ClosureObject>(proto);
         push(Value::object(closure));
+        // Reserve the script frame's local slots (for-loop variables) just like a
+        // function call would, so the value stack runs above them.
+        for (int i = 0; i < proto->localCount; ++i) push(Value::nil());
         frames_.reserve(MAX_FRAMES);
         frames_.push_back({closure.get(), proto->chunk.code.data(), 0, 0});
         auto result = run(0);
@@ -944,7 +947,6 @@ private:
                     uint16_t v1 = readU16();
                     uint16_t v2 = readU16();
                     uint16_t exitJump = readU16();
-                    bool isGlobal = flags & 1;
                     bool pair = flags & 2;
                     auto iter = std::static_pointer_cast<IterObject>(peek().obj);
 
@@ -1001,12 +1003,14 @@ private:
                     // Single form: the variable receives the element (map -> key).
                     Value primary = pair ? first
                         : (iter->kind == IterObject::Kind::MAP_KEYS ? first : second);
-                    auto store = [&](uint16_t slot, const Value& val) {
-                        if (isGlobal) { globals_[slot] = val; globalDefined_[slot] = 1; }
-                        else slots[slot] = val;
-                    };
-                    store(v1, primary);
-                    if (pair) store(v2, second);
+                    slots[v1] = primary;
+                    if (pair) slots[v2] = second;
+                    break;
+                }
+                case Op::CLOSE_UPVALUE: {
+                    uint16_t slot = readU16();
+                    if (!openUpvalues_.empty())
+                        closeUpvalues((int)(frame->base + 1 + slot));
                     break;
                 }
 
