@@ -1,0 +1,67 @@
+# ---- BFS pathfinding on a tile grid, rendered to the terminal canvas ----
+use canvas
+use strings
+
+# 0 = floor, 1 = wall
+set W = 16
+set H = 8
+set grid = [
+    [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
+    [0,1,1,1,1,0,1,0,1,1,1,1,1,1,0,0],
+    [0,1,0,0,1,0,1,0,0,0,0,0,0,1,0,0],
+    [0,1,0,0,1,0,1,1,1,1,1,1,0,1,0,0],
+    [0,1,0,1,1,0,0,0,0,0,0,1,0,1,0,0],
+    [0,0,0,1,0,0,1,1,1,1,0,1,0,0,0,0],
+    [0,1,1,1,0,1,1,0,0,1,0,1,1,1,1,0],
+    [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
+]
+
+fn key(x, y):
+    return "{x},{y}"
+
+fn walkable(x, y):
+    if x < 0 or y < 0 or x >= W or y >= H:
+        return false
+    return grid[y][x] == 0
+
+# BFS from start to goal; returns the path as a list of [x,y] or [] if none
+fn bfs(sx, sy, gx, gy):
+    set queue = [[sx, sy]]
+    set came = {}
+    came[key(sx, sy)] = "START"
+    set head = 0
+    while head < len(queue):
+        set cur = queue[head]
+        head += 1
+        set cx = cur[0]
+        set cy = cur[1]
+        if cx == gx and cy == gy:
+            # reconstruct
+            set path = []
+            set k = key(gx, gy)
+            while k != "START":
+                set parts = strings.split(k, ",")
+                push(path, [num(parts[0]), num(parts[1])])
+                k = came[k]
+            return reverse(path)
+        for d in [[1,0],[-1,0],[0,1],[0,-1]]:
+            set nx = cx + d[0]
+            set ny = cy + d[1]
+            if walkable(nx, ny) and not has(came, key(nx, ny)):
+                came[key(nx, ny)] = key(cx, cy)
+                push(queue, [nx, ny])
+    return []
+
+set path = bfs(0, 0, 15, 7)
+say "path length: {len(path)}"
+
+# render
+set c = canvas.create(W, H)
+for y in 0..H:
+    for x in 0..W:
+        canvas.put(c, x, y, "#" if grid[y][x] == 1 else " ")
+for step in path:
+    canvas.put(c, step[0], step[1], "*")
+canvas.put(c, 0, 0, "S")
+canvas.put(c, 15, 7, "G")
+canvas.render(c)

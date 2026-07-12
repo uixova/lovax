@@ -1,0 +1,75 @@
+# ---- Mini roguelike combat simulation ----
+use game: chance, pick_weighted
+use math
+
+seed(1337)
+
+enum Kind: WARRIOR, MAGE, ROGUE
+
+struct Entity:
+    name = "?"
+    hp = 30
+    max_hp = 30
+    atk = 5
+    kind = 0
+    alive = true
+    fn hurt(dmg):
+        this.hp -= dmg
+        if this.hp <= 0:
+            this.hp = 0
+            this.alive = false
+    fn heal(amount):
+        this.hp = math.clamp(this.hp + amount, 0, this.max_hp)
+    fn power():
+        # mages hit harder, rogues crit
+        set base = this.atk
+        if this.kind == Kind.MAGE:
+            base = base + 3
+        if this.kind == Kind.ROGUE and chance(0.35):
+            base = base * 2
+        return base
+    fn bar():
+        set filled = math.clamp(this.hp * 10 / this.max_hp, 0, 10)
+        set out = ""
+        for i in 0..10:
+            out = out + ("#" if i < filled else ".")
+        return "{this.name} [{out}] {this.hp}/{this.max_hp}"
+
+fn make(name, hp, atk, kind):
+    return Entity(name, hp, hp, atk, kind, true)
+
+set hero = make("Aria", 60, 8, Kind.ROGUE)
+set foes = [
+    make("Goblin", 20, 4, Kind.WARRIOR),
+    make("Shaman", 28, 6, Kind.MAGE),
+    make("Bandit", 34, 7, Kind.ROGUE),
+]
+
+fn living(list):
+    return filter(list, fn(e) -> e.alive)
+
+set round = 0
+while hero.alive and len(living(foes)) > 0:
+    round += 1
+    say "--- round {round} ---"
+    # hero attacks the weakest living foe
+    set targets = sort_by(living(foes), fn(e) -> e.hp)
+    set target = first(targets)
+    set dmg = hero.power()
+    target.hurt(dmg)
+    say "{hero.name} hits {target.name} for {dmg}"
+    if not target.alive:
+        say "  {target.name} falls!"
+    # surviving foes strike back
+    for foe in living(foes):
+        set fdmg = foe.power()
+        hero.hurt(fdmg)
+    say hero.bar()
+    for foe in foes:
+        say "  " + foe.bar()
+
+say ""
+if hero.alive:
+    say "VICTORY in {round} rounds — {hero.hp} hp left"
+else:
+    say "DEFEAT — the party wiped you at round {round}"

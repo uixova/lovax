@@ -1,0 +1,14 @@
+# try/finally with no catch: cleanup on normal path AND before re-raising
+fn guarded(fail):
+    try:
+        if fail:
+            throw "boom"
+        say "ok"
+    finally:
+        say "cleanup"
+
+guarded(false)
+try:
+    guarded(true)
+catch e:
+    say "outer caught: {e}"

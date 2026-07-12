@@ -184,8 +184,11 @@ private:
             case NodeType::TRY_STATEMENT: {
                 const auto* t = static_cast<const TryStatement*>(stmt);
                 for (const auto& s : t->tryBlock->statements) collectLocals(s.get(), out);
-                add(t->catchName->value);
-                for (const auto& s : t->catchBlock->statements) collectLocals(s.get(), out);
+                if (t->catchName) add(t->catchName->value);          // null for try/finally
+                if (t->catchBlock)
+                    for (const auto& s : t->catchBlock->statements) collectLocals(s.get(), out);
+                if (t->finallyBlock)
+                    for (const auto& s : t->finallyBlock->statements) collectLocals(s.get(), out);
                 break;
             }
             case NodeType::WHILE_STATEMENT: {
@@ -550,6 +553,24 @@ private:
 
     void compileTry(const TryStatement* t) {
         int line = t->token.line;
+
+        if (t->catchBlock == nullptr) {
+            // try / finally (no catch): run 'finally' on the normal path, and also
+            // on the throw path before re-raising so the error still propagates.
+            int handlerJump = emitJump(Op::TRY_PUSH, line);
+            compileBlock(t->tryBlock.get());
+            emitOp(Op::TRY_POP, line);
+            compileBlock(t->finallyBlock.get());        // normal path
+            int endJump = emitJump(Op::JUMP, line);
+            patchJump(handlerJump);
+            // Throw path: the error string sits on the stack beneath the finally
+            // block (which is stack-neutral); re-raise it afterwards.
+            compileBlock(t->finallyBlock.get());
+            emitOp(Op::THROW_, line);
+            patchJump(endJump);
+            return;
+        }
+
         int handlerJump = emitJump(Op::TRY_PUSH, line); // operand = catch target
         compileBlock(t->tryBlock.get());
         emitOp(Op::TRY_POP, line);

@@ -1,0 +1,61 @@
+# ---- Particle physics: gravity + wall bounce, fixed-step game loop ----
+use math
+use canvas
+
+seed(42)
+set W = 30
+set H = 14
+const GRAV = 0.6
+const DAMP = 0.72
+const DT = 1.0
+
+struct Particle:
+    x = 0.0
+    y = 0.0
+    vx = 0.0
+    vy = 0.0
+    fn step():
+        this.vy += GRAV * DT
+        this.x += this.vx * DT
+        this.y += this.vy * DT
+        if this.x < 0:
+            this.x = 0
+            this.vx = 0 - this.vx * DAMP
+        if this.x > W - 1:
+            this.x = W - 1
+            this.vx = 0 - this.vx * DAMP
+        if this.y > H - 1:
+            this.y = H - 1
+            this.vy = 0 - this.vy * DAMP
+            this.vx *= 0.9
+
+fn spawn():
+    return Particle(random(2, W - 3) * 1.0, 0.0, (random(0, 20) - 10) * 0.3, 0.0)
+
+set parts = []
+repeat 18:
+    push(parts, spawn())
+
+set FRAMES = 40
+set total_energy = 0.0
+for f in 0..FRAMES:
+    for p in parts:
+        p.step()
+
+# final positions
+set c = canvas.create(W, H)
+canvas.rect(c, 0, 0, W, H, "+")
+for p in parts:
+    set ix = math.clamp(round(p.x), 0, W - 1)
+    set iy = math.clamp(round(p.y), 0, H - 1)
+    canvas.put(c, ix, iy, "o")
+canvas.render(c)
+
+# report kinetic energy after settling
+for p in parts:
+    total_energy += p.vx * p.vx + p.vy * p.vy
+say "particles: {len(parts)}, frames: {FRAMES}"
+say "residual KE: {round(total_energy * 100) / 100}"
+
+set resting = filter(parts, fn(p) -> p.y >= H - 2)
+say "at rest on floor: {len(resting)}"
