@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.7.0 — rich core (struct · enum · try/catch/finally · REPL) · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v0.8.0 — the speed release: faster than CPython · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -74,7 +74,7 @@ error handling in [RFC-008](rfcs/008-error-handling.md).
 ## Quick Start
 
 ```bash
-g++ -std=c++17 -O2 -o lume src/main.cpp   # zero dependencies
+g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp   # zero dependencies
 
 ./lume examples/hello_world.lm
 ./lume examples/dungeon.lm      # loot table + signals + save system
@@ -290,20 +290,22 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 
 ## Performance
 
-Lume compiles to bytecode and runs on a stack VM with immediate numeric values
-(no heap allocation for ints/floats) and closed upvalues. Best-of-3, `-O3`, same
-machine, against the retired tree-walker and CPython 3.14:
+Lume compiles to bytecode and runs on a direct-threaded stack VM (computed-goto
+dispatch), with immediate numeric values, in-place stack arithmetic, and fused
+superinstructions emitted by a compiler peephole (see
+[RFC-012](rfcs/012-vm-performance.md)). Best-of-3 wall clock, same machine,
+recommended flags, against CPython 3.14:
 
-| Benchmark | tree-walker | **VM (v0.6)** | CPython 3.14 |
-|-----------|------------:|--------------:|-------------:|
-| `fib(24)` (call-heavy) | 140 ms | **22 ms** | 7 ms |
-| `mandelbrot` (numeric loops) | 41 ms | **5 ms** | 6 ms |
-| `game-loop` (1k entities x 60 frames) | 34 ms | **9 ms** | 8 ms |
-| `string-concat` (10k) | 8 ms | **5 ms** | 2 ms |
+| Benchmark | v0.6 VM | **v0.8 VM** | CPython 3.14 | vs CPython |
+|-----------|--------:|------------:|-------------:|:----------:|
+| `fib(30)` (call-heavy, 2.7M calls) | 357 ms | **115 ms** | 139 ms | **1.2x faster** |
+| `heavy_loop` (arith/nested/float mix) | 727 ms | **371 ms** | 449 ms | **1.2x faster** |
+| `mandelbrot` (numeric loops) | 5 ms | **4 ms** | 6 ms | **1.5x faster** |
+| `game-loop` (1k entities x 60 frames) | 9 ms | **8 ms** | 8 ms | parity |
 
-Numeric workloads already beat the fastest CPython ever shipped; call-heavy and
-string-heavy paths close the rest of the gap in VM phase 2 (register-based
-instructions, NaN-boxing, computed-goto dispatch).
+Call-heavy **and** numeric workloads now beat the fastest CPython ever shipped.
+Next on the perf ladder (v0.9+): NaN-boxed 8-byte values, inline caches for
+member access, and a register allocator for locals.
 
 ## Architecture & Roadmap
 
@@ -311,9 +313,9 @@ instructions, NaN-boxing, computed-goto dispatch).
 The language surface is complete and frozen (53 golden tests pin every behavior,
 including error messages). Next milestones:
 
-1. **VM phase 2** — register instructions, NaN-boxing, computed goto (fib/string parity and beyond).
-2. Game-friendly memory (incremental GC + frame arenas) and coroutines (`wait`/`yield`).
-3. `struct` + optional type hints; REPL, LSP, formatter.
+1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done in v0.8: beats CPython**.
+2. Coroutines (`wait`/`yield`) and game-friendly memory (incremental GC + frame arenas).
+3. Optional type hints; LSP, formatter, VSCode extension.
 4. **v1.0**: engine embedding API, hot-reload, determinism guarantees.
 
 See [lume.md](lume.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
@@ -345,7 +347,7 @@ geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama 
 ### Hızlı Başlangıç
 
 ```bash
-g++ -std=c++17 -O2 -o lume src/main.cpp
+g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
 ./lume examples/turkish_showcase.lm     # Türkçe tanımlayıcı vitrini
 ./lume examples/dungeon.lm
 ```

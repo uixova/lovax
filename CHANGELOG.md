@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.8.0 — the speed release: faster than CPython
+
+The VM was rebuilt for speed ([RFC-012](rfcs/012-vm-performance.md)). Same
+language, same error messages, 60 golden tests bit-for-bit — just fast:
+
+| Benchmark | v0.6 | **v0.8** | CPython 3.14 |
+|-----------|-----:|---------:|-------------:|
+| `fib(30)` (2.7M calls) | 357 ms | **115 ms** | 139 ms |
+| `heavy_loop` | 727 ms | **371 ms** | 449 ms |
+
+- **Direct-threaded dispatch** (computed goto) on GCC/Clang, with a tested
+  portable switch fallback (`-DLUME_NO_COMPUTED_GOTO`).
+- **Fused superinstructions** from a compiler peephole: immediate arithmetic
+  (`n - 1`, `% 13`, `& 255`), compare-and-branch (`if n < 2` is one op),
+  two-local loads, local±immediate.
+- **In-place stack arithmetic** — zero Value moves on numeric paths.
+- **Call fast path**: exact-arity closure calls inlined; `RETURN` moves the
+  result in place; frames cache chunk/const pointers; range `for` loops have an
+  all-scalar path.
+- Fixed `push()` taking its argument by value — the single biggest win.
+- Recommended build: `g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping`.
+- Verified: ASan + UBSan + LeakSanitizer clean in both dispatch modes.
+
 ## v0.7.1 — per-iteration loop capture + try/finally
 
 - **Closures in `for` loops now capture the loop variable per iteration**

@@ -72,6 +72,19 @@ enum class Op : uint8_t {
     IS_TYPE,        // pops type-name string and value -> bool
     UNPACK,         // u16 n: pops a list of exactly n items, pushes them in order
     SLICE,          // pops end,start,obj (nil = default) -> slice of list/string
+
+    // Fused superinstructions (emitted by the compiler's peephole; RFC v0.8):
+    ADD_I, SUB_I, MUL_I, MOD_I,   // i16 imm: top op= imm (int/float fast, generic fallback)
+    BAND_I, BOR_I, BXOR_I,        // i16 imm: int-only bitwise with immediate
+    LESS_JF, LESS_EQ_JF,          // u16 off: compare two stack values, jump if NOT true
+    GREATER_JF, GREATER_EQ_JF,
+    EQUAL_JF, NOT_EQUAL_JF,
+    LGET2,                        // u16 a, u16 b: push two locals in one dispatch
+    LGET_ADD_I, LGET_SUB_I,       // u16 slot, i16 imm: push local +/- imm (n-1 pattern)
+    LT_I_JF, LE_I_JF,             // i16 imm, u16 off: pop top, compare vs imm, jump if NOT true
+    GT_I_JF, GE_I_JF,
+    EQ_I_JF, NE_I_JF,
+
     HALT            // end of the top-level script
 };
 

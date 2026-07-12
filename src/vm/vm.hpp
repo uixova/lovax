@@ -26,6 +26,14 @@
 // Object-typed operations reuse the exact runtime semantics (and error
 // messages) of the retired tree-walker via runtime.hpp.
 
+// Direct-threaded dispatch (computed goto) on GCC/Clang: each opcode handler
+// jumps straight to the next handler, giving the branch predictor one indirect
+// jump per handler instead of a single shared one. ~15-25% on tight loops.
+// Define LUME_NO_COMPUTED_GOTO to force the portable switch dispatch.
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(LUME_NO_COMPUTED_GOTO)
+#define LUME_CG 1
+#endif
+
 namespace Lume {
 
 class VM {
@@ -57,7 +65,8 @@ public:
         // function call would, so the value stack runs above them.
         for (int i = 0; i < proto->localCount; ++i) push(Value::nil());
         frames_.reserve(MAX_FRAMES);
-        frames_.push_back({closure.get(), proto->chunk.code.data(), 0, 0});
+        frames_.push_back({closure.get(), proto->chunk.code.data(), 0, 0,
+                           proto->chunk.consts.data(), &proto->chunk});
         auto result = run(0);
         return isError(result) ? result : NULL_OBJ_;
     }
@@ -234,6 +243,10 @@ private:
         const uint8_t* ip;
         size_t base;    // stack index of the callee value; locals start at base+1
         int nargs;
+        // Cached from closure->proto->chunk so frame switches (call/return) do a
+        // flat load instead of chasing two shared_ptrs.
+        const Value* consts;
+        const Chunk* chunk;
     };
 
     GlobalTable globalsTable_;
@@ -296,7 +309,8 @@ private:
         }
     }
 
-    void push(Value v) { *sp_++ = std::move(v); }
+    void push(const Value& v) { *sp_++ = v; }
+    void push(Value&& v) { *sp_++ = std::move(v); }
     Value pop() { return std::move(*--sp_); }
     Value& peek(int distance = 0) { return sp_[-1 - distance]; }
     size_t stackSize() const { return (size_t)(sp_ - stackMem_.get()); }
@@ -369,7 +383,8 @@ private:
             for (int i = argc; i < proto.localCount; ++i) push(Value::nil());
 
             frames_.push_back({closure, proto.chunk.code.data(),
-                               stackSize() - proto.localCount - 1, argc});
+                               stackSize() - proto.localCount - 1, argc,
+                               proto.chunk.consts.data(), &proto.chunk});
             return nullptr;
         }
 
@@ -393,7 +408,7 @@ private:
     std::shared_ptr<Object> run(size_t exitFrameDepth) {
         Frame* frame = &frames_.back();
         const uint8_t* ip = frame->ip;
-        const Value* consts = frame->closure->proto->chunk.consts.data();
+        const Value* consts = frame->consts;
         Value* slots = stackAt(frame->base + 1);
 
         // Keep the hot state in locals; resync whenever the frame changes or the
@@ -402,7 +417,7 @@ private:
         auto syncIn = [&]() {
             frame = &frames_.back();
             ip = frame->ip;
-            consts = frame->closure->proto->chunk.consts.data();
+            consts = frame->consts;
             slots = stackAt(frame->base + 1);
         };
 
@@ -413,7 +428,7 @@ private:
             return v;
         };
         auto currentLine = [&]() -> int {
-            const Chunk& c = frame->closure->proto->chunk;
+            const Chunk& c = *frame->chunk;
             size_t offset = (size_t)(ip - c.code.data()) - 1;
             if (offset >= c.lines.size()) offset = c.lines.size() - 1;
             return c.lines[offset];
@@ -442,7 +457,7 @@ private:
             push(Value::object(std::make_shared<StringObject>(msg)));
             frame = &frames_.back();
             ip = h.catchIp;
-            consts = frame->closure->proto->chunk.consts.data();
+            consts = frame->consts;
             slots = stackAt(frame->base + 1);
             return true;
         };
@@ -450,19 +465,129 @@ private:
         #define VM_THROW(E) { std::shared_ptr<Object> _e = (E); if (tryHandle(_e)) continue; frames_.resize(exitFrameDepth); return _e; }
 
         for (;;) {
+#ifdef LUME_CG
+            static const void* lume_dispatch[] = {
+            &&L_CONST,
+            &&L_NIL,
+            &&L_TRUE_,
+            &&L_FALSE_,
+            &&L_POP,
+            &&L_DUP,
+            &&L_GET_LOCAL,
+            &&L_SET_LOCAL,
+            &&L_GET_GLOBAL,
+            &&L_DEFINE_GLOBAL,
+            &&L_SET_GLOBAL,
+            &&L_GET_UPVALUE,
+            &&L_SET_UPVALUE,
+            &&L_EQUAL,
+            &&L_NOT_EQUAL,
+            &&L_ADD,
+            &&L_SUB,
+            &&L_MUL,
+            &&L_DIV,
+            &&L_MOD,
+            &&L_POW,
+            &&L_LESS,
+            &&L_GREATER,
+            &&L_LESS_EQ,
+            &&L_GREATER_EQ,
+            &&L_BIT_AND,
+            &&L_BIT_OR,
+            &&L_BIT_XOR,
+            &&L_SHL,
+            &&L_SHR,
+            &&L_IN,
+            &&L_NEGATE,
+            &&L_NOT_,
+            &&L_BIT_NOT,
+            &&L_JUMP,
+            &&L_JUMP_IF_FALSE,
+            &&L_LOOP,
+            &&L_AND_KEEP,
+            &&L_OR_KEEP,
+            &&L_CALL,
+            &&L_CALL_METHOD,
+            &&L_CLOSURE,
+            &&L_ARG_DEFAULT,
+            &&L_RETURN,
+            &&L_LIST,
+            &&L_MAP,
+            &&L_INDEX_GET,
+            &&L_INDEX_GET_KEEP,
+            &&L_INDEX_SET,
+            &&L_MEMBER_GET,
+            &&L_MEMBER_GET_SAFE,
+            &&L_MEMBER_GET_KEEP,
+            &&L_MEMBER_SET,
+            &&L_INTERP,
+            &&L_SAY,
+            &&L_FOR_SETUP,
+            &&L_FOR_NEXT,
+            &&L_CLOSE_UPVALUE,
+            &&L_USE,
+            &&L_RUNTIME_ERROR,
+            &&L_TRY_PUSH,
+            &&L_TRY_POP,
+            &&L_THROW_,
+            &&L_COALESCE,
+            &&L_RANGE_NEW,
+            &&L_IS_TYPE,
+            &&L_UNPACK,
+            &&L_SLICE,
+            &&L_ADD_I,
+            &&L_SUB_I,
+            &&L_MUL_I,
+            &&L_MOD_I,
+            &&L_BAND_I,
+            &&L_BOR_I,
+            &&L_BXOR_I,
+            &&L_LESS_JF,
+            &&L_LESS_EQ_JF,
+            &&L_GREATER_JF,
+            &&L_GREATER_EQ_JF,
+            &&L_EQUAL_JF,
+            &&L_NOT_EQUAL_JF,
+            &&L_LGET2,
+            &&L_LGET_ADD_I,
+            &&L_LGET_SUB_I,
+            &&L_LT_I_JF,
+            &&L_LE_I_JF,
+            &&L_GT_I_JF,
+            &&L_GE_I_JF,
+            &&L_EQ_I_JF,
+            &&L_NE_I_JF,
+            &&L_HALT
+            };
+        #define VM_CASE(name) L_##name:
+        // Safe everywhere: a plain goto runs destructors of handler locals
+        // before the (computed) dispatch at the loop head.
+        #define VM_NEXT       goto lume_dispatch_next
+        // Only in handlers with NO named non-trivial locals in scope: a computed
+        // goto skips destructors (GCC cannot see the target), so 'Value'/string
+        // locals alive here would leak.
+        #define VM_NEXT_FAST  { op = (Op)*ip++; goto *lume_dispatch[(uint8_t)op]; }
+            Op op;
+        lume_dispatch_next:
+            VM_NEXT_FAST;
+#else
+        #define VM_CASE(name) case Op::name:
+        #define VM_NEXT       break
+        #define VM_NEXT_FAST  break
             Op op = (Op)readByte();
             switch (op) {
-                case Op::CONST: push(constant(readU16())); break;
-                case Op::NIL:    push(Value::nil()); break;
-                case Op::TRUE_:  push(Value::boolean(true)); break;
-                case Op::FALSE_: push(Value::boolean(false)); break;
-                case Op::POP:    pop(); break;
-                case Op::DUP:    push(peek()); break;
+#endif
+                VM_CASE(CONST) push(constant(readU16())); VM_NEXT_FAST;
+                VM_CASE(NIL)    push(Value::nil()); VM_NEXT_FAST;
+                VM_CASE(TRUE_)  push(Value::boolean(true)); VM_NEXT_FAST;
+                VM_CASE(FALSE_) push(Value::boolean(false)); VM_NEXT_FAST;
+                VM_CASE(POP)    pop(); VM_NEXT_FAST;
+                VM_CASE(DUP)    push(peek()); VM_NEXT_FAST;
 
-                case Op::GET_LOCAL: push(slots[readU16()]); break;
-                case Op::SET_LOCAL: slots[readU16()] = pop(); break;
+                VM_CASE(GET_LOCAL) push(slots[readU16()]); VM_NEXT_FAST;
+                VM_CASE(SET_LOCAL) slots[readU16()] = pop(); VM_NEXT_FAST;
 
-                case Op::GET_GLOBAL: {
+                VM_CASE(GET_GLOBAL) {
                     uint16_t slot = readU16();
                     if (!globalDefined_[slot]) {
                         const std::string& name = globalsTable_.names[slot];
@@ -471,15 +596,15 @@ private:
                             "' (define it with: set " + name + " = ...)", currentLine()));
                     }
                     push(globals_[slot]);
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::DEFINE_GLOBAL: {
+                VM_CASE(DEFINE_GLOBAL) {
                     uint16_t slot = readU16();
                     globals_[slot] = pop();
                     globalDefined_[slot] = 1;
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::SET_GLOBAL: {
+                VM_CASE(SET_GLOBAL) {
                     uint16_t slot = readU16();
                     if (!globalDefined_[slot]) {
                         const std::string& name = globalsTable_.names[slot];
@@ -488,88 +613,103 @@ private:
                             "' (define it with: set " + name + " = ...)", currentLine()));
                     }
                     globals_[slot] = pop();
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::GET_UPVALUE: {
+                VM_CASE(GET_UPVALUE) {
                     auto& cell = frame->closure->upvalues[readU16()];
                     push(cell->closed ? cell->value : *stackAt(cell->stackSlot));
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::SET_UPVALUE: {
+                VM_CASE(SET_UPVALUE) {
                     auto& cell = frame->closure->upvalues[readU16()];
                     if (cell->closed) cell->value = pop();
                     else *stackAt(cell->stackSlot) = pop();
-                    break;
+                    VM_NEXT_FAST;
                 }
 
-                case Op::EQUAL: {
-                    Value b = pop(), a = pop();
-                    push(Value::boolean(valueEquals(a, b)));
-                    break;
+                VM_CASE(EQUAL) {
+                    bool eq = valueEquals(sp_[-2], sp_[-1]);
+                    sp_[-1].obj.reset(); sp_[-2].obj.reset();
+                    sp_[-2].kind = VKind::BOOL; sp_[-2].b = eq; --sp_;
+                    VM_NEXT_FAST;
                 }
-                case Op::NOT_EQUAL: {
-                    Value b = pop(), a = pop();
-                    push(Value::boolean(!valueEquals(a, b)));
-                    break;
+                VM_CASE(NOT_EQUAL) {
+                    bool eq = valueEquals(sp_[-2], sp_[-1]);
+                    sp_[-1].obj.reset(); sp_[-2].obj.reset();
+                    sp_[-2].kind = VKind::BOOL; sp_[-2].b = !eq; --sp_;
+                    VM_NEXT_FAST;
                 }
 
+                // In-place numeric fast path: both operands stay in their stack slots
+                // (numbers carry no shared_ptr, so overwriting them is free); only the
+                // object slow path materializes Values, inside its own scope so the
+                // destructor-safe VM_NEXT applies.
                 #define NUMERIC_FAST(opChar, intExpr, dblExpr)                              \
-                    Value b = pop(), a = pop();                                             \
-                    if (a.kind == VKind::INT && b.kind == VKind::INT) {                     \
-                        long long l = a.i, r = b.i; (void)l; (void)r;                       \
-                        push(intExpr);                                                      \
-                    } else if (a.isNumber() && b.isNumber()) {                              \
-                        double l = a.asDouble(), r = b.asDouble(); (void)l; (void)r;        \
-                        push(dblExpr);                                                      \
-                    } else {                                                                \
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;                               \
+                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {                 \
+                        long long l = pa->i, r = pb->i; (void)l; (void)r;                   \
+                        *pa = intExpr; --sp_; VM_NEXT_FAST;                                 \
+                    }                                                                       \
+                    if (pa->isNumber() && pb->isNumber()) {                                 \
+                        double l = pa->asDouble(), r = pb->asDouble(); (void)l; (void)r;    \
+                        *pa = dblExpr; --sp_; VM_NEXT_FAST;                                 \
+                    }                                                                       \
+                    {                                                                       \
+                        Value b = pop(), a = pop();                                         \
                         auto res = Runtime::evalInfixExpression(opChar, toObject(a),        \
                                                                 toObject(b), currentLine());\
-                        if (isError(res)) VM_THROW(res);                         \
+                        if (isError(res)) VM_THROW(res);                                    \
                         push(fromObject(res));                                              \
                     }
 
-                case Op::ADD: { NUMERIC_FAST("+", Value::integer(l + r), Value::real(l + r)); break; }
-                case Op::SUB: { NUMERIC_FAST("-", Value::integer(l - r), Value::real(l - r)); break; }
-                case Op::MUL: { NUMERIC_FAST("*", Value::integer(l * r), Value::real(l * r)); break; }
-                case Op::DIV: {
-                    Value b = pop(), a = pop();
-                    if (a.kind == VKind::INT && b.kind == VKind::INT) {
-                        if (b.i == 0) VM_THROW(makeError("division by zero", currentLine()));
-                        long long q = a.i / b.i;
-                        if ((a.i % b.i != 0) && ((a.i < 0) != (b.i < 0))) q--;
-                        push(Value::integer(q));
-                    } else if (a.isNumber() && b.isNumber()) {
-                        double r = b.asDouble();
+                VM_CASE(ADD) { NUMERIC_FAST("+", Value::integer(l + r), Value::real(l + r)); VM_NEXT; }
+                VM_CASE(SUB) { NUMERIC_FAST("-", Value::integer(l - r), Value::real(l - r)); VM_NEXT; }
+                VM_CASE(MUL) { NUMERIC_FAST("*", Value::integer(l * r), Value::real(l * r)); VM_NEXT; }
+                VM_CASE(DIV) {
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;
+                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {
+                        if (pb->i == 0) VM_THROW(makeError("division by zero", currentLine()));
+                        long long q = pa->i / pb->i;
+                        if ((pa->i % pb->i != 0) && ((pa->i < 0) != (pb->i < 0))) q--;
+                        pa->i = q; --sp_; VM_NEXT_FAST;
+                    }
+                    if (pa->isNumber() && pb->isNumber()) {
+                        double r = pb->asDouble();
                         if (r == 0.0) VM_THROW(makeError("division by zero", currentLine()));
-                        push(Value::real(a.asDouble() / r));
-                    } else {
+                        *pa = Value::real(pa->asDouble() / r); --sp_; VM_NEXT_FAST;
+                    }
+                    {
+                        Value b = pop(), a = pop();
                         auto res = Runtime::evalInfixExpression("/", toObject(a), toObject(b), currentLine());
                         if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
-                    break;
+                    VM_NEXT;
                 }
-                case Op::MOD: {
-                    Value b = pop(), a = pop();
-                    if (a.kind == VKind::INT && b.kind == VKind::INT) {
-                        if (b.i == 0) VM_THROW(makeError("modulo by zero", currentLine()));
-                        long long m = a.i % b.i;
-                        if (m != 0 && ((m < 0) != (b.i < 0))) m += b.i;
-                        push(Value::integer(m));
-                    } else if (a.isNumber() && b.isNumber()) {
-                        double r = b.asDouble();
+                VM_CASE(MOD) {
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;
+                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {
+                        if (pb->i == 0) VM_THROW(makeError("modulo by zero", currentLine()));
+                        long long m = pa->i % pb->i;
+                        if (m != 0 && ((m < 0) != (pb->i < 0))) m += pb->i;
+                        pa->i = m; --sp_; VM_NEXT_FAST;
+                    }
+                    if (pa->isNumber() && pb->isNumber()) {
+                        double r = pb->asDouble();
                         if (r == 0.0) VM_THROW(makeError("modulo by zero", currentLine()));
-                        double m = std::fmod(a.asDouble(), r);
+                        double m = std::fmod(pa->asDouble(), r);
                         if (m != 0.0 && ((m < 0.0) != (r < 0.0))) m += r;
-                        push(Value::real(m));
-                    } else {
+                        *pa = Value::real(m); --sp_; VM_NEXT_FAST;
+                    }
+                    {
+                        Value b = pop(), a = pop();
                         auto res = Runtime::evalInfixExpression("%", toObject(a), toObject(b), currentLine());
                         if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
-                    break;
+                    VM_NEXT;
                 }
-                case Op::POW: {
+                VM_CASE(POW) {
                     Value b = pop(), a = pop();
                     if (a.isNumber() && b.isNumber()) {
                         double result = std::pow(a.asDouble(), b.asDouble());
@@ -584,29 +724,31 @@ private:
                         if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
-                    break;
+                    VM_NEXT;
                 }
-                case Op::LESS:       { NUMERIC_FAST("<",  Value::boolean(l < r),  Value::boolean(l < r));  break; }
-                case Op::GREATER:    { NUMERIC_FAST(">",  Value::boolean(l > r),  Value::boolean(l > r));  break; }
-                case Op::LESS_EQ:    { NUMERIC_FAST("<=", Value::boolean(l <= r), Value::boolean(l <= r)); break; }
-                case Op::GREATER_EQ: { NUMERIC_FAST(">=", Value::boolean(l >= r), Value::boolean(l >= r)); break; }
+                VM_CASE(LESS)       { NUMERIC_FAST("<",  Value::boolean(l < r),  Value::boolean(l < r));  VM_NEXT; }
+                VM_CASE(GREATER)    { NUMERIC_FAST(">",  Value::boolean(l > r),  Value::boolean(l > r));  VM_NEXT; }
+                VM_CASE(LESS_EQ)    { NUMERIC_FAST("<=", Value::boolean(l <= r), Value::boolean(l <= r)); VM_NEXT; }
+                VM_CASE(GREATER_EQ) { NUMERIC_FAST(">=", Value::boolean(l >= r), Value::boolean(l >= r)); VM_NEXT; }
 
                 #define INT_ONLY_OP(opStr, expr)                                            \
-                    Value b = pop(), a = pop();                                             \
-                    if (a.kind == VKind::INT && b.kind == VKind::INT) {                     \
-                        long long l = a.i, r = b.i; (void)l; (void)r;                       \
-                        push(expr);                                                         \
-                    } else {                                                                \
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;                               \
+                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {                 \
+                        long long l = pa->i, r = pb->i; (void)l; (void)r;                   \
+                        *pa = expr; --sp_; VM_NEXT_FAST;                                    \
+                    }                                                                       \
+                    {                                                                       \
+                        Value b = pop(), a = pop();                                         \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),         \
                                                                 toObject(b), currentLine());\
-                        if (isError(res)) VM_THROW(res);                         \
+                        if (isError(res)) VM_THROW(res);                                    \
                         push(fromObject(res));                                              \
                     }
 
-                case Op::BIT_AND: { INT_ONLY_OP("&", Value::integer(l & r)); break; }
-                case Op::BIT_OR:  { INT_ONLY_OP("|", Value::integer(l | r)); break; }
-                case Op::BIT_XOR: { INT_ONLY_OP("^", Value::integer(l ^ r)); break; }
-                case Op::SHL: case Op::SHR: {
+                VM_CASE(BIT_AND) { INT_ONLY_OP("&", Value::integer(l & r)); VM_NEXT; }
+                VM_CASE(BIT_OR)  { INT_ONLY_OP("|", Value::integer(l | r)); VM_NEXT; }
+                VM_CASE(BIT_XOR) { INT_ONLY_OP("^", Value::integer(l ^ r)); VM_NEXT; }
+                VM_CASE(SHL) VM_CASE(SHR) {
                     Value b = pop(), a = pop();
                     const char* opStr = (op == Op::SHL) ? "<<" : ">>";
                     if (a.kind == VKind::INT && b.kind == VKind::INT) {
@@ -621,73 +763,90 @@ private:
                         if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
-                    break;
+                    VM_NEXT;
                 }
-                case Op::IN: {
+                VM_CASE(IN) {
                     Value b = pop(), a = pop();
                     auto res = Runtime::evalInfixExpression("in", toObject(a), toObject(b), currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
 
-                case Op::NEGATE: {
-                    Value a = pop();
-                    if (a.kind == VKind::INT)        push(Value::integer(-a.i));
-                    else if (a.kind == VKind::FLOAT) push(Value::real(-a.d));
-                    else {
-                        VM_THROW(makeError(
-                            "unary '-' only works on numbers, got " + valueTypeName(a),
-                            currentLine()));
-                    }
-                    break;
+                VM_CASE(NEGATE) {
+                    Value* pa = sp_ - 1;
+                    if (pa->kind == VKind::INT)   { pa->i = -pa->i; VM_NEXT_FAST; }
+                    if (pa->kind == VKind::FLOAT) { pa->d = -pa->d; VM_NEXT_FAST; }
+                    VM_THROW(makeError(
+                        "unary '-' only works on numbers, got " + valueTypeName(*pa),
+                        currentLine()));
                 }
-                case Op::NOT_: {
-                    Value a = pop();
-                    push(Value::boolean(!valueTruthy(a)));
-                    break;
+                VM_CASE(NOT_) {
+                    bool t = valueTruthy(sp_[-1]);
+                    sp_[-1].obj.reset();
+                    sp_[-1].kind = VKind::BOOL; sp_[-1].b = !t;
+                    VM_NEXT_FAST;
                 }
-                case Op::BIT_NOT: {
-                    Value a = pop();
-                    if (a.kind == VKind::INT) push(Value::integer(~a.i));
-                    else {
-                        VM_THROW(makeError(
-                            "'~' only works on integers, got " + valueTypeName(a),
-                            currentLine()));
-                    }
-                    break;
+                VM_CASE(BIT_NOT) {
+                    Value* pa = sp_ - 1;
+                    if (pa->kind == VKind::INT) { pa->i = ~pa->i; VM_NEXT_FAST; }
+                    VM_THROW(makeError(
+                        "'~' only works on integers, got " + valueTypeName(*pa),
+                        currentLine()));
                 }
 
-                case Op::JUMP: { uint16_t d = readU16(); ip += d; break; }
-                case Op::JUMP_IF_FALSE: {
+                VM_CASE(JUMP) { uint16_t d = readU16(); ip += d; VM_NEXT_FAST; }
+                VM_CASE(JUMP_IF_FALSE) {
                     uint16_t d = readU16();
                     if (!valueTruthy(pop())) ip += d;
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::LOOP: { uint16_t d = readU16(); ip -= d; break; }
-                case Op::AND_KEEP: {
+                VM_CASE(LOOP) { uint16_t d = readU16(); ip -= d; VM_NEXT_FAST; }
+                VM_CASE(AND_KEEP) {
                     uint16_t d = readU16();
                     if (!valueTruthy(peek())) ip += d;
                     else pop();
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::OR_KEEP: {
+                VM_CASE(OR_KEEP) {
                     uint16_t d = readU16();
                     if (valueTruthy(peek())) ip += d;
                     else pop();
-                    break;
+                    VM_NEXT_FAST;
                 }
 
-                case Op::CALL: {
+                VM_CASE(CALL) {
                     int argc = readByte();
+                    // Exact-arity closure call, inlined: no defaults in play, no
+                    // variadic collection — the dominant call shape in real code.
+                    {
+                        Value& callee = peek(argc);
+                        if (callee.isObjType(ObjectType::FUNCTION)) {
+                            ClosureObject* cl = static_cast<ClosureObject*>(callee.obj.get());
+                            const Proto& p = *cl->proto;
+                            if (!p.variadic && argc == p.paramCount &&
+                                frames_.size() < MAX_FRAMES &&
+                                stackSize() + p.localCount + 16 <= STACK_LIMIT) {
+                                syncOut();
+                                for (int i = argc; i < p.localCount; ++i) push(Value::nil());
+                                frames_.push_back({cl, p.chunk.code.data(),
+                                                   stackSize() - p.localCount - 1, argc,
+                                                   p.chunk.consts.data(), &p.chunk});
+                                syncIn();
+                                VM_NEXT_FAST;
+                            }
+                        }
+                    }
                     int line = currentLine();
                     syncOut();
-                    auto err = callValue(argc, line);
-                    if (err != nullptr && isError(err)) VM_THROW(err);
+                    {
+                        auto err = callValue(argc, line);
+                        if (err != nullptr && isError(err)) VM_THROW(err);
+                    }
                     syncIn();
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::CALL_METHOD: {
+                VM_CASE(CALL_METHOD) {
                     int argc = readByte();
                     int line = currentLine();
                     // Stack: [recv, method, a1..aN]. Pass recv as 'this' only when it
@@ -695,26 +854,28 @@ private:
                     // plainly (module/plain-map field call keeps its original arity).
                     static const std::shared_ptr<StringObject> typeKey =
                         std::make_shared<StringObject>("__type__");
-                    Value recv = peek(argc + 1);
+                    Value& recv = peek(argc + 1);
                     bool isStruct = recv.isObjType(ObjectType::MAP) &&
                         static_cast<MapObject*>(recv.obj.get())->get(typeKey) != nullptr;
                     syncOut();
-                    std::shared_ptr<Object> err;
-                    if (isStruct) {
-                        Value* basep = sp_ - argc - 2;   // [0]=recv, [1]=method
-                        std::swap(basep[0], basep[1]);   // -> [method, recv, args..]
-                        err = callValue(argc + 1, line);
-                    } else {
-                        Value* basep = sp_ - argc - 2;
-                        for (int i = 0; i <= argc; ++i) basep[i] = basep[i + 1]; // drop recv
-                        --sp_;
-                        err = callValue(argc, line);
+                    {
+                        std::shared_ptr<Object> err;
+                        if (isStruct) {
+                            Value* basep = sp_ - argc - 2;   // [0]=recv, [1]=method
+                            std::swap(basep[0], basep[1]);   // -> [method, recv, args..]
+                            err = callValue(argc + 1, line);
+                        } else {
+                            Value* basep = sp_ - argc - 2;
+                            for (int i = 0; i <= argc; ++i) basep[i] = basep[i + 1]; // drop recv
+                            --sp_;
+                            err = callValue(argc, line);
+                        }
+                        if (err != nullptr && isError(err)) VM_THROW(err);
                     }
-                    if (err != nullptr && isError(err)) VM_THROW(err);
                     syncIn();
-                    break;
+                    VM_NEXT_FAST;
                 }
-                case Op::CLOSURE: {
+                VM_CASE(CLOSURE) {
                     uint16_t protoIdx = readU16();
                     auto holder = std::static_pointer_cast<ProtoObject>(constant(protoIdx).obj);
                     auto closure = std::make_shared<ClosureObject>(holder->proto);
@@ -730,35 +891,36 @@ private:
                         }
                     }
                     push(Value::object(closure));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::ARG_DEFAULT: {
+                VM_CASE(ARG_DEFAULT) {
                     uint16_t paramSlot = readU16();
                     uint16_t skip = readU16();
                     if (frame->nargs > (int)paramSlot) ip += skip;
-                    break;
+                    VM_NEXT;
                 }
-                case Op::RETURN: {
-                    Value result = pop();
+                VM_CASE(RETURN) {
                     if (!openUpvalues_.empty()) closeUpvalues((int)frame->base);
-                    sp_ = stackAt(frame->base);
+                    // Move the result from the stack top into the callee slot; the
+                    // move-assign releases the callee closure reference in passing.
+                    *stackAt(frame->base) = std::move(sp_[-1]);
+                    sp_ = stackAt(frame->base) + 1;
                     frames_.pop_back();
-                    push(std::move(result));
                     if (frames_.size() == exitFrameDepth) return NULL_OBJ_;
                     syncIn();
-                    break;
+                    VM_NEXT_FAST;
                 }
 
-                case Op::LIST: {
+                VM_CASE(LIST) {
                     uint16_t n = readU16();
                     auto list = std::make_shared<ListObject>();
                     list->elements.reserve(n);
                     for (int i = n - 1; i >= 0; --i) list->elements.push_back(toObject(peek(i)));
                     sp_ -= n;
                     push(Value::object(list));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::MAP: {
+                VM_CASE(MAP) {
                     uint16_t n = readU16();
                     auto map = std::make_shared<MapObject>();
                     int line = currentLine();
@@ -774,10 +936,10 @@ private:
                     }
                     sp_ -= n * 2;
                     push(Value::object(map));
-                    break;
+                    VM_NEXT;
                 }
 
-                case Op::INDEX_GET: {
+                VM_CASE(INDEX_GET) {
                     Value idx = pop(), obj = pop();
                     if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
                         auto* list = static_cast<ListObject*>(obj.obj.get());
@@ -786,15 +948,15 @@ private:
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
                             push(fromObject(list->elements[i]));
-                            break;
+                            VM_NEXT;
                         }
                     }
                     auto res = Runtime::evalIndexAccess(toObject(obj), toObject(idx), currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::INDEX_GET_KEEP: {
+                VM_CASE(INDEX_GET_KEEP) {
                     Value& obj = peek(1);
                     Value& idx = peek(0);
                     if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
@@ -804,16 +966,16 @@ private:
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
                             push(fromObject(list->elements[i]));
-                            break;
+                            VM_NEXT;
                         }
                     }
                     auto res = Runtime::evalIndexAccess(toObject(peek(1)), toObject(peek(0)),
                                                         currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::INDEX_SET: {
+                VM_CASE(INDEX_SET) {
                     Value val = pop(), idx = pop(), obj = pop();
                     if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
                         auto* list = static_cast<ListObject*>(obj.obj.get());
@@ -822,14 +984,14 @@ private:
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
                             list->elements[i] = toObject(val);
-                            break;
+                            VM_NEXT;
                         }
                     }
                     auto err = indexSet(toObject(obj), toObject(idx), toObject(val), currentLine());
                     if (err != nullptr) VM_THROW(err);
-                    break;
+                    VM_NEXT;
                 }
-                case Op::MEMBER_GET: {
+                VM_CASE(MEMBER_GET) {
                     uint16_t nameC = readU16();
                     Value obj = pop();
                     const std::string& prop =
@@ -837,47 +999,47 @@ private:
                     auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::MEMBER_GET_SAFE: {
+                VM_CASE(MEMBER_GET_SAFE) {
                     uint16_t nameC = readU16();
                     Value obj = pop();
-                    if (obj.isNil()) { push(Value::nil()); break; } // a?.b -> null
+                    if (obj.isNil()) { push(Value::nil()); VM_NEXT; } // a?.b -> null
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
                     auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::MEMBER_GET_KEEP: {
+                VM_CASE(MEMBER_GET_KEEP) {
                     uint16_t nameC = readU16();
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
                     auto res = Runtime::evalMemberAccess(toObject(peek(0)), prop, currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::MEMBER_SET: {
+                VM_CASE(MEMBER_SET) {
                     uint16_t nameC = readU16();
                     Value val = pop(), obj = pop();
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
                     auto err = memberSet(toObject(obj), prop, toObject(val), currentLine());
                     if (err != nullptr) VM_THROW(err);
-                    break;
+                    VM_NEXT;
                 }
 
-                case Op::INTERP: {
+                VM_CASE(INTERP) {
                     uint16_t n = readU16();
                     std::string out;
                     for (int i = n - 1; i >= 0; --i) out += valueInspect(peek(i));
                     sp_ -= n;
                     push(Value::object(std::make_shared<StringObject>(out)));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::SAY: {
+                VM_CASE(SAY) {
                     uint8_t n = readByte();
                     std::string out;
                     VKind firstKind = VKind::NIL;
@@ -904,10 +1066,10 @@ private:
                             break;
                     }
                     std::cout << color << out << Color::reset() << "\n";
-                    break;
+                    VM_NEXT;
                 }
 
-                case Op::FOR_SETUP: {
+                VM_CASE(FOR_SETUP) {
                     Value iterable = pop();
                     auto iter = std::make_shared<IterObject>();
                     auto obj = toObject(iterable);
@@ -940,14 +1102,31 @@ private:
                                 typeName(obj->type()), currentLine()));
                     }
                     push(Value::object(iter));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::FOR_NEXT: {
+                VM_CASE(FOR_NEXT) {
                     uint8_t flags = readByte();
                     uint16_t v1 = readU16();
                     uint16_t v2 = readU16();
                     uint16_t exitJump = readU16();
                     bool pair = flags & 2;
+                    // Range iteration is the hot loop shape (for i in 0..n): all-scalar,
+                    // in-place slot writes, direct dispatch.
+                    {
+                        IterObject* itp = static_cast<IterObject*>(peek().obj.get());
+                        if (itp->kind == IterObject::Kind::RANGE) {
+                            auto* r = static_cast<RangeObject*>(itp->source.get());
+                            if (r->step > 0 ? itp->index >= r->end : itp->index <= r->end) {
+                                ip += exitJump;
+                                VM_NEXT_FAST;
+                            }
+                            long long cur = itp->index;
+                            itp->index += r->step;
+                            slots[v1] = Value::integer(cur);
+                            if (pair) slots[v2] = Value::integer(cur);
+                            VM_NEXT_FAST;
+                        }
+                    }
                     auto iter = std::static_pointer_cast<IterObject>(peek().obj);
 
                     Value first, second;
@@ -998,23 +1177,23 @@ private:
 
                     if (done) {
                         ip += exitJump;
-                        break;
+                        VM_NEXT;
                     }
                     // Single form: the variable receives the element (map -> key).
                     Value primary = pair ? first
                         : (iter->kind == IterObject::Kind::MAP_KEYS ? first : second);
                     slots[v1] = primary;
                     if (pair) slots[v2] = second;
-                    break;
+                    VM_NEXT;
                 }
-                case Op::CLOSE_UPVALUE: {
+                VM_CASE(CLOSE_UPVALUE) {
                     uint16_t slot = readU16();
                     if (!openUpvalues_.empty())
                         closeUpvalues((int)(frame->base + 1 + slot));
-                    break;
+                    VM_NEXT_FAST;
                 }
 
-                case Op::USE: {
+                VM_CASE(USE) {
                     uint16_t specIdx = readU16();
                     syncOut();
                     const UseSpec& spec = frame->closure->proto->chunk.useSpecs[specIdx];
@@ -1044,37 +1223,37 @@ private:
                         globals_[spec.bindSlot] = Value::object(module);
                         globalDefined_[spec.bindSlot] = 1;
                     }
-                    break;
+                    VM_NEXT;
                 }
 
-                case Op::TRY_PUSH: {
+                VM_CASE(TRY_PUSH) {
                     uint16_t off = readU16();
                     handlers_.push_back({frames_.size(), stackSize(), ip + off});
-                    break;
+                    VM_NEXT;
                 }
-                case Op::TRY_POP:
+                VM_CASE(TRY_POP)
                     if (!handlers_.empty()) handlers_.pop_back();
-                    break;
-                case Op::THROW_: {
+                    VM_NEXT;
+                VM_CASE(THROW_) {
                     Value v = pop();
                     std::string msg = valueInspect(v);
                     VM_THROW(makeError(msg, currentLine()));
                 }
-                case Op::COALESCE: {
+                VM_CASE(COALESCE) {
                     uint16_t off = readU16();
                     if (!peek().isNil()) ip += off;
                     else pop();
-                    break;
+                    VM_NEXT;
                 }
-                case Op::RANGE_NEW: {
+                VM_CASE(RANGE_NEW) {
                     Value b = pop(), a = pop();
                     if (a.kind != VKind::INT || b.kind != VKind::INT) {
                         VM_THROW(makeError("range operator '..' expects two integers", currentLine()));
                     }
                     push(Value::object(std::make_shared<RangeObject>(a.i, b.i, 1)));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::IS_TYPE: {
+                VM_CASE(IS_TYPE) {
                     Value name = pop(), val = pop();
                     if (!name.isObjType(ObjectType::STRING)) {
                         VM_THROW(makeError("'is' expects a type name string on the right "
@@ -1082,9 +1261,9 @@ private:
                     }
                     const std::string& want = static_cast<StringObject*>(name.obj.get())->value;
                     push(Value::boolean(valueTypeName(val) == want));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::UNPACK: {
+                VM_CASE(UNPACK) {
                     uint16_t n = readU16();
                     Value v = pop();
                     if (!v.isObjType(ObjectType::LIST)) {
@@ -1098,28 +1277,178 @@ private:
                                            std::to_string(list->elements.size()), currentLine()));
                     }
                     for (uint16_t i = 0; i < n; ++i) push(fromObject(list->elements[i]));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::SLICE: {
+                VM_CASE(SLICE) {
                     Value endV = pop(), startV = pop(), obj = pop();
                     auto res = sliceOp(toObject(obj), startV, endV, currentLine());
                     if (isError(res)) VM_THROW(res);
                     push(fromObject(res));
-                    break;
+                    VM_NEXT;
                 }
-                case Op::RUNTIME_ERROR: {
+                VM_CASE(RUNTIME_ERROR) {
                     uint16_t msgC = readU16();
                     const std::string& msg =
                         static_cast<StringObject*>(constant(msgC).obj.get())->value;
                     VM_THROW(makeError(msg, currentLine()));
                 }
 
-                case Op::HALT:
+                // ===== Fused superinstructions (v0.8 peephole) =====
+                // IMM_ARITH: top op= i16 immediate, in place; generic fallback keeps
+                // the exact error messages of the unfused op.
+                #define IMM_ARITH(opStr, intStmt, dblStmt)                              \
+                    int16_t k = (int16_t)readU16();                                     \
+                    Value* pa = sp_ - 1;                                                \
+                    if (pa->kind == VKind::INT)   { intStmt; VM_NEXT_FAST; }            \
+                    if (pa->kind == VKind::FLOAT) { dblStmt; VM_NEXT_FAST; }            \
+                    {                                                                   \
+                        Value a = pop();                                                \
+                        auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
+                            std::make_shared<IntegerObject>(k), currentLine());         \
+                        if (isError(res)) VM_THROW(res);                                \
+                        push(fromObject(res));                                          \
+                    }                                                                   \
+                    VM_NEXT;
+
+                VM_CASE(ADD_I) { IMM_ARITH("+", pa->i += k, pa->d += k) }
+                VM_CASE(SUB_I) { IMM_ARITH("-", pa->i -= k, pa->d -= k) }
+                VM_CASE(MUL_I) { IMM_ARITH("*", pa->i *= k, pa->d *= k) }
+                VM_CASE(MOD_I) {
+                    int16_t k = (int16_t)readU16();
+                    Value* pa = sp_ - 1;
+                    if (pa->kind == VKind::INT && k != 0) {
+                        long long m = pa->i % k;
+                        if (m != 0 && ((m < 0) != (k < 0))) m += k;
+                        pa->i = m;
+                        VM_NEXT_FAST;
+                    }
+                    {
+                        Value a = pop();
+                        auto res = Runtime::evalInfixExpression("%", toObject(a),
+                            std::make_shared<IntegerObject>(k), currentLine());
+                        if (isError(res)) VM_THROW(res);
+                        push(fromObject(res));
+                    }
+                    VM_NEXT;
+                }
+                #define IMM_BITWISE(opStr, intStmt)                                     \
+                    int16_t k = (int16_t)readU16();                                     \
+                    Value* pa = sp_ - 1;                                                \
+                    if (pa->kind == VKind::INT) { intStmt; VM_NEXT_FAST; }              \
+                    {                                                                   \
+                        Value a = pop();                                                \
+                        auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
+                            std::make_shared<IntegerObject>(k), currentLine());         \
+                        if (isError(res)) VM_THROW(res);                                \
+                        push(fromObject(res));                                          \
+                    }                                                                   \
+                    VM_NEXT;
+
+                VM_CASE(BAND_I) { IMM_BITWISE("&", pa->i &= k) }
+                VM_CASE(BOR_I)  { IMM_BITWISE("|", pa->i |= k) }
+                VM_CASE(BXOR_I) { IMM_BITWISE("^", pa->i ^= k) }
+
+                // CMP_JF: compare the top two values, pop both, jump when NOT true.
+                // One dispatch instead of compare + JUMP_IF_FALSE + a bool roundtrip.
+                #define CMP_JF(opStr, cmpInt, cmpDbl)                                   \
+                    uint16_t d = readU16();                                             \
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;                           \
+                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {             \
+                        long long l = pa->i, r = pb->i; (void)l; (void)r;               \
+                        sp_ -= 2; if (!(cmpInt)) ip += d; VM_NEXT_FAST;                 \
+                    }                                                                   \
+                    if (pa->isNumber() && pb->isNumber()) {                             \
+                        double l = pa->asDouble(), r = pb->asDouble(); (void)l; (void)r;\
+                        sp_ -= 2; if (!(cmpDbl)) ip += d; VM_NEXT_FAST;                 \
+                    }                                                                   \
+                    {                                                                   \
+                        Value b = pop(), a = pop();                                     \
+                        auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
+                                                                toObject(b), currentLine());\
+                        if (isError(res)) VM_THROW(res);                                \
+                        if (!objectTruthy(res)) ip += d;                                \
+                    }                                                                   \
+                    VM_NEXT;
+
+                VM_CASE(LESS_JF)       { CMP_JF("<",  l < r,  l < r)  }
+                VM_CASE(LESS_EQ_JF)    { CMP_JF("<=", l <= r, l <= r) }
+                VM_CASE(GREATER_JF)    { CMP_JF(">",  l > r,  l > r)  }
+                VM_CASE(GREATER_EQ_JF) { CMP_JF(">=", l >= r, l >= r) }
+                VM_CASE(EQUAL_JF) {
+                    uint16_t d = readU16();
+                    bool t = valueEquals(sp_[-2], sp_[-1]);
+                    sp_[-1].obj.reset(); sp_[-2].obj.reset(); sp_ -= 2;
+                    if (!t) ip += d;
+                    VM_NEXT_FAST;
+                }
+                VM_CASE(NOT_EQUAL_JF) {
+                    uint16_t d = readU16();
+                    bool t = valueEquals(sp_[-2], sp_[-1]);
+                    sp_[-1].obj.reset(); sp_[-2].obj.reset(); sp_ -= 2;
+                    if (t) ip += d;
+                    VM_NEXT_FAST;
+                }
+
+                VM_CASE(LGET2) {
+                    uint16_t a = readU16(), b = readU16();
+                    push(slots[a]); push(slots[b]);
+                    VM_NEXT_FAST;
+                }
+                #define LGET_ARITH_I(opStr, intExpr, dblExpr)                           \
+                    uint16_t sl = readU16(); int16_t k = (int16_t)readU16();            \
+                    Value* v = &slots[sl];                                              \
+                    if (v->kind == VKind::INT)   { push(intExpr); VM_NEXT_FAST; }       \
+                    if (v->kind == VKind::FLOAT) { push(dblExpr); VM_NEXT_FAST; }       \
+                    {                                                                   \
+                        auto res = Runtime::evalInfixExpression(opStr, toObject(*v),    \
+                            std::make_shared<IntegerObject>(k), currentLine());         \
+                        if (isError(res)) VM_THROW(res);                                \
+                        push(fromObject(res));                                          \
+                    }                                                                   \
+                    VM_NEXT;
+
+                VM_CASE(LGET_ADD_I) { LGET_ARITH_I("+", Value::integer(v->i + k), Value::real(v->d + k)) }
+                VM_CASE(LGET_SUB_I) { LGET_ARITH_I("-", Value::integer(v->i - k), Value::real(v->d - k)) }
+
+                // Pop the top, compare against an i16 immediate, jump when NOT true.
+                #define CMP_I_JF(opStr, cmpInt, cmpDbl)                                 \
+                    int16_t k = (int16_t)readU16(); uint16_t d = readU16();             \
+                    Value* pa = sp_ - 1;                                                \
+                    if (pa->kind == VKind::INT) {                                       \
+                        long long l = pa->i; (void)l;                                   \
+                        --sp_; if (!(cmpInt)) ip += d; VM_NEXT_FAST;                    \
+                    }                                                                   \
+                    if (pa->kind == VKind::FLOAT) {                                     \
+                        double l = pa->d; (void)l;                                      \
+                        --sp_; if (!(cmpDbl)) ip += d; VM_NEXT_FAST;                    \
+                    }                                                                   \
+                    {                                                                   \
+                        Value a = pop();                                                \
+                        auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
+                            std::make_shared<IntegerObject>(k), currentLine());         \
+                        if (isError(res)) VM_THROW(res);                                \
+                        if (!objectTruthy(res)) ip += d;                                \
+                    }                                                                   \
+                    VM_NEXT;
+
+                VM_CASE(LT_I_JF) { CMP_I_JF("<",  l < k,  l < k)  }
+                VM_CASE(LE_I_JF) { CMP_I_JF("<=", l <= k, l <= k) }
+                VM_CASE(GT_I_JF) { CMP_I_JF(">",  l > k,  l > k)  }
+                VM_CASE(GE_I_JF) { CMP_I_JF(">=", l >= k, l >= k) }
+                VM_CASE(EQ_I_JF) { CMP_I_JF("==", l == k, l == k) }
+                VM_CASE(NE_I_JF) { CMP_I_JF("!=", l != k, l != k) }
+
+                VM_CASE(HALT)
                     frames_.pop_back();
                     sp_ = stackMem_.get();
                     return NULL_OBJ_;
+            #ifndef LUME_CG
             }
+#endif
         }
+        #undef VM_CASE
+        #undef VM_NEXT
+        #undef VM_NEXT_FAST
         #undef VM_THROW
     }
 

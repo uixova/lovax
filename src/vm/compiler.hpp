@@ -265,8 +265,7 @@ private:
             }
             case NodeType::IF_STATEMENT: {
                 const auto* s = static_cast<const IfStatement*>(stmt);
-                compileExpression(s->condition.get());
-                int elseJump = emitJump(Op::JUMP_IF_FALSE, s->token.line);
+                int elseJump = emitCondJump(s->condition.get(), false, s->token.line);
                 compileBlock(s->consequence.get());
                 if (s->alternative) {
                     int endJump = emitJump(Op::JUMP, s->token.line);
@@ -288,9 +287,7 @@ private:
                 const auto* s = static_cast<const WhileStatement*>(stmt);
                 int loopStart = (int)chunk().code.size();
                 ctx_->loops.push_back({loopStart, {}, 0});
-                compileExpression(s->condition.get());
-                if (s->untilForm) emitOp(Op::NOT_, s->token.line); // until = while not
-                int exitJump = emitJump(Op::JUMP_IF_FALSE, s->token.line);
+                int exitJump = emitCondJump(s->condition.get(), s->untilForm, s->token.line);
                 compileBlock(s->body.get());
                 emitLoop(loopStart, s->token.line);
                 patchJump(exitJump);
@@ -482,6 +479,65 @@ private:
         }
         emitOp(Op::SET_GLOBAL, line);
         emitU16(globals_.slot(name), line);
+    }
+
+
+
+    // Returns the local slot when expr is an identifier bound to a local in the
+    // current context, else -1 (globals/upvalues do not qualify for LGET fusion).
+    int localSlotOf(const Expression* e) {
+        if (e->nodeType() != NodeType::IDENTIFIER) return -1;
+        return resolveLocal(ctx_, static_cast<const Identifier*>(e)->value);
+    }
+
+    // Compiles a branch condition and emits the "exit" jump in one fused op when
+    // the condition is a plain comparison (peephole, v0.8). invert flips the
+    // comparison ('until' loops). Returns the jump operand offset to patch.
+    int emitCondJump(const Expression* cond, bool invert, int line) {
+        if (cond->nodeType() == NodeType::INFIX_EXPRESSION) {
+            const auto* b = static_cast<const InfixExpression*>(cond);
+            static const struct { const char* op; Op straight; Op inverse; } table[] = {
+                {"<",  Op::LESS_JF,       Op::GREATER_EQ_JF},
+                {">",  Op::GREATER_JF,    Op::LESS_EQ_JF},
+                {"<=", Op::LESS_EQ_JF,    Op::GREATER_JF},
+                {">=", Op::GREATER_EQ_JF, Op::LESS_JF},
+                {"==", Op::EQUAL_JF,      Op::NOT_EQUAL_JF},
+                {"!=", Op::NOT_EQUAL_JF,  Op::EQUAL_JF},
+            };
+            static const struct { const char* op; Op straight; Op inverse; } immTable[] = {
+                {"<",  Op::LT_I_JF, Op::GE_I_JF},
+                {">",  Op::GT_I_JF, Op::LE_I_JF},
+                {"<=", Op::LE_I_JF, Op::GT_I_JF},
+                {">=", Op::GE_I_JF, Op::LT_I_JF},
+                {"==", Op::EQ_I_JF, Op::NE_I_JF},
+                {"!=", Op::NE_I_JF, Op::EQ_I_JF},
+            };
+            if (b->right->nodeType() == NodeType::INTEGER_LITERAL) {
+                long long k = static_cast<const IntegerLiteral*>(b->right.get())->value;
+                if (k >= -32768 && k <= 32767) {
+                    for (const auto& e : immTable) {
+                        if (b->op == e.op) {
+                            compileExpression(b->left.get());
+                            Op fused = invert ? e.inverse : e.straight;
+                            emitOp(fused, line);
+                            emitU16((uint16_t)(int16_t)k, line);
+                            emitU16(0xFFFF, line);      // jump operand, patched by caller
+                            return (int)chunk().code.size() - 2;
+                        }
+                    }
+                }
+            }
+            for (const auto& e : table) {
+                if (b->op == e.op) {
+                    compileExpression(b->left.get());
+                    compileExpression(b->right.get());
+                    return emitJump(invert ? e.inverse : e.straight, line);
+                }
+            }
+        }
+        compileExpression(cond);
+        if (invert) emitOp(Op::NOT_, line);
+        return emitJump(Op::JUMP_IF_FALSE, line);
     }
 
     void compileMatch(const MatchStatement* m) {
@@ -681,8 +737,7 @@ private:
         ctx_->loops.push_back({loopStart, {}, 0});
         emitLoadHidden(counterSlot, line);
         emitConst(Value::integer(0), line);
-        emitOp(Op::GREATER, line);
-        int exitJump = emitJump(Op::JUMP_IF_FALSE, line);
+        int exitJump = emitJump(Op::GREATER_JF, line);
         compileBlock(r->body.get());
         emitLoadHidden(counterSlot, line);
         emitConst(Value::integer(1), line);
@@ -836,8 +891,7 @@ private:
             }
             case NodeType::CONDITIONAL_EXPRESSION: {
                 const auto* c = static_cast<const ConditionalExpression*>(expr);
-                compileExpression(c->condition.get());
-                int elseJump = emitJump(Op::JUMP_IF_FALSE, c->token.line);
+                int elseJump = emitCondJump(c->condition.get(), false, c->token.line);
                 compileExpression(c->thenExpr.get());
                 int endJump = emitJump(Op::JUMP, c->token.line);
                 patchJump(elseJump);
@@ -870,8 +924,52 @@ private:
                     patchJump(j);
                     break;
                 }
-                compileExpression(b->left.get());
-                compileExpression(b->right.get());
+                // Immediate fusion: <expr> op <small-int-literal> collapses the
+                // CONST + binary op into one fused instruction (v0.8 peephole).
+                if (b->right->nodeType() == NodeType::INTEGER_LITERAL) {
+                    long long k = static_cast<const IntegerLiteral*>(b->right.get())->value;
+                    if (k >= -32768 && k <= 32767) {
+                        Op fused = Op::HALT;
+                        if      (b->op == "+") fused = Op::ADD_I;
+                        else if (b->op == "-") fused = Op::SUB_I;
+                        else if (b->op == "*") fused = Op::MUL_I;
+                        else if (b->op == "%") fused = Op::MOD_I;
+                        else if (b->op == "&") fused = Op::BAND_I;
+                        else if (b->op == "|") fused = Op::BOR_I;
+                        else if (b->op == "^") fused = Op::BXOR_I;
+                        if (fused != Op::HALT) {
+                            int slot = localSlotOf(b->left.get());
+                            if (slot != -1 && fused == Op::ADD_I) {
+                                emitOp(Op::LGET_ADD_I, b->token.line);
+                                emitU16((uint16_t)slot, b->token.line);
+                                emitU16((uint16_t)(int16_t)k, b->token.line);
+                                break;
+                            }
+                            if (slot != -1 && fused == Op::SUB_I) {
+                                emitOp(Op::LGET_SUB_I, b->token.line);
+                                emitU16((uint16_t)slot, b->token.line);
+                                emitU16((uint16_t)(int16_t)k, b->token.line);
+                                break;
+                            }
+                            compileExpression(b->left.get());
+                            emitOp(fused, b->token.line);
+                            emitU16((uint16_t)(int16_t)k, b->token.line);
+                            break;
+                        }
+                    }
+                }
+                {
+                    int sa = localSlotOf(b->left.get());
+                    int sb = localSlotOf(b->right.get());
+                    if (sa != -1 && sb != -1) {
+                        emitOp(Op::LGET2, b->token.line);
+                        emitU16((uint16_t)sa, b->token.line);
+                        emitU16((uint16_t)sb, b->token.line);
+                    } else {
+                        compileExpression(b->left.get());
+                        compileExpression(b->right.get());
+                    }
+                }
                 if (b->op == "..")      emitOp(Op::RANGE_NEW, b->token.line);
                 else if (b->op == "is") emitOp(Op::IS_TYPE, b->token.line);
                 else                    emitBinary(b->op, b->token.line);

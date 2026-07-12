@@ -6,7 +6,7 @@ Thanks for your interest! The process is simple.
 
 ```bash
 # Build (any C++17 compiler, zero dependencies)
-g++ -std=c++17 -O2 -o lume src/main.cpp
+g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
 
 # Run the test suite (53 golden-file tests)
 ./tests/run_tests.sh
