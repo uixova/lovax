@@ -1,0 +1,28 @@
+# Compute-heavy stress: hot loops for v0.8 perf work (no I/O in the timed part)
+use math
+
+# 1) tight arithmetic loop
+set acc = 0
+for i in 0..1000000:
+    acc += (i * 3 + 7) % 13
+say "arith: {acc}"
+
+# 2) nested loop (matrix-ish)
+set s = 0
+for y in 0..1000:
+    for x in 0..1000:
+        s += (x ^ y) & 255
+say "nested: {s}"
+
+# 3) function-call heavy (recursion)
+fn fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+say "fib(28): {fib(28)}"
+
+# 4) float math loop
+set t = 0.0
+for i in 0..500000:
+    t += math.sin(i * 0.001) * math.cos(i * 0.002)
+say "floatsum: {round(t)}"

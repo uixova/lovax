@@ -310,19 +310,27 @@ private:
         stmt->tryBlock = parseColonBlock();
         if (stmt->tryBlock == nullptr) return nullptr;
 
-        if (!expectPeek(TokenType::CATCH)) return nullptr;
-        if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
-        stmt->catchName = std::make_unique<Identifier>();
-        stmt->catchName->token = curToken;
-        stmt->catchName->value = curToken.literal;
+        // 'catch' is optional when a 'finally' clause is present (try/finally).
+        if (peekToken.type == TokenType::CATCH) {
+            nextParserToken(); // 'catch'
+            if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+            stmt->catchName = std::make_unique<Identifier>();
+            stmt->catchName->token = curToken;
+            stmt->catchName->value = curToken.literal;
 
-        stmt->catchBlock = parseColonBlock();
-        if (stmt->catchBlock == nullptr) return nullptr;
+            stmt->catchBlock = parseColonBlock();
+            if (stmt->catchBlock == nullptr) return nullptr;
+        }
 
         if (peekToken.type == TokenType::FINALLY) {
             nextParserToken(); // 'finally'
             stmt->finallyBlock = parseColonBlock();
             if (stmt->finallyBlock == nullptr) return nullptr;
+        }
+
+        if (stmt->catchBlock == nullptr && stmt->finallyBlock == nullptr) {
+            addError("'try' needs a 'catch' or a 'finally' clause", stmt->token);
+            return nullptr;
         }
         return stmt;
     }

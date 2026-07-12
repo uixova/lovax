@@ -1,0 +1,65 @@
+# ---- Inventory, crafting & shop economy ----
+use game: pick_weighted
+use strings
+
+# loot drops from 200 kills
+seed(7)
+set drops = []
+set table = {"wood": 50, "iron": 25, "gold": 10, "gem": 3, "herb": 40}
+repeat 200:
+    push(drops, pick_weighted(table))
+
+# tally with group_by
+set by_type = group_by(drops, fn(d) -> d)
+set inventory = {}
+for kind in keys(by_type):
+    inventory[kind] = len(by_type[kind])
+
+say "=== loot after 200 kills ==="
+for kind in sorted(keys(inventory)):
+    say "  {kind}: {inventory[kind]}"
+
+# crafting recipes: name -> {ingredient: qty}
+set recipes = {
+    "sword": {"iron": 3, "wood": 1},
+    "potion": {"herb": 2, "gem": 1},
+    "ring": {"gold": 2, "gem": 1},
+}
+
+fn can_craft(inv, recipe):
+    for ing in keys(recipe):
+        if get(inv, ing, 0) < recipe[ing]:
+            return false
+    return true
+
+fn craft(inv, recipe):
+    for ing in keys(recipe):
+        inv[ing] -= recipe[ing]
+
+# greedily craft everything possible
+set made = {}
+set changed = true
+while changed:
+    changed = false
+    for name in keys(recipes):
+        if can_craft(inventory, recipes[name]):
+            craft(inventory, recipes[name])
+            made[name] = get(made, name, 0) + 1
+            changed = true
+
+say "=== crafted ==="
+set total_items = reduce(values(made), fn(a, b) -> a + b, 0)
+for name in sorted(keys(made)):
+    say "  {name} x{made[name]}"
+say "total items crafted: {total_items}"
+
+# shop value
+set prices = {"sword": 40, "potion": 15, "ring": 60}
+set gross = 0
+for name in keys(made):
+    gross += made[name] * prices[name]
+say "sell value: {gross} gold"
+
+# leftover raw materials
+set leftover = filter(entries(inventory), fn(e) -> e[1] > 0)
+say "leftover stacks: {len(leftover)}"
