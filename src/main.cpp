@@ -10,7 +10,7 @@
 #include "vm/vm.hpp"
 #include "utils/colors.hpp"
 
-static const char* LUME_VERSION = "0.7.0";
+static const char* LUME_VERSION = "0.8.0";
 
 // Evaluate one REPL chunk on a persistent VM. A lone bare expression is echoed
 // (wrapped in 'say') so `2 + 3` or `player.hp` print their value like Python.

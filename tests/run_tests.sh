@@ -16,7 +16,7 @@ UPDATE=0
 [ "${1:-}" = "--update" ] && UPDATE=1
 
 if [ ! -x "$LUME" ]; then
-    echo "HATA: '$LUME' bulunamadı. Önce derle: g++ -std=c++17 -O2 -o lume src/main.cpp"
+    echo "HATA: '$LUME' bulunamadı. Önce derle: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp"
     exit 2
 fi
 

@@ -4,7 +4,7 @@
 set -u
 cd "$(dirname "$0")/.."
 LUME=./lume
-[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O2 -o lume src/main.cpp"; exit 2; }
+[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp"; exit 2; }
 
 run() {
     local name="$1" file="$2" best=99999
