@@ -1,0 +1,10 @@
+# null-safe member access and single-expression (arrow) lambdas
+set player = {"name": "Zoe"}
+say player?.name
+set empty = null
+say empty?.name
+
+set double = fn(x) -> x * 2
+say double(21)
+set nums = [1, 2, 3, 4]
+say transform(nums, fn(n) -> n * n)

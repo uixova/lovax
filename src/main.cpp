@@ -10,13 +10,80 @@
 #include "vm/vm.hpp"
 #include "utils/colors.hpp"
 
-static const char* LUME_VERSION = "0.6.0";
+static const char* LUME_VERSION = "0.7.0";
+
+// Evaluate one REPL chunk on a persistent VM. A lone bare expression is echoed
+// (wrapped in 'say') so `2 + 3` or `player.hp` print their value like Python.
+static void replEval(Lume::VM& vm, const std::string& src) {
+    Lume::Lexer lexer(src);
+    Lume::Parser parser(lexer);
+    auto program = parser.parseProgram();
+    if (!parser.errors().empty()) {
+        for (const auto& err : parser.errors()) {
+            std::cerr << Lume::Color::errRed() << err.toString()
+                      << Lume::Color::errReset() << "\n";
+        }
+        return;
+    }
+    if (program->statements.size() == 1 &&
+        program->statements[0]->nodeType() == Lume::NodeType::EXPRESSION_STATEMENT) {
+        auto* es = static_cast<Lume::ExpressionStatement*>(program->statements[0].get());
+        auto say = std::make_unique<Lume::SayStatement>();
+        say->token = es->token;
+        say->values.push_back(std::move(es->expression));
+        program->statements[0] = std::move(say);
+    }
+    vm.resetReplState();
+    auto result = vm.interpret(program.get());
+    if (Lume::isError(result)) {
+        std::cerr << Lume::Color::errRed() << result->inspect()
+                  << Lume::Color::errReset() << std::endl;
+    }
+}
+
+// Interactive read-eval-print loop (started when lume is launched with no script).
+// A header line ending in ':' opens a block that is collected until a blank line.
+static int runRepl() {
+    std::cout << "Lume " << LUME_VERSION << " REPL — type 'exit' to quit, blank line ends a block\n";
+    Lume::VM::setBaseDir(".");
+    Lume::VM vm;
+    std::string line, block;
+    bool inBlock = false;
+    while (true) {
+        std::cout << (inBlock ? "... " : ">>> ") << std::flush;
+        if (!std::getline(std::cin, line)) { std::cout << "\n"; break; }
+
+        if (!inBlock) {
+            std::string trimmed = line;
+            size_t a = trimmed.find_first_not_of(" \t");
+            if (a == std::string::npos) continue;             // empty line
+            std::string t = trimmed.substr(a);
+            if (t == "exit" || t == "quit") break;
+            // A trailing ':' (block header) starts multi-line collection.
+            size_t last = t.find_last_not_of(" \t");
+            if (last != std::string::npos && t[last] == ':') {
+                block = line + "\n";
+                inBlock = true;
+                continue;
+            }
+            replEval(vm, line);
+        } else {
+            if (line.find_first_not_of(" \t") == std::string::npos) {
+                replEval(vm, block);                          // blank line ends block
+                block.clear();
+                inBlock = false;
+            } else {
+                block += line + "\n";
+            }
+        }
+    }
+    return 0;
+}
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cout << "Lume " << LUME_VERSION << "\n"
-                  << "Usage: " << argv[0] << " <script.lm> [args...]" << std::endl;
-        return 1;
+        // No script given: drop into the interactive REPL.
+        return runRepl();
     }
 
     std::string arg = argv[1];

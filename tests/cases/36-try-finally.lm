@@ -1,0 +1,13 @@
+# try / catch / finally — cleanup runs on both paths
+fn safe_div(a, b):
+    try:
+        if b == 0:
+            throw "division by zero"
+        say a / b
+    catch e:
+        say "error: {e}"
+    finally:
+        say "done"
+
+safe_div(10, 2)
+safe_div(10, 0)

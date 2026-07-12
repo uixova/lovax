@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <filesystem>
 #include "../ast/ast.hpp"
 #include "chunk.hpp"
@@ -67,6 +68,11 @@ private:
         FnCtx* enclosing = nullptr;
         bool isScript = false;
     };
+
+    // Constant names per compilation unit (script + each function share this set;
+    // const is a compile-time contract, so a global name marked const stays const).
+    std::unordered_set<std::string> constNames_;
+    int hiddenCounter_ = 0;
 
     GlobalTable& globals_;
     FnCtx* ctx_ = nullptr;
@@ -148,9 +154,12 @@ private:
             out.push_back(n);
         };
         switch (stmt->nodeType()) {
-            case NodeType::SET_STATEMENT:
-                add(static_cast<const SetStatement*>(stmt)->name->value);
+            case NodeType::SET_STATEMENT: {
+                const auto* ss = static_cast<const SetStatement*>(stmt);
+                add(ss->name->value);
+                for (const auto& e : ss->extraNames) add(e->value);
                 break;
+            }
             case NodeType::EXPRESSION_STATEMENT: {
                 // A named nested 'fn' binds its own name in this scope.
                 const auto* e = static_cast<const ExpressionStatement*>(stmt);
@@ -163,7 +172,20 @@ private:
             case NodeType::FOR_STATEMENT: {
                 const auto* f = static_cast<const ForStatement*>(stmt);
                 add(f->variable->value);
+                if (f->variable2) add(f->variable2->value);
                 for (const auto& s : f->body->statements) collectLocals(s.get(), out);
+                break;
+            }
+            case NodeType::REPEAT_STATEMENT: {
+                const auto* r = static_cast<const RepeatStatement*>(stmt);
+                for (const auto& s : r->body->statements) collectLocals(s.get(), out);
+                break;
+            }
+            case NodeType::TRY_STATEMENT: {
+                const auto* t = static_cast<const TryStatement*>(stmt);
+                for (const auto& s : t->tryBlock->statements) collectLocals(s.get(), out);
+                add(t->catchName->value);
+                for (const auto& s : t->catchBlock->statements) collectLocals(s.get(), out);
                 break;
             }
             case NodeType::WHILE_STATEMENT: {
@@ -199,12 +221,29 @@ private:
 
     void compileStatement(const Statement* stmt) {
         switch (stmt->nodeType()) {
-            case NodeType::SET_STATEMENT: {
-                const auto* s = static_cast<const SetStatement*>(stmt);
-                compileExpression(s->value.get());
-                defineName(s->name->value, s->token.line);
+            case NodeType::SET_STATEMENT:
+                compileSet(static_cast<const SetStatement*>(stmt));
+                break;
+            case NodeType::PASS_STATEMENT:
+                break; // no-op
+            case NodeType::THROW_STATEMENT: {
+                const auto* t = static_cast<const ThrowStatement*>(stmt);
+                compileExpression(t->value.get());
+                emitOp(Op::THROW_, t->token.line);
                 break;
             }
+            case NodeType::TRY_STATEMENT:
+                compileTry(static_cast<const TryStatement*>(stmt));
+                break;
+            case NodeType::REPEAT_STATEMENT:
+                compileRepeat(static_cast<const RepeatStatement*>(stmt));
+                break;
+            case NodeType::ENUM_STATEMENT:
+                compileEnum(static_cast<const EnumStatement*>(stmt));
+                break;
+            case NodeType::STRUCT_STATEMENT:
+                compileStruct(static_cast<const StructStatement*>(stmt));
+                break;
             case NodeType::ASSIGN_STATEMENT:
                 compileAssign(static_cast<const AssignStatement*>(stmt));
                 break;
@@ -241,6 +280,7 @@ private:
                 int loopStart = (int)chunk().code.size();
                 ctx_->loops.push_back({loopStart, {}, 0});
                 compileExpression(s->condition.get());
+                if (s->untilForm) emitOp(Op::NOT_, s->token.line); // until = while not
                 int exitJump = emitJump(Op::JUMP_IF_FALSE, s->token.line);
                 compileBlock(s->body.get());
                 emitLoop(loopStart, s->token.line);
@@ -313,17 +353,54 @@ private:
         }
     }
 
+    void markConst(const std::string& name) { constNames_.insert(name); }
+
+    // Hidden compiler-generated temporaries (repeat counter): reuse a bank of
+    // reserved local slots that no user name can collide with.
+    int declareHidden(int line) {
+        (void)line;
+        std::string hn = "\x01hidden" + std::to_string(hiddenCounter_++);
+        if (ctx_->isScript) return (int)globals_.slot(hn);
+        int slot = resolveLocal(ctx_, hn);
+        if (slot == -1) { ctx_->locals.push_back({hn}); slot = (int)ctx_->locals.size() - 1; }
+        return slot;
+    }
+    void emitStoreHidden(int slot, int line) {
+        if (ctx_->isScript) { emitOp(Op::DEFINE_GLOBAL, line); emitU16((uint16_t)slot, line); }
+        else { emitOp(Op::SET_LOCAL, line); emitU16((uint16_t)slot, line); }
+    }
+    void emitLoadHidden(int slot, int line) {
+        if (ctx_->isScript) { emitOp(Op::GET_GLOBAL, line); emitU16((uint16_t)slot, line); }
+        else { emitOp(Op::GET_LOCAL, line); emitU16((uint16_t)slot, line); }
+    }
+
     void compileAssign(const AssignStatement* s) {
         int line = s->token.line;
+        // const contract: reassigning a const name is a compile-time detected error.
+        if (s->target->nodeType() == NodeType::IDENTIFIER) {
+            const auto* id = static_cast<const Identifier*>(s->target.get());
+            if (constNames_.count(id->value)) {
+                emitRuntimeError("cannot assign to constant '" + id->value + "'", line);
+                return;
+            }
+        }
         std::string binOp;
         if (s->op != "=") binOp = s->op.substr(0, s->op.size() - 1); // "+=" -> "+", "**=" safe too
 
         if (s->target->nodeType() == NodeType::IDENTIFIER) {
             const auto* ident = static_cast<const Identifier*>(s->target.get());
+            if (binOp == "??") { // ??= : assign only when currently null
+                emitNameGet(ident->value, line);
+                int j = emitJump(Op::COALESCE, line);
+                compileExpression(s->value.get());
+                patchJump(j);
+                emitNameSet(ident->value, line);
+                return;
+            }
             if (!binOp.empty()) {
                 emitNameGet(ident->value, line);
                 compileExpression(s->value.get());
-                emitBinary(binOp, line);
+                emitCompound(binOp, line);
             } else {
                 compileExpression(s->value.get());
             }
@@ -338,7 +415,7 @@ private:
             if (!binOp.empty()) {
                 emitOp(Op::INDEX_GET_KEEP, line);       // obj idx -> obj idx old
                 compileExpression(s->value.get());
-                emitBinary(binOp, line);                 // obj idx new
+                emitCompound(binOp, line);              // obj idx new
             } else {
                 compileExpression(s->value.get());
             }
@@ -354,7 +431,7 @@ private:
             emitOp(Op::MEMBER_GET_KEEP, line);           // obj -> obj old
             emitU16(nameC, line);
             compileExpression(s->value.get());
-            emitBinary(binOp, line);                     // obj new
+            emitCompound(binOp, line);                  // obj new
         } else {
             compileExpression(s->value.get());
         }
@@ -439,26 +516,180 @@ private:
         for (int j : endJumps) patchJump(j);
     }
 
+    // set/const with optional parallel targets and list unpacking
+    void compileSet(const SetStatement* s) {
+        int line = s->token.line;
+        size_t targets = 1 + s->extraNames.size();
+
+        if (targets == 1) {
+            compileExpression(s->value.get());
+            defineName(s->name->value, line);
+            if (s->isConst) markConst(s->name->value);
+            return;
+        }
+
+        if (s->extraValues.empty()) {
+            // List unpacking: set a, b = some_list
+            compileExpression(s->value.get());
+            emitOp(Op::UNPACK, line);
+            emitU16((uint16_t)targets, line);
+        } else {
+            // Parallel: set a, b = 1, 2 — push all values, then bind in reverse
+            compileExpression(s->value.get());
+            for (const auto& v : s->extraValues) compileExpression(v.get());
+        }
+        // Stack now holds the N values in order; bind last-to-first.
+        std::vector<const Identifier*> names;
+        names.push_back(s->name.get());
+        for (const auto& e : s->extraNames) names.push_back(e.get());
+        for (int i = (int)names.size() - 1; i >= 0; --i) {
+            defineName(names[i]->value, line);
+            if (s->isConst) markConst(names[i]->value);
+        }
+    }
+
+    void compileTry(const TryStatement* t) {
+        int line = t->token.line;
+        int handlerJump = emitJump(Op::TRY_PUSH, line); // operand = catch target
+        compileBlock(t->tryBlock.get());
+        emitOp(Op::TRY_POP, line);
+        int endJump = emitJump(Op::JUMP, line);
+        patchJump(handlerJump);
+        // Catch entry: the VM pushed the error message string; bind it.
+        defineName(t->catchName->value, line);
+        compileBlock(t->catchBlock.get());
+        patchJump(endJump);
+        // 'finally' runs on both the normal and the caught path (RFC-008).
+        if (t->finallyBlock) compileBlock(t->finallyBlock.get());
+    }
+
+    // enum State: IDLE, WALK, ATTACK -> a map { "IDLE": 0, "WALK": 1, ... }
+    void compileEnum(const EnumStatement* e) {
+        int line = e->token.line;
+        for (size_t i = 0; i < e->members.size(); ++i) {
+            emitConst(Value::object(std::make_shared<StringObject>(e->members[i])), line);
+            emitConst(Value::integer((long long)i), line);
+        }
+        emitOp(Op::MAP, line);
+        emitU16((uint16_t)e->members.size(), line);
+        defineName(e->name, line);
+        markConst(e->name);
+    }
+
+    // struct Player: -> a factory closure that builds a tagged map instance.
+    // Fields become factory parameters (defaults preserved); methods are stored
+    // as closures whose implicit first parameter is 'this' (see CALL_METHOD).
+    void compileStruct(const StructStatement* st) {
+        int line = st->token.line;
+
+        FnCtx fnCtx;
+        fnCtx.proto = std::make_shared<Proto>();
+        fnCtx.proto->name = st->name;
+        fnCtx.proto->paramCount = (int)st->fields.size();
+        fnCtx.enclosing = ctx_;
+        fnCtx.isScript = false;
+
+        int required = 0;
+        for (const auto& d : st->fieldDefaults) if (d == nullptr) required++;
+        fnCtx.proto->requiredCount = required;
+
+        for (const auto& f : st->fields) fnCtx.locals.push_back({f});
+
+        FnCtx* saved = ctx_;
+        ctx_ = &fnCtx;
+
+        // Field defaults (evaluated when the argument is missing).
+        for (size_t i = 0; i < st->fieldDefaults.size(); ++i) {
+            if (st->fieldDefaults[i] == nullptr) continue;
+            emitOp(Op::ARG_DEFAULT, line);
+            emitU16((uint16_t)i, line);
+            int skip = (int)chunk().code.size();
+            emitU16(0xFFFF, line);
+            compileExpression(st->fieldDefaults[i].get());
+            emitOp(Op::SET_LOCAL, line);
+            emitU16((uint16_t)i, line);
+            patchJump(skip);
+        }
+
+        // Build the instance map: __type__, then fields, then methods.
+        int pairCount = 1 + (int)st->fields.size() + (int)st->methods.size();
+        emitConst(Value::object(std::make_shared<StringObject>("__type__")), line);
+        emitConst(Value::object(std::make_shared<StringObject>(st->name)), line);
+        for (size_t i = 0; i < st->fields.size(); ++i) {
+            emitConst(Value::object(std::make_shared<StringObject>(st->fields[i])), line);
+            emitOp(Op::GET_LOCAL, line);
+            emitU16((uint16_t)i, line);
+        }
+        for (const auto& m : st->methods) {
+            emitConst(Value::object(std::make_shared<StringObject>(m->name->value)), line);
+            compileFunction(m.get(), /*asMethod=*/true);
+        }
+        emitOp(Op::MAP, line);
+        emitU16((uint16_t)pairCount, line);
+        emitOp(Op::RETURN, line);
+
+        std::vector<UpvalDesc> upvals = fnCtx.upvals;
+        std::shared_ptr<Proto> proto = fnCtx.proto;
+        proto->localCount = (int)fnCtx.locals.size();
+
+        ctx_ = saved;
+
+        emitOp(Op::CLOSURE, line);
+        emitU16(addConst(Value::object(std::make_shared<ProtoObject>(proto))), line);
+        emitU16((uint16_t)upvals.size(), line);
+        for (const auto& u : upvals) {
+            emitU8(u.isLocal ? 1 : 0, line);
+            emitU16(u.index, line);
+        }
+        defineName(st->name, line);
+        markConst(st->name);
+    }
+
+    void compileRepeat(const RepeatStatement* r) {
+        int line = r->token.line;
+        // Desugar to: set _n = count; while _n > 0: body; _n -= 1
+        compileExpression(r->count.get());
+        int counterSlot = declareHidden(line);
+        emitStoreHidden(counterSlot, line);
+
+        int loopStart = (int)chunk().code.size();
+        ctx_->loops.push_back({loopStart, {}, 0});
+        emitLoadHidden(counterSlot, line);
+        emitConst(Value::integer(0), line);
+        emitOp(Op::GREATER, line);
+        int exitJump = emitJump(Op::JUMP_IF_FALSE, line);
+        compileBlock(r->body.get());
+        emitLoadHidden(counterSlot, line);
+        emitConst(Value::integer(1), line);
+        emitOp(Op::SUB, line);
+        emitStoreHidden(counterSlot, line);
+        emitLoop(loopStart, line);
+        patchJump(exitJump);
+        for (int bj : ctx_->loops.back().breakJumps) patchJump(bj);
+        ctx_->loops.pop_back();
+    }
+
     void compileFor(const ForStatement* f) {
         int line = f->token.line;
         compileExpression(f->iterable.get());
         emitOp(Op::FOR_SETUP, line);           // iterable -> iterator (stays on stack)
 
-        int varSlot = -1;
-        uint16_t varOperand;
-        if (ctx_->isScript) {
-            varOperand = globals_.slot(f->variable->value);
-        } else {
-            varSlot = resolveLocal(ctx_, f->variable->value);
-            varOperand = (uint16_t)varSlot;
-        }
+        auto varOperand = [&](const Identifier* id) -> uint16_t {
+            return ctx_->isScript ? globals_.slot(id->value) : (uint16_t)resolveLocal(ctx_, id->value);
+        };
+        uint16_t v1 = varOperand(f->variable.get());
+        uint16_t v2 = f->variable2 ? varOperand(f->variable2.get()) : 0;
 
         int loopStart = (int)chunk().code.size();
         ctx_->loops.push_back({loopStart, {}, 1});
 
+        uint8_t flags = 0;
+        if (ctx_->isScript) flags |= 1;        // write into globals
+        if (f->variable2)   flags |= 2;        // pair form
         emitOp(Op::FOR_NEXT, line);
-        emitU8(ctx_->isScript ? 1 : 0, line);  // 1 = write into a global, 0 = local
-        emitU16(varOperand, line);
+        emitU8(flags, line);
+        emitU16(v1, line);
+        emitU16(v2, line);
         int exitJump = (int)chunk().code.size();
         emitU16(0xFFFF, line);                 // patched below
 
@@ -546,14 +777,22 @@ private:
             case NodeType::INDEX_EXPRESSION: {
                 const auto* i = static_cast<const IndexExpression*>(expr);
                 compileExpression(i->object.get());
-                compileExpression(i->index.get());
-                emitOp(Op::INDEX_GET, i->token.line);
+                if (i->isSlice) {
+                    if (i->index) compileExpression(i->index.get());
+                    else emitOp(Op::NIL, i->token.line);
+                    if (i->indexEnd) compileExpression(i->indexEnd.get());
+                    else emitOp(Op::NIL, i->token.line);
+                    emitOp(Op::SLICE, i->token.line);
+                } else {
+                    compileExpression(i->index.get());
+                    emitOp(Op::INDEX_GET, i->token.line);
+                }
                 break;
             }
             case NodeType::MEMBER_EXPRESSION: {
                 const auto* m = static_cast<const MemberExpression*>(expr);
                 compileExpression(m->object.get());
-                emitOp(Op::MEMBER_GET, m->token.line);
+                emitOp(m->safe ? Op::MEMBER_GET_SAFE : Op::MEMBER_GET, m->token.line);
                 emitU16(strConst(m->property), m->token.line);
                 break;
             }
@@ -586,9 +825,18 @@ private:
                     patchJump(j);
                     break;
                 }
+                if (b->op == "??") {
+                    compileExpression(b->left.get());
+                    int j = emitJump(Op::COALESCE, b->token.line);
+                    compileExpression(b->right.get());
+                    patchJump(j);
+                    break;
+                }
                 compileExpression(b->left.get());
                 compileExpression(b->right.get());
-                emitBinary(b->op, b->token.line);
+                if (b->op == "..")      emitOp(Op::RANGE_NEW, b->token.line);
+                else if (b->op == "is") emitOp(Op::IS_TYPE, b->token.line);
+                else                    emitBinary(b->op, b->token.line);
                 break;
             }
             case NodeType::FUNCTION_LITERAL:
@@ -596,6 +844,19 @@ private:
                 break;
             case NodeType::CALL_EXPRESSION: {
                 const auto* c = static_cast<const CallExpression*>(expr);
+                // Method-call sugar: obj.name(args). The receiver is kept so the VM
+                // can pass it as 'this' when obj is a struct instance (see CALL_METHOD).
+                if (c->function->nodeType() == NodeType::MEMBER_EXPRESSION &&
+                    !static_cast<const MemberExpression*>(c->function.get())->safe) {
+                    const auto* m = static_cast<const MemberExpression*>(c->function.get());
+                    compileExpression(m->object.get());
+                    emitOp(Op::MEMBER_GET_KEEP, m->token.line);
+                    emitU16(strConst(m->property), m->token.line);
+                    for (const auto& a : c->arguments) compileExpression(a.get());
+                    emitOp(Op::CALL_METHOD, c->token.line);
+                    emitU8((uint8_t)c->arguments.size(), c->token.line);
+                    break;
+                }
                 compileExpression(c->function.get());
                 for (const auto& a : c->arguments) compileExpression(a.get());
                 emitOp(Op::CALL, c->token.line);
@@ -605,6 +866,16 @@ private:
             default:
                 break;
         }
+    }
+
+    // Maps a compound-assignment base op (e.g. "&", "<<") to its binary opcode.
+    void emitCompound(const std::string& op, int line) {
+        if      (op == "&")  emitOp(Op::BIT_AND, line);
+        else if (op == "|")  emitOp(Op::BIT_OR, line);
+        else if (op == "^")  emitOp(Op::BIT_XOR, line);
+        else if (op == "<<") emitOp(Op::SHL, line);
+        else if (op == ">>") emitOp(Op::SHR, line);
+        else                 emitBinary(op, line);
     }
 
     void emitBinary(const std::string& op, int line) {
@@ -628,23 +899,25 @@ private:
         else if (op == "in") emitOp(Op::IN, line);
     }
 
-    void compileFunction(const FunctionLiteral* fn) {
+    void compileFunction(const FunctionLiteral* fn, bool asMethod = false) {
         int line = fn->token.line;
+        int base = asMethod ? 1 : 0; // slot 0 is the implicit 'this' for methods
 
         FnCtx fnCtx;
         fnCtx.proto = std::make_shared<Proto>();
         fnCtx.proto->name = fn->name ? fn->name->value : "";
-        fnCtx.proto->paramCount = (int)fn->parameters.size();
+        fnCtx.proto->paramCount = (int)fn->parameters.size() + base;
         fnCtx.enclosing = ctx_;
         fnCtx.isScript = false;
 
-        int required = 0;
+        int required = base;
         for (const auto& d : fn->defaults) {
             if (d == nullptr) required++;
         }
         fnCtx.proto->requiredCount = required;
 
         // Slot layout: [0..paramCount) = parameters, then the collected locals.
+        if (asMethod) fnCtx.locals.push_back({"this"});
         for (const auto& p : fn->parameters) fnCtx.locals.push_back({p->value});
         std::vector<std::string> names;
         for (const auto& s : fn->body->statements) collectLocals(s.get(), names);
@@ -659,13 +932,14 @@ private:
         // Default parameters: evaluated at call time when the argument is missing.
         for (size_t i = 0; i < fn->defaults.size(); ++i) {
             if (fn->defaults[i] == nullptr) continue;
+            uint16_t slot = (uint16_t)(i + base);
             emitOp(Op::ARG_DEFAULT, line);
-            emitU16((uint16_t)i, line);
+            emitU16(slot, line);
             int skip = (int)chunk().code.size();
             emitU16(0xFFFF, line);
             compileExpression(fn->defaults[i].get());
             emitOp(Op::SET_LOCAL, line);
-            emitU16((uint16_t)i, line);
+            emitU16(slot, line);
             patchJump(skip);
         }
 
@@ -676,6 +950,7 @@ private:
         std::vector<UpvalDesc> upvals = fnCtx.upvals;
         std::shared_ptr<Proto> proto = fnCtx.proto;
         proto->localCount = (int)fnCtx.locals.size();
+        proto->variadic = fn->variadic;
 
         ctx_ = saved;
 
@@ -689,7 +964,9 @@ private:
 
         // Named function: also bind the name in the current scope, keep the
         // value on the stack (the expression statement above pops it).
-        if (fn->name) {
+        // Methods are stored into the instance map by compileStruct, not bound
+        // as names, so they must NOT run the name-binding path.
+        if (fn->name && !asMethod) {
             emitOp(Op::DUP, line);
             defineName(fn->name->value, line);
         }

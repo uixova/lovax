@@ -1,0 +1,32 @@
+# struct: fields, defaults, methods, this, mutation, nesting
+struct Weapon:
+    damage = 10
+    fn boost():
+        this.damage *= 2
+
+struct Player:
+    hp = 100
+    name = "hero"
+    weapon = null
+    fn hurt(amount):
+        this.hp -= amount
+    fn equip(w):
+        this.weapon = w
+    fn power():
+        return this.weapon.damage
+    fn status():
+        return "{this.name}: {this.hp} hp"
+
+set p = Player(80, "Aria")
+say p.hp
+say p.name
+p.hurt(30)
+say p.hp
+say p.status()
+
+set sword = Weapon(25)
+p.equip(sword)
+say p.power()
+sword.boost()
+say p.power()
+say p.__type__

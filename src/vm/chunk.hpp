@@ -40,6 +40,7 @@ enum class Op : uint8_t {
     OR_KEEP,        // u16: if truthy jump keeping value, else pop
 
     CALL,           // u8 argc (callee below args on stack)
+    CALL_METHOD,    // u8 argc: [recv, method, args..]; passes recv as 'this' iff struct instance
     CLOSURE,        // u16 proto const index, then per-upvalue: u8 isLocal, u16 index
     ARG_DEFAULT,    // u16 param slot, u16 jump offset: skip default expr if arg was provided
     RETURN,         // pops result, closes upvalues, unwinds frame
@@ -50,16 +51,26 @@ enum class Op : uint8_t {
     INDEX_GET_KEEP, // obj idx -> obj idx value (for compound index assignment)
     INDEX_SET,      // obj idx value -> (pops all three)
     MEMBER_GET,     // u16 name const: obj -> value
+    MEMBER_GET_SAFE,// u16 name const: obj -> value (null if obj is null)
     MEMBER_GET_KEEP,// u16 name const: obj -> obj value
     MEMBER_SET,     // u16 name const: obj value -> (pops both)
     INTERP,         // u16 part count -> concatenated string
     SAY,            // u8 value count (pops, prints)
 
     FOR_SETUP,      // iterable -> iterator object (validates type)
-    FOR_NEXT,       // u16 user var slot, u16 exit jump offset (iterator stays on stack)
+    FOR_NEXT,       // u8 flags(1=global,2=pair,4=discard), u16 var1, u16 var2, u16 exit offset
 
     USE,            // u16 use-spec index (module import, binds globals)
     RUNTIME_ERROR,  // u16 message const index ('break' outside loop etc., kept as runtime errors)
+
+    TRY_PUSH,       // u16 forward offset to the catch target (RFC-008)
+    TRY_POP,        // discards the innermost handler (normal try exit)
+    THROW_,         // pops a value, raises it as a runtime error
+    COALESCE,       // u16: if top is not null jump (keep it), else pop and eval rhs
+    RANGE_NEW,      // pops end,start (ints) -> pushes range(start, end)
+    IS_TYPE,        // pops type-name string and value -> bool
+    UNPACK,         // u16 n: pops a list of exactly n items, pushes them in order
+    SLICE,          // pops end,start,obj (nil = default) -> slice of list/string
     HALT            // end of the top-level script
 };
 
@@ -101,6 +112,7 @@ struct Proto {
     int requiredCount = 0;             // params without defaults
     int localCount = 0;                // params + collected locals (stack reservation)
     int upvalueCount = 0;
+    bool variadic = false;             // last parameter collects extra args as a list
     Chunk chunk;
 };
 

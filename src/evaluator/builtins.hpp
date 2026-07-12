@@ -10,6 +10,7 @@
 #include <iostream>
 #include <algorithm>
 #include <thread>
+#include <cstdlib>
 #include "../object/object.hpp"
 #include "../object/environment.hpp"
 
@@ -707,6 +708,280 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) out->set(e.first, e.second);
         for (const auto& e : static_cast<MapObject*>(args[1].get())->entries) out->set(e.first, e.second);
         return out;
+    });
+
+    // ===== Iteration, aggregation, and higher-order helpers =====
+
+    // enumerate(list) -> [[0, x0], [1, x1], ...]
+    def("enumerate", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
+            return makeError("enumerate() expects a list", line);
+        }
+        auto out = std::make_shared<ListObject>();
+        const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        for (size_t i = 0; i < els.size(); ++i) {
+            auto pair = std::make_shared<ListObject>();
+            pair->elements.push_back(std::make_shared<IntegerObject>((long long)i));
+            pair->elements.push_back(els[i]);
+            out->elements.push_back(pair);
+        }
+        return out;
+    });
+
+    // zip(a, b) -> [[a0, b0], [a1, b1], ...] (stops at the shorter list)
+    def("zip", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || args[0]->type() != ObjectType::LIST ||
+            args[1]->type() != ObjectType::LIST) {
+            return makeError("zip(a, b) expects two lists", line);
+        }
+        const auto& la = static_cast<ListObject*>(args[0].get())->elements;
+        const auto& lb = static_cast<ListObject*>(args[1].get())->elements;
+        auto out = std::make_shared<ListObject>();
+        size_t n = std::min(la.size(), lb.size());
+        for (size_t i = 0; i < n; ++i) {
+            auto pair = std::make_shared<ListObject>();
+            pair->elements.push_back(la[i]);
+            pair->elements.push_back(lb[i]);
+            out->elements.push_back(pair);
+        }
+        return out;
+    });
+
+    // all(list): true if every element is truthy (true for empty list)
+    def("all", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
+            return makeError("all() expects a list", line);
+        }
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            if (!objectTruthy(e)) return FALSE_OBJ;
+        }
+        return TRUE_OBJ;
+    });
+
+    // any(list): true if any element is truthy (false for empty list)
+    def("any", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
+            return makeError("any() expects a list", line);
+        }
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            if (objectTruthy(e)) return TRUE_OBJ;
+        }
+        return FALSE_OBJ;
+    });
+
+    // sorted(list): a NEW sorted list (sort() sorts in place)
+    def("sorted", [](const Args& args, int line, const CallFn& call) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
+            return makeError("sorted() expects a list", line);
+        }
+        auto copy = std::make_shared<ListObject>();
+        copy->elements = static_cast<ListObject*>(args[0].get())->elements;
+        // Reuse the core sort() by looking it up would be circular; sort here directly.
+        auto& els = copy->elements;
+        if (els.empty()) return copy;
+        bool allNum = true, allStr = true;
+        for (const auto& e : els) {
+            if (!isNumeric(e)) allNum = false;
+            if (e->type() != ObjectType::STRING) allStr = false;
+        }
+        if (allNum) std::stable_sort(els.begin(), els.end(),
+            [](const ObjPtr& a, const ObjPtr& b) { return asDouble(a) < asDouble(b); });
+        else if (allStr) std::stable_sort(els.begin(), els.end(),
+            [](const ObjPtr& a, const ObjPtr& b) {
+                return static_cast<StringObject*>(a.get())->value <
+                       static_cast<StringObject*>(b.get())->value; });
+        else return makeError("sorted() cannot sort mixed types (all numbers or all strings)", line);
+        return copy;
+    });
+
+    // reduce(list, fn[, initial]): folds the list left to right
+    def("reduce", [](const Args& args, int line, const CallFn& call) -> ObjPtr {
+        if (args.size() < 2 || args.size() > 3 || args[0]->type() != ObjectType::LIST ||
+            (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
+            return makeError("reduce(list, fn[, initial]) expects a list and a function", line);
+        }
+        const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        ObjPtr acc;
+        size_t start = 0;
+        if (args.size() == 3) { acc = args[2]; }
+        else {
+            if (els.empty()) return makeError("reduce() of an empty list needs an initial value", line);
+            acc = els[0]; start = 1;
+        }
+        for (size_t i = start; i < els.size(); ++i) {
+            acc = call(args[1], {acc, els[i]}, line);
+            if (isError(acc)) return acc;
+        }
+        return acc;
+    });
+
+    // first(list) / last(list): the ends (error on empty)
+    def("first", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("first() expects a list", line);
+        auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        if (els.empty()) return makeError("first() of an empty list", line);
+        return els.front();
+    });
+    def("last", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("last() expects a list", line);
+        auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        if (els.empty()) return makeError("last() of an empty list", line);
+        return els.back();
+    });
+
+    // flat(list): flattens one level of nesting
+    def("flat", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("flat() expects a list", line);
+        auto out = std::make_shared<ListObject>();
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            if (e->type() == ObjectType::LIST) {
+                for (const auto& inner : static_cast<ListObject*>(e.get())->elements)
+                    out->elements.push_back(inner);
+            } else out->elements.push_back(e);
+        }
+        return out;
+    });
+
+    // unique(list): first occurrences only, order preserved
+    def("unique", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("unique() expects a list", line);
+        auto out = std::make_shared<ListObject>();
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            bool seen = false;
+            for (const auto& k : out->elements) if (objectEquals(k, e)) { seen = true; break; }
+            if (!seen) out->elements.push_back(e);
+        }
+        return out;
+    });
+
+    // dump(x): debug text with strings quoted (say prints raw; dump shows structure)
+    def("dump", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1) return argCountError("dump", "1", args.size(), line);
+        return std::make_shared<StringObject>(inspectQuoted(args[0]));
+    });
+
+    // get(map, key[, default]): safe map read (null or default if the key is absent)
+    def("get", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() < 2 || args.size() > 3 || args[0]->type() != ObjectType::MAP) {
+            return makeError("get(map, key[, default]) expects a map", line);
+        }
+        auto v = static_cast<MapObject*>(args[0].get())->get(args[1]);
+        if (v != nullptr) return v;
+        return args.size() == 3 ? args[2] : NULL_OBJ_;
+    });
+
+    // entries(map) -> [[k, v], ...]
+    def("entries", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::MAP) return makeError("entries() expects a map", line);
+        auto out = std::make_shared<ListObject>();
+        for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
+            auto pair = std::make_shared<ListObject>();
+            pair->elements.push_back(e.first);
+            pair->elements.push_back(e.second);
+            out->elements.push_back(pair);
+        }
+        return out;
+    });
+
+    // to_map(pairs): inverse of entries — builds a map from [[k, v], ...]
+    def("to_map", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("to_map() expects a list of [key, value] pairs", line);
+        auto out = std::make_shared<MapObject>();
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            if (e->type() != ObjectType::LIST ||
+                static_cast<ListObject*>(e.get())->elements.size() != 2) {
+                return makeError("to_map() expects each entry to be a [key, value] pair", line);
+            }
+            auto& p = static_cast<ListObject*>(e.get())->elements;
+            if (p[0]->type() != ObjectType::STRING && p[0]->type() != ObjectType::INTEGER &&
+                p[0]->type() != ObjectType::BOOLEAN) {
+                return makeError("to_map() keys must be string, int or bool", line);
+            }
+            out->set(p[0], p[1]);
+        }
+        return out;
+    });
+
+    // min_by(list, fn) / max_by(list, fn): extremum by the fn(element) key
+    auto extremeBy = [](const Args& args, int line, const CallFn& call, bool wantMin) -> ObjPtr {
+        std::string fname = wantMin ? "min_by" : "max_by";
+        if (args.size() != 2 || args[0]->type() != ObjectType::LIST ||
+            (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
+            return makeError(fname + "(list, fn) expects a list and a function", line);
+        }
+        const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        if (els.empty()) return makeError(fname + "() of an empty list", line);
+        ObjPtr best = els[0];
+        auto bestKey = call(args[1], {els[0]}, line);
+        if (isError(bestKey)) return bestKey;
+        for (size_t i = 1; i < els.size(); ++i) {
+            auto key = call(args[1], {els[i]}, line);
+            if (isError(key)) return key;
+            if (!isNumeric(key) || !isNumeric(bestKey)) return makeError(fname + "() keys must be numbers", line);
+            bool better = wantMin ? (asDouble(key) < asDouble(bestKey)) : (asDouble(key) > asDouble(bestKey));
+            if (better) { best = els[i]; bestKey = key; }
+        }
+        return best;
+    };
+    def("min_by", [extremeBy](const Args& a, int l, const CallFn& c) { return extremeBy(a, l, c, true); });
+    def("max_by", [extremeBy](const Args& a, int l, const CallFn& c) { return extremeBy(a, l, c, false); });
+
+    // group_by(list, fn): a map from fn(element) key -> list of elements
+    def("group_by", [](const Args& args, int line, const CallFn& call) -> ObjPtr {
+        if (args.size() != 2 || args[0]->type() != ObjectType::LIST ||
+            (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
+            return makeError("group_by(list, fn) expects a list and a function", line);
+        }
+        auto out = std::make_shared<MapObject>();
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            auto key = call(args[1], {e}, line);
+            if (isError(key)) return key;
+            if (key->type() != ObjectType::STRING && key->type() != ObjectType::INTEGER &&
+                key->type() != ObjectType::BOOLEAN) {
+                return makeError("group_by() keys must be string, int or bool", line);
+            }
+            auto bucket = out->get(key);
+            if (bucket == nullptr) { bucket = std::make_shared<ListObject>(); out->set(key, bucket); }
+            static_cast<ListObject*>(bucket.get())->elements.push_back(e);
+        }
+        return out;
+    });
+
+    // binary_search(sorted_list, x): index of x, or -1 (numbers or strings)
+    def("binary_search", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || args[0]->type() != ObjectType::LIST) {
+            return makeError("binary_search(sorted_list, x) expects a list", line);
+        }
+        const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        auto cmp = [&](const ObjPtr& a, const ObjPtr& b, int& out) -> bool {
+            if (isNumeric(a) && isNumeric(b)) { double x = asDouble(a), y = asDouble(b); out = x < y ? -1 : (x > y ? 1 : 0); return true; }
+            if (a->type() == ObjectType::STRING && b->type() == ObjectType::STRING) {
+                const auto& x = static_cast<StringObject*>(a.get())->value;
+                const auto& y = static_cast<StringObject*>(b.get())->value;
+                out = x < y ? -1 : (x > y ? 1 : 0); return true;
+            }
+            return false;
+        };
+        long long lo = 0, hi = (long long)els.size() - 1;
+        while (lo <= hi) {
+            long long mid = (lo + hi) / 2;
+            int c;
+            if (!cmp(els[mid], args[1], c)) return makeError("binary_search() needs a uniformly typed sorted list", line);
+            if (c == 0) return std::make_shared<IntegerObject>(mid);
+            if (c < 0) lo = mid + 1; else hi = mid - 1;
+        }
+        return std::make_shared<IntegerObject>(-1);
+    });
+
+    // exit([code]): stops the program immediately
+    def("exit", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() > 1) return argCountError("exit", "0-1", args.size(), line);
+        int code = 0;
+        if (args.size() == 1) {
+            if (args[0]->type() != ObjectType::INTEGER) return makeError("exit() expects an integer code", line);
+            code = (int)static_cast<IntegerObject*>(args[0].get())->value;
+        }
+        std::exit(code);
     });
 }
 

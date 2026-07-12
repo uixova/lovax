@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.7.0 — rich core
+
+The core stops being minimal. New language constructs, a much bigger standard
+library, and an interactive REPL — no fake keywords, everything maps to real
+bytecode (see [RFC-009](rfcs/009-rich-core.md) for the accept/reject rationale).
+
+### Language
+- **`struct` + `this`** — tagged data with methods and default fields;
+  `player.hp` is a real field, `this` is implicit in methods. Composition, no
+  inheritance ([RFC-010](rfcs/010-struct-enum.md)).
+- **`enum`** — named integer constants (`enum State: IDLE, WALK, ATTACK`), inline
+  or block form.
+- **`try` / `catch` / `throw` / `finally`** — structured, recoverable error
+  handling on a VM handler stack; uncaught errors are unchanged ([RFC-008](rfcs/008-error-handling.md)).
+- **`?.` null-safe access** — `player?.weapon?.damage` yields null instead of
+  crashing on a null link.
+- **`->` arrow lambdas** — `fn(x) -> x * 2`.
+- **New compound assignments** — `&= |= ^= <<= >>= ??=` (bitwise, shift,
+  null-coalescing), joining the existing `+= -= *= /= %=`.
+- Plus the earlier v0.7 syntax pack: `const`, `pass`, `repeat N:`, `until cond:`,
+  `x is "type"`, `..` ranges, slices `xs[a:b]`, parallel/unpack `set a, b = …`,
+  variadic `fn f(rest...)`, `##` block comments.
+
+### Standard library & builtins
+- ~20 new core builtins: `enumerate`, `zip`, `all`, `any`, `sorted`, `reduce`,
+  `first`, `last`, `flat`, `unique`, `group_by`, `min_by`, `max_by`,
+  `binary_search`, `get`, `entries`, `to_map`, `dump`, `exit`, …
+- Modules grown: `math` (+`gcd`/`lcm`/`smoothstep`/`inverse_lerp`/`factorial`/…),
+  `strings` (+`lines`/`capitalize`/`is_digit`/…), `game` (+`chance`/`noise`),
+  `file`, `os`, plus new **`time`** and a terminal **`canvas`** renderer.
+
+### Tooling
+- **REPL** — run `lume` with no arguments for an interactive session; a bare
+  expression is echoed, a header line ending in `:` opens a multi-line block.
+
+### Quality
+- 58 golden tests pass bit-for-bit (53 prior + 5 new: struct, enum, try/finally,
+  operators, null-safe/lambda). Clean under ASan + UBSan.
+- Benchmark note: `fib(30)` ≈ 354 ms vs CPython ≈ 133 ms — call-heavy code is
+  still slower than CPython. Closing that gap (computed-goto dispatch,
+  NaN-boxing, inline caches) is the v0.8 objective, not this release's scope.
+
 ## v0.6.0 — bytecode VM
 
 The tree-walking interpreter is retired. Lume now compiles to bytecode and runs on

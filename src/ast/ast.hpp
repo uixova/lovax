@@ -25,6 +25,12 @@ enum class NodeType {
     CONTINUE_STATEMENT,
     RETURN_STATEMENT,
     USE_STATEMENT,
+    TRY_STATEMENT,
+    THROW_STATEMENT,
+    PASS_STATEMENT,
+    REPEAT_STATEMENT,
+    ENUM_STATEMENT,
+    STRUCT_STATEMENT,
     BLOCK_STATEMENT,
     EXPRESSION_STATEMENT,
 
@@ -98,11 +104,16 @@ public:
 };
 
 // Variable definition statement -> "set <identifier> = <expression>"
+// Also covers: const bindings, parallel assignment (set a, b = 1, 2) and
+// list unpacking (set a, b = some_list).
 class SetStatement : public Statement {
 public:
-    Token token; // 'set' token
+    Token token; // 'set' or 'const' token
+    bool isConst = false;
     std::unique_ptr<Identifier> name;
+    std::vector<std::unique_ptr<Identifier>> extraNames;   // parallel targets after the first
     std::unique_ptr<Expression> value;
+    std::vector<std::unique_ptr<Expression>> extraValues;  // parallel values after the first
 
     NodeType nodeType() const override { return NodeType::SET_STATEMENT; }
     int line() const override { return token.line; }
@@ -225,7 +236,9 @@ class IndexExpression : public Expression {
 public:
     Token token; // '[' token
     std::unique_ptr<Expression> object;
-    std::unique_ptr<Expression> index;
+    std::unique_ptr<Expression> index;    // slice: start (null = from 0)
+    bool isSlice = false;
+    std::unique_ptr<Expression> indexEnd; // slice: end (null = to length)
 
     NodeType nodeType() const override { return NodeType::INDEX_EXPRESSION; }
     int line() const override { return token.line; }
@@ -236,9 +249,10 @@ public:
 // Member access -> math.lerp, player.hp (RFC-006)
 class MemberExpression : public Expression {
 public:
-    Token token; // '.' token
+    Token token; // '.' or '?.' token
     std::unique_ptr<Expression> object;
     std::string property; // name after the dot
+    bool safe = false;    // '?.' — yields null instead of erroring when object is null
 
     NodeType nodeType() const override { return NodeType::MEMBER_EXPRESSION; }
     int line() const override { return token.line; }
@@ -325,6 +339,70 @@ public:
     std::string tokenLiteral() const override { return token.literal; }
 };
 
+// try / catch error handling (RFC-008) -> try: ... catch err: ...
+class TryStatement : public Statement {
+public:
+    Token token; // 'try' token
+    std::unique_ptr<BlockStatement> tryBlock;
+    std::unique_ptr<Identifier> catchName; // the caught error message binding
+    std::unique_ptr<BlockStatement> catchBlock;
+    std::unique_ptr<BlockStatement> finallyBlock; // null unless a finally clause is present
+
+    NodeType nodeType() const override { return NodeType::TRY_STATEMENT; }
+    int line() const override { return token.line; }
+    void statementNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
+// throw <expr> -> raises a runtime error with the value's text
+class ThrowStatement : public Statement {
+public:
+    Token token;
+    std::unique_ptr<Expression> value;
+
+    NodeType nodeType() const override { return NodeType::THROW_STATEMENT; }
+    int line() const override { return token.line; }
+    void statementNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
+// pass -> empty-block no-op
+class PassStatement : public Statement {
+public:
+    Token token;
+
+    NodeType nodeType() const override { return NodeType::PASS_STATEMENT; }
+    int line() const override { return token.line; }
+    void statementNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
+// repeat <count>: body -> runs the body count times
+class RepeatStatement : public Statement {
+public:
+    Token token;
+    std::unique_ptr<Expression> count;
+    std::unique_ptr<BlockStatement> body;
+
+    NodeType nodeType() const override { return NodeType::REPEAT_STATEMENT; }
+    int line() const override { return token.line; }
+    void statementNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
+// enum State: IDLE, WALK, ATTACK -> a frozen module-like map of int constants
+class EnumStatement : public Statement {
+public:
+    Token token;
+    std::string name;
+    std::vector<std::string> members; // members[i] gets value i
+
+    NodeType nodeType() const override { return NodeType::ENUM_STATEMENT; }
+    int line() const override { return token.line; }
+    void statementNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
 class IfStatement : public Statement {
 public:
     Token token; // 'if' token (also used by chained else-if)
@@ -361,7 +439,8 @@ public:
 
 class WhileStatement : public Statement {
 public:
-    Token token; // 'while' token
+    Token token; // 'while' or 'until' token
+    bool untilForm = false; // until cond: == while not cond:
     std::unique_ptr<Expression> condition;
     std::unique_ptr<BlockStatement> body;
 
@@ -372,10 +451,12 @@ public:
 };
 
 // for <name> in <expr>: body
+// Pair form: for i, x in list / for k, v in map (index+element / key+value)
 class ForStatement : public Statement {
 public:
     Token token; // 'for' token
     std::unique_ptr<Identifier> variable;
+    std::unique_ptr<Identifier> variable2; // null unless the pair form is used
     std::unique_ptr<Expression> iterable;
     std::unique_ptr<BlockStatement> body;
 
@@ -421,6 +502,7 @@ public:
     Token token; // 'fn' token
     std::unique_ptr<Identifier> name; // stays null for anonymous functions
     std::vector<std::unique_ptr<Identifier>> parameters;
+    bool variadic = false; // last parameter declared as rest... collects extra args
     // Defaults: aligned with parameters; null for parameters without one
     std::vector<std::unique_ptr<Expression>> defaults;
     std::unique_ptr<BlockStatement> body;
@@ -428,6 +510,21 @@ public:
     NodeType nodeType() const override { return NodeType::FUNCTION_LITERAL; }
     int line() const override { return token.line; }
     void expressionNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
+// struct Player: field defaults + methods (RFC-003, composition — no inheritance)
+class StructStatement : public Statement {
+public:
+    Token token;
+    std::string name;
+    std::vector<std::string> fields;                          // field names
+    std::vector<std::unique_ptr<Expression>> fieldDefaults;   // aligned; null = no default
+    std::vector<std::unique_ptr<FunctionLiteral>> methods;    // methods (first param is implicit 'this')
+
+    NodeType nodeType() const override { return NodeType::STRUCT_STATEMENT; }
+    int line() const override { return token.line; }
+    void statementNode() override {}
     std::string tokenLiteral() const override { return token.literal; }
 };
 
