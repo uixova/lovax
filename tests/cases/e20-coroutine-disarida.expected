@@ -1,0 +1,2 @@
+# exit: 70
+[Runtime Error] line 1: yield used outside a coroutine

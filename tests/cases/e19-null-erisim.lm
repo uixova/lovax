@@ -1,0 +1,2 @@
+set m = null
+say m.field

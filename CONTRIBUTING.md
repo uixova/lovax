@@ -8,12 +8,37 @@ Thanks for your interest! The process is simple.
 # Build (any C++17 compiler, zero dependencies)
 g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
 
-# Run the test suite (53 golden-file tests)
+# Run the test suite (golden-file tests, both dispatch modes)
 ./tests/run_tests.sh
 
 # Sanitizer build
 g++ -std=c++17 -g -fsanitize=address,undefined -o lume_asan src/main.cpp
+
+# Security gate (adversarial + fuzz — must report no crashes)
+./tests/fuzz.sh
 ```
+
+## Release Gate — every step ends here (no exceptions)
+
+A change is not "done" until **all** of these pass. From v0.10 on, the VM grows
+memory-unsafe machinery (NaN-boxed values, a GC, and eventually a JIT), so this
+gate is the contract that keeps the language crash-free and exploit-free:
+
+1. **Golden, both dispatch modes** — `./tests/run_tests.sh` bit-for-bit under
+   computed-goto **and** `-DLUME_NO_COMPUTED_GOTO`.
+2. **Sanitizers clean** — ASan + UBSan + LeakSanitizer over every `tests/cases/*.lm`
+   and every `examples/stress/*.lm`, in both dispatch modes for anything touching
+   the VM core.
+3. **Security gate** — `./tests/fuzz.sh` (run it against the ASan build too):
+   adversarial + random inputs must **never** crash. A signal exit (≥128) is a
+   hard failure; only Lume's own exit codes (0/64/65/70) are acceptable.
+4. **Perf non-regression** — `./tests/bench.sh`; a step must not silently make the
+   language slower.
+5. **A safety fallback exists** for any unsafe optimization — e.g. NaN-boxing ships
+   behind `LUME_SAFE_VALUES`, and CI builds/tests both representations, so a bug in
+   the fast path can never brick the language.
+
+CI (`.github/workflows/ci.yml`) enforces 1–3 on every push and PR.
 
 ## Rules
 
