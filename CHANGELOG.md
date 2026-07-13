@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.9.0 — coroutines, string speed, distribution
+
+Beats CPython everywhere and Lua 5.4 on string/data work; coroutines land for
+game scripting; and Lume now installs like any other language. Same-machine
+best-of-5 vs CPython 3.14 / Lua 5.4:
+
+| Benchmark | Lume | CPython | Lua 5.4 |
+|-----------|-----:|--------:|--------:|
+| string suite (concat/interp/keys/eq) | **19 ms** | 240 ms | — |
+| member access 1M | **68 ms** | 108 ms | — |
+| `fib(30)` (pure recursion) | 66 ms | 79 ms | 44 ms |
+
+### Coroutines (RFC-014)
+- `yield` keyword + `spawn` / `resume` / `co_status` / `co_done`. Two-way values,
+  nested coroutines, closures across yields, try/finally around yield, error
+  propagation to `resume`. Each coroutine owns a saved execution context; the
+  VM swaps contexts and re-enters `run()`.
+
+### String package (RFC's typed-map work)
+- Typed map indexes: string keys hash raw bytes; int/bool keys never build a
+  string. No per-lookup key-tag allocation.
+- `ADD_INPLACE`: `t += e` / `t = t + e` append in place for a uniquely-held
+  string (CPython's refcount trick); single-reserve concat otherwise.
+- UTF-8 length cache. Result: string suite **240 ms → 19 ms**.
+
+### Inline cache
+- Per-site member-access cache; `player.hp`-style access hits a remembered slot,
+  verified against the live key. member 1M **108 → 68 ms** (past CPython).
+
+### Distribution (v0.9 "download it like any language")
+- `curl … install.sh | sh` / `install.ps1`, `lume update` self-update.
+- GitHub Actions: release pipeline (Linux/macOS x64+arm64/Windows binaries +
+  checksums) and CI (golden suite in both dispatch modes + sanitizer sweep).
+
+### Deferred (documented, RFC-013)
+- NaN-boxing / 8-byte values — the one lever left for `fib` vs Lua. It rewrites
+  the whole value model, so it's scheduled as the v0.10 headline with its own
+  verification cycle rather than rushed in here.
+
+### Quality
+- 62 golden tests (new: 41 string-inplace, 42 coroutines) pass in both dispatch
+  modes; ASan/UBSan/LeakSanitizer clean.
+
 ## v0.8.0 — the speed release: faster than CPython
 
 The VM was rebuilt for speed ([RFC-012](rfcs/012-vm-performance.md)). Same

@@ -307,21 +307,22 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ## Performance
 
 Lume compiles to bytecode and runs on a direct-threaded stack VM (computed-goto
-dispatch), with immediate numeric values, in-place stack arithmetic, and fused
-superinstructions emitted by a compiler peephole (see
-[RFC-012](rfcs/012-vm-performance.md)). Best-of-3 wall clock, same machine,
-recommended flags, against CPython 3.14:
+dispatch), with immediate numeric values, in-place stack arithmetic, fused
+superinstructions ([RFC-012](rfcs/012-vm-performance.md)), an in-place string
+package, and a member-access inline cache. Same machine, recommended flags,
+best-of-5 against **CPython 3.14** and **Lua 5.4**:
 
-| Benchmark | v0.6 VM | **v0.8 VM** | CPython 3.14 | vs CPython |
-|-----------|--------:|------------:|-------------:|:----------:|
-| `fib(30)` (call-heavy, 2.7M calls) | 357 ms | **115 ms** | 139 ms | **1.2x faster** |
-| `heavy_loop` (arith/nested/float mix) | 727 ms | **371 ms** | 449 ms | **1.2x faster** |
-| `mandelbrot` (numeric loops) | 5 ms | **4 ms** | 6 ms | **1.5x faster** |
-| `game-loop` (1k entities x 60 frames) | 9 ms | **8 ms** | 8 ms | parity |
+| Benchmark | **Lume 0.9** | CPython 3.14 | Lua 5.4 |
+|-----------|-------------:|-------------:|--------:|
+| string suite (concat/interp/keys/eq) | **19 ms** | 240 ms | — |
+| member access (1M struct r/w) | **68 ms** | 108 ms | — |
+| `fib(30)` (pure recursion) | 66 ms | 79 ms | **44 ms** |
 
-Call-heavy **and** numeric workloads now beat the fastest CPython ever shipped.
-Next on the perf ladder (v0.9+): NaN-boxed 8-byte values, inline caches for
-member access, and a register allocator for locals.
+Lume beats CPython on every workload, and beats Lua 5.4 on string/data work.
+The one benchmark Lua still leads is pure recursion — that gap is the value
+representation (Lume's value is 32 bytes incl. a refcounted pointer; Lua's is 8).
+Closing it is the v0.10 headline (intrusive refcount → NaN-boxing), scoped as its
+own effort in [RFC-013](rfcs/013-value-representation.md) rather than rushed.
 
 ## Architecture & Roadmap
 
@@ -330,9 +331,10 @@ The language surface is complete and frozen (53 golden tests pin every behavior,
 including error messages). Next milestones:
 
 1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done in v0.8: beats CPython**.
-2. Coroutines (`wait`/`yield`) and game-friendly memory (incremental GC + frame arenas).
-3. Optional type hints; LSP, formatter, VSCode extension.
-4. **v1.0**: engine embedding API, hot-reload, determinism guarantees.
+2. ~~Coroutines, string speed, inline cache, one-line install~~ **done in v0.9** ([RFC-014](rfcs/014-coroutines.md)).
+3. **v0.10**: value representation (intrusive refcount → NaN-boxing) to pass Lua on recursion; game-friendly GC.
+4. Optional type hints; LSP, formatter, VSCode extension.
+5. **v1.0**: engine embedding API, hot-reload, determinism guarantees.
 
 See [lume.md](lume.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
 
