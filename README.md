@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.8.0 — the speed release: faster than CPython · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v0.9.0 — coroutines + string speed + one-line install (faster than CPython everywhere; past Lua 5.4 on string/data) · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
