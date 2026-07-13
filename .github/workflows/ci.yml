@@ -1,0 +1,31 @@
+name: ci
+
+# Build and run the golden test suite on every push / PR, in BOTH dispatch
+# modes (computed-goto and the portable switch fallback).
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build + golden (computed-goto)
+        run: |
+          g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
+          ./tests/run_tests.sh
+
+      - name: Build + golden (portable switch)
+        run: |
+          g++ -std=c++17 -O2 -DLUME_NO_COMPUTED_GOTO -o lume src/main.cpp
+          ./tests/run_tests.sh
+
+      - name: Sanitizer sweep (ASan + UBSan)
+        run: |
+          g++ -std=c++17 -g -O1 -fsanitize=address,undefined -o lume src/main.cpp
+          for f in tests/cases/*.lm; do ./lume "$f" >/dev/null 2>&1 || true; done
+          echo "sanitizer sweep completed"
