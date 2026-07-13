@@ -73,13 +73,29 @@ error handling in [RFC-008](rfcs/008-error-handling.md).
 
 ## Quick Start
 
-```bash
-g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp   # zero dependencies
+**Install (prebuilt binary — no compiler needed):**
 
-./lume examples/hello_world.lm
-./lume examples/dungeon.lm      # loot table + signals + save system
-./lume examples/inventory.lm    # lists, maps, dot access
-./lume --version
+```bash
+curl -fsSL https://raw.githubusercontent.com/uixova/lume/main/install.sh | sh   # Linux / macOS
+```
+```powershell
+irm https://raw.githubusercontent.com/uixova/lume/main/install.ps1 | iex        # Windows
+```
+
+Then `lume update` self-updates to the newest release. Prefer to build from source?
+It's one command, zero dependencies:
+
+```bash
+g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
+```
+
+**Run:**
+
+```bash
+lume                            # interactive REPL
+lume examples/hello_world.lm
+lume examples/dungeon.lm        # loot table + signals + save system
+lume --version
 ```
 
 ## Language Tour

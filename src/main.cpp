@@ -92,6 +92,31 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // lume update [--channel stable|latest] — re-runs the install script, which
+    // fetches the newest release binary for this platform and replaces this one.
+    if (arg == "update") {
+        std::string channel = "stable";
+        for (int i = 2; i < argc; ++i) {
+            std::string a = argv[i];
+            if (a == "--channel" && i + 1 < argc) channel = argv[++i];
+            else if (a.rfind("--channel=", 0) == 0) channel = a.substr(10);
+        }
+        std::cout << "Lume " << LUME_VERSION << " — checking for updates (channel: "
+                  << channel << ")..." << std::endl;
+        // The install script is idempotent: it self-updates in place. Piping it
+        // through the shell is the same path a first-time user takes.
+        std::string url = "https://raw.githubusercontent.com/uixova/lume/main/install.sh";
+        std::string cmd = "curl -fsSL \"" + url + "\" | LUME_CHANNEL=" + channel + " sh";
+        int rc = std::system(cmd.c_str());
+        if (rc != 0) {
+            std::cerr << "[Update Error] could not run the installer "
+                         "(need curl + internet). Manual: "
+                      << url << std::endl;
+            return 1;
+        }
+        return 0;
+    }
+
     // lume install <user/repo | git-url> — fetches a package into ./lume_libs/<name>
     // (uses the system git; a native registry client is planned)
     if (arg == "install") {
