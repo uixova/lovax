@@ -299,7 +299,8 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ## Tests & Benchmarks
 
 ```bash
-./tests/run_tests.sh              # 53 golden-file tests (features + errors + stress)
+./tests/run_tests.sh              # 66 golden-file tests (features + errors + stress)
+./tests/fuzz.sh                   # security gate: adversarial + fuzz, no crashes allowed
 ./tests/run_tests.sh --update     # regenerate expected outputs (verify diffs first!)
 ./benchmarks/run_benchmarks.sh
 ```
@@ -327,7 +328,7 @@ own effort in [RFC-013](rfcs/013-value-representation.md) rather than rushed.
 ## Architecture & Roadmap
 
 `Lexer -> Parser (Pratt) -> AST -> Compiler -> Bytecode -> Stack VM`.
-The language surface is complete and frozen (53 golden tests pin every behavior,
+The language surface is complete and frozen (66 golden tests pin every behavior,
 including error messages). Next milestones:
 
 1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done in v0.8: beats CPython**.
@@ -379,7 +380,7 @@ g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
 - Kendi kütüphaneni yaz: `use "libs/envanter.lm"` — bir kez yüklenir, döngüsel `use`
   net hatayla yakalanır.
 
-Testler: `./tests/run_tests.sh` (53 golden test). Paket kurma: `lume install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/).
+Testler: `./tests/run_tests.sh` (66 golden test) + `./tests/fuzz.sh` (güvenlik kapısı). Paket kurma: `lume install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/).
 
 </details>
 
