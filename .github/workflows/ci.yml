@@ -35,3 +35,8 @@ jobs:
           # Run the adversarial/fuzz suite under the ASan build: a memory bug
           # aborts (exit >=128), which the gate treats as a crash → CI fails.
           ./tests/fuzz.sh
+
+      - name: Sandbox gate (capabilities actually deny)
+        run: |
+          g++ -std=c++17 -O2 -o lume src/main.cpp
+          ./tests/sandbox.sh
