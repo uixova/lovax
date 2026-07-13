@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.10.0 — general-purpose + safe: net, packages, sandbox
+
+Lume stops being game-only. It can now open sockets, install version-pinned
+packages, and run untrusted code behind a capability sandbox — the pieces a
+real general-purpose / server / scripting language needs. (The value-model
+perf work — NaN-boxing, GC — is scoped separately as v0.11, RFC-013, so it
+gets its own verification cycle rather than being rushed.)
+
+### Networking — `net` (RFC-015)
+- Blocking TCP/UDP sockets on OS syscalls (zero third-party deps): tcp_listen/
+  accept/connect, send/recv/close, udp_socket/bind/send/recv, set_timeout.
+- Enough for a VPS service, LAN multiplayer messaging, or a small client. A
+  socket is an int handle; misuse returns a catchable error, never a crash.
+
+### Version-pinned packages (RFC-007 phase 2)
+- `lume install user/repo@v1.2.0` clones exactly that git tag and locks the
+  commit SHA in lume.lock; deps recorded in lume.json; no-arg install
+  reproduces from the manifest. The supply-chain guarantee npm/pip don't give.
+- Fixed a pre-existing bug: file-module functions now resolve their module-level
+  globals correctly (state persists across calls) even when called from another
+  VM — packages with internal state finally work.
+
+### Capability sandbox (RFC-015)
+- `lume --sandbox --allow-net app.lm`: dangerous ops (net, file read/write,
+  env) require explicit permission (Deno's model). Mentioning any permission
+  flag opts into deny-all; no flag = your own trusted script, all allowed.
+- An installed package physically cannot touch the network or filesystem unless
+  you allowed it — the runtime half of the malicious-code defense.
+
+### Security gates (permanent, automated)
+- `tests/fuzz.sh`: ~70 adversarial/random inputs, never crashes (signal exit is
+  a hard fail), run under the ASan build too.
+- `tests/sandbox.sh`: asserts every capability denies when sandboxed and allows
+  when granted.
+- New adversarial golden cases (e18–e21). CI runs golden (both dispatch modes) +
+  sanitizers + fuzz + sandbox on every push.
+
+### Quality
+- 67 golden tests pass in both dispatch modes; fuzz + sandbox gates green;
+  net/package/module/gated paths clean under ASan/UBSan/LeakSanitizer.
+
 ## v0.9.0 — coroutines, string speed, distribution
 
 Beats CPython everywhere and Lua 5.4 on string/data work; coroutines land for

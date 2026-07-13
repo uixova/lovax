@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.9.0 — coroutines + string speed + one-line install (faster than CPython everywhere; past Lua 5.4 on string/data) · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v0.10.0 — general-purpose + safe: TCP/UDP `net`, version-pinned packages, capability sandbox (faster than CPython everywhere; past Lua 5.4 on string/data) · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -70,6 +70,24 @@ Run `lume` with no arguments for an interactive **REPL**. Full rationale for wha
 earned a keyword (and what was rejected) is in
 [RFC-009](rfcs/009-rich-core.md); `struct`/`enum` in [RFC-010](rfcs/010-struct-enum.md),
 error handling in [RFC-008](rfcs/008-error-handling.md).
+
+## New in v0.10 — general-purpose & safe
+
+```lume
+use net                                  # TCP/UDP sockets: servers, clients, LAN, VPS
+set server = net.tcp_listen(8080)
+set client = net.tcp_accept(server)
+net.send(client, "pong")
+```
+
+```bash
+lume install someuser/inventory@v1.2.0   # version-pinned: locks the exact commit in lume.lock
+lume --sandbox --allow-net app.lm        # run untrusted code: net yes, filesystem/env no
+```
+
+Coroutines (`yield`/`spawn`/`resume`), a capability **sandbox** (Deno-style
+`--allow-*`), and version-pinned packages make Lume safe to run other people's
+code — see [RFC-014](rfcs/014-coroutines.md) and [RFC-015](rfcs/015-net-and-sandbox.md).
 
 ## Quick Start
 
