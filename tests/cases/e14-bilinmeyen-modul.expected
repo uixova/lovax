@@ -1,2 +1,2 @@
 # exit: 70
-[Runtime Error] line 1: unknown module 'fizik' (built-ins: math, game, strings, file, os, time, canvas; no package at lume_libs/fizik/; for a file module use quotes: use "fizik.lm")
+[Runtime Error] line 1: unknown module 'fizik' (built-ins: math, game, strings, file, os, time, canvas, net; no package at lume_libs/fizik/; for a file module use quotes: use "fizik.lm")

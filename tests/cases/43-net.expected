@@ -1,0 +1,6 @@
+# exit: 0
+connect refused: ok
+accept timed out: ok
+bad send guarded: ok
+bad port guarded: ok
+udp socket ok

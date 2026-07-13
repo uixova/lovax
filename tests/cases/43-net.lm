@@ -1,0 +1,35 @@
+# net module — self-contained, deterministic (no external peer, no hang)
+use net
+
+# connecting to a closed port fails cleanly (caught, not a crash)
+try:
+    set c = net.tcp_connect("127.0.0.1", 1)
+    net.close(c)
+    say "connected?!"
+catch e:
+    say "connect refused: ok"
+
+# listen + short timeout + accept that times out -> clean error
+set s = net.tcp_listen(59934)
+net.set_timeout(s, 0.1)
+try:
+    net.tcp_accept(s)
+    say "accepted?!"
+catch e:
+    say "accept timed out: ok"
+net.close(s)
+
+# argument misuse -> catchable errors, never a crash
+try:
+    net.send("not-a-socket", 5)
+catch e:
+    say "bad send guarded: ok"
+try:
+    net.tcp_listen(99999)
+catch e:
+    say "bad port guarded: ok"
+
+# udp socket create/close round-trips
+set u = net.udp_socket()
+net.close(u)
+say "udp socket ok"
