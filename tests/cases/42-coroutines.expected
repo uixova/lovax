@@ -1,0 +1,15 @@
+# exit: 0
+10
+11
+12
+suspended
+a
+b
+done
+true
+ready
+got: 42
+ok
+caught: kaboom
+dead
+err: cannot resume a finished coroutine

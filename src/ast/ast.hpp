@@ -27,6 +27,7 @@ enum class NodeType {
     USE_STATEMENT,
     TRY_STATEMENT,
     THROW_STATEMENT,
+    YIELD_EXPRESSION,
     PASS_STATEMENT,
     REPEAT_STATEMENT,
     ENUM_STATEMENT,
@@ -363,6 +364,18 @@ public:
     NodeType nodeType() const override { return NodeType::THROW_STATEMENT; }
     int line() const override { return token.line; }
     void statementNode() override {}
+    std::string tokenLiteral() const override { return token.literal; }
+};
+
+// yield <expr> — pauses the running coroutine and hands <expr> to resume();
+// evaluates to the value passed to the next resume() (RFC-014).
+class YieldExpression : public Expression {
+public:
+    Token token; // 'yield'
+    std::unique_ptr<Expression> value; // may be null -> yields null
+    NodeType nodeType() const override { return NodeType::YIELD_EXPRESSION; }
+    int line() const override { return token.line; }
+    void expressionNode() override {}
     std::string tokenLiteral() const override { return token.literal; }
 };
 

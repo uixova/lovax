@@ -416,6 +416,22 @@ private:
         return stmt;
     }
 
+    std::unique_ptr<Expression> parseYieldExpression() {
+        auto y = std::make_unique<YieldExpression>();
+        y->token = curToken;
+        // 'yield' alone yields null; 'yield <expr>' yields the value.
+        TokenType nt = peekToken.type;
+        if (nt != TokenType::NEWLINE && nt != TokenType::DEDENT &&
+            nt != TokenType::END_OF_FILE && nt != TokenType::RPAREN &&
+            nt != TokenType::RBRACKET && nt != TokenType::COMMA &&
+            nt != TokenType::COLON) {
+            nextParserToken();
+            y->value = parseExpression(Precedence::LOWEST);
+            if (y->value == nullptr) return nullptr;
+        }
+        return y;
+    }
+
     std::unique_ptr<ThrowStatement> parseThrowStatement() {
         auto stmt = std::make_unique<ThrowStatement>();
         stmt->token = curToken;
@@ -884,6 +900,7 @@ private:
                 return ident;
             }
             case TokenType::FN:         return parseFunctionLiteral();
+            case TokenType::YIELD:      return parseYieldExpression();
             case TokenType::MINUS:
             case TokenType::TILDE:
             case TokenType::NOT:        return parsePrefixExpression();

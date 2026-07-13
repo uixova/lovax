@@ -406,7 +406,22 @@ private:
             if (!binOp.empty()) {
                 emitNameGet(ident->value, line);
                 compileExpression(s->value.get());
-                emitCompound(binOp, line);
+                // '+=' gets the in-place op: a uniquely-referenced string appends
+                // without copying (the very next store rebinds the same object).
+                if (binOp == "+") emitOp(Op::ADD_INPLACE, line);
+                else              emitCompound(binOp, line);
+            } else if (s->value->nodeType() == NodeType::INFIX_EXPRESSION &&
+                       static_cast<const InfixExpression*>(s->value.get())->op == "+" &&
+                       static_cast<const InfixExpression*>(s->value.get())->left->nodeType() ==
+                           NodeType::IDENTIFIER &&
+                       static_cast<const Identifier*>(
+                           static_cast<const InfixExpression*>(s->value.get())->left.get())
+                               ->value == ident->value) {
+                // 't = t + e' is the same shape as 't += e' — normalize it.
+                const auto* inf = static_cast<const InfixExpression*>(s->value.get());
+                emitNameGet(ident->value, line);
+                compileExpression(inf->right.get());
+                emitOp(Op::ADD_INPLACE, line);
             } else {
                 compileExpression(s->value.get());
             }
@@ -436,6 +451,7 @@ private:
         if (!binOp.empty()) {
             emitOp(Op::MEMBER_GET_KEEP, line);           // obj -> obj old
             emitU16(nameC, line);
+            emitU16(chunk().addIC(), line);
             compileExpression(s->value.get());
             emitCompound(binOp, line);                  // obj new
         } else {
@@ -443,6 +459,7 @@ private:
         }
         emitOp(Op::MEMBER_SET, line);
         emitU16(nameC, line);
+        emitU16(chunk().addIC(), line);
     }
 
     void emitNameGet(const std::string& name, int line) {
@@ -887,6 +904,7 @@ private:
                 compileExpression(m->object.get());
                 emitOp(m->safe ? Op::MEMBER_GET_SAFE : Op::MEMBER_GET, m->token.line);
                 emitU16(strConst(m->property), m->token.line);
+                emitU16(chunk().addIC(), m->token.line);
                 break;
             }
             case NodeType::CONDITIONAL_EXPRESSION: {
@@ -978,6 +996,13 @@ private:
             case NodeType::FUNCTION_LITERAL:
                 compileFunction(static_cast<const FunctionLiteral*>(expr));
                 break;
+            case NodeType::YIELD_EXPRESSION: {
+                const auto* y = static_cast<const YieldExpression*>(expr);
+                if (y->value) compileExpression(y->value.get());
+                else emitOp(Op::NIL, y->token.line);
+                emitOp(Op::YIELD_, y->token.line);
+                break;
+            }
             case NodeType::CALL_EXPRESSION: {
                 const auto* c = static_cast<const CallExpression*>(expr);
                 // Method-call sugar: obj.name(args). The receiver is kept so the VM
@@ -988,6 +1013,7 @@ private:
                     compileExpression(m->object.get());
                     emitOp(Op::MEMBER_GET_KEEP, m->token.line);
                     emitU16(strConst(m->property), m->token.line);
+                    emitU16(chunk().addIC(), m->token.line);
                     for (const auto& a : c->arguments) compileExpression(a.get());
                     emitOp(Op::CALL_METHOD, c->token.line);
                     emitU8((uint8_t)c->arguments.size(), c->token.line);

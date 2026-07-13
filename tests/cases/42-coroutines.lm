@@ -1,0 +1,48 @@
+# Coroutines (RFC-014): spawn / resume / yield / co_status / co_done
+fn counter(start):
+    set n = start
+    while true:
+        yield n
+        n += 1
+set c = spawn(counter)
+say resume(c, 10)      # 10
+say resume(c)          # 11
+say resume(c)          # 12
+say co_status(c)       # suspended
+
+# finite coroutine returns a final value, then is done
+fn gen():
+    yield "a"
+    yield "b"
+    return "done"
+set g = spawn(gen)
+say resume(g)          # a
+say resume(g)          # b
+say resume(g)          # done
+say co_done(g)         # true
+
+# two-way: resume passes a value back into the yield expression
+fn echo():
+    set x = yield "ready"
+    yield "got: {x}"
+set e = spawn(echo)
+say resume(e)          # ready
+say resume(e, 42)      # got: 42
+
+# error inside a coroutine surfaces at resume; coroutine becomes dead
+fn boom():
+    yield "ok"
+    throw "kaboom"
+set b = spawn(boom)
+say resume(b)          # ok
+try:
+    resume(b)
+catch err:
+    say "caught: {err}"
+say co_status(b)       # dead
+
+# resuming a finished coroutine is an error
+try:
+    resume(g)
+catch e2:
+    say "err: {e2}"

@@ -23,6 +23,7 @@ enum class ObjectType {
     FUNCTION,
     BUILTIN,
     SIGNAL,
+    COROUTINE,
     RETURN_VALUE,
     BREAK_SIGNAL,
     CONTINUE_SIGNAL,
@@ -74,6 +75,9 @@ public:
 class StringObject : public Object {
 public:
     std::string value;
+    // Cached UTF-8 code-point count; -1 = not computed. Strings are immutable
+    // except for the VM's in-place append (ADD_INPLACE), which resets it.
+    mutable long long lenCache = -1;
     StringObject(const std::string& val) : Object(ObjectType::STRING), value(val) {}
     std::string inspect() const override { return value; } // Prints the raw text on the console
 };
@@ -128,47 +132,117 @@ class MapObject : public Object {
 public:
     MapObject() : Object(ObjectType::MAP) {}
     std::vector<std::pair<std::shared_ptr<Object>, std::shared_ptr<Object>>> entries;
-    std::unordered_map<std::string, size_t> index; // tagged key -> index into entries
+    // Typed indexes: no key-tag string is ever built for a lookup. String keys
+    // hash the raw bytes, int/bool keys never touch a string at all.
+    std::unordered_map<std::string, size_t> strIndex;
+    std::unordered_map<long long, size_t> intIndex;
+    static constexpr size_t NPOS = (size_t)-1;
+    size_t boolIndex[2] = {NPOS, NPOS};
     bool frozen = false;          // true: immutable (modules)
     std::string moduleName;       // module name if this is a module (for errors + inspect)
 
-    // Converts keys to type-tagged strings ("s:name", "i:42", "b:1")
-    static std::string keyTag(const std::shared_ptr<Object>& key) {
-        switch (key->type()) {
-            case ObjectType::STRING:  return "s:" + key->inspect();
-            case ObjectType::INTEGER: return "i:" + key->inspect();
-            case ObjectType::BOOLEAN: return "b:" + key->inspect();
-            default: return ""; // unsupported key type (caller raises the error)
-        }
+    void copyIndexFrom(const MapObject& src) {
+        strIndex = src.strIndex;
+        intIndex = src.intIndex;
+        boolIndex[0] = src.boolIndex[0];
+        boolIndex[1] = src.boolIndex[1];
+    }
+    void clearIndex() {
+        strIndex.clear();
+        intIndex.clear();
+        boolIndex[0] = boolIndex[1] = NPOS;
+    }
+
+    // Zero-allocation lookups by native key
+    std::shared_ptr<Object> getStr(const std::string& k) const {
+        auto it = strIndex.find(k);
+        return it == strIndex.end() ? nullptr : entries[it->second].second;
+    }
+    size_t findStr(const std::string& k) const {
+        auto it = strIndex.find(k);
+        return it == strIndex.end() ? NPOS : it->second;
+    }
+    void setStr(const std::shared_ptr<Object>& key, const std::string& k,
+                const std::shared_ptr<Object>& val) {
+        auto it = strIndex.find(k);
+        if (it != strIndex.end()) { entries[it->second].second = val; return; }
+        strIndex[k] = entries.size();
+        entries.push_back({key, val});
     }
 
     void set(const std::shared_ptr<Object>& key, const std::shared_ptr<Object>& val) {
-        std::string tag = keyTag(key);
-        auto it = index.find(tag);
-        if (it != index.end()) {
-            entries[it->second].second = val;
-        } else {
-            index[tag] = entries.size();
-            entries.push_back({key, val});
+        switch (key->type()) {
+            case ObjectType::STRING:
+                setStr(key, static_cast<StringObject*>(key.get())->value, val);
+                return;
+            case ObjectType::INTEGER: {
+                long long k = static_cast<IntegerObject*>(key.get())->value;
+                auto it = intIndex.find(k);
+                if (it != intIndex.end()) { entries[it->second].second = val; return; }
+                intIndex[k] = entries.size();
+                entries.push_back({key, val});
+                return;
+            }
+            case ObjectType::BOOLEAN: {
+                int k = static_cast<BooleanObject*>(key.get())->value ? 1 : 0;
+                if (boolIndex[k] != NPOS) { entries[boolIndex[k]].second = val; return; }
+                boolIndex[k] = entries.size();
+                entries.push_back({key, val});
+                return;
+            }
+            default: return; // unsupported key type (caller raises the error)
         }
     }
 
     std::shared_ptr<Object> get(const std::shared_ptr<Object>& key) const {
-        auto it = index.find(keyTag(key));
-        if (it == index.end()) return nullptr;
-        return entries[it->second].second;
+        switch (key->type()) {
+            case ObjectType::STRING:
+                return getStr(static_cast<StringObject*>(key.get())->value);
+            case ObjectType::INTEGER: {
+                auto it = intIndex.find(static_cast<IntegerObject*>(key.get())->value);
+                return it == intIndex.end() ? nullptr : entries[it->second].second;
+            }
+            case ObjectType::BOOLEAN: {
+                size_t pos = boolIndex[static_cast<BooleanObject*>(key.get())->value ? 1 : 0];
+                return pos == NPOS ? nullptr : entries[pos].second;
+            }
+            default: return nullptr;
+        }
     }
 
     bool remove(const std::shared_ptr<Object>& key) {
-        std::string tag = keyTag(key);
-        auto it = index.find(tag);
-        if (it == index.end()) return false;
-        size_t pos = it->second;
+        size_t pos = NPOS;
+        switch (key->type()) {
+            case ObjectType::STRING: {
+                auto it = strIndex.find(static_cast<StringObject*>(key.get())->value);
+                if (it == strIndex.end()) return false;
+                pos = it->second; strIndex.erase(it);
+                break;
+            }
+            case ObjectType::INTEGER: {
+                auto it = intIndex.find(static_cast<IntegerObject*>(key.get())->value);
+                if (it == intIndex.end()) return false;
+                pos = it->second; intIndex.erase(it);
+                break;
+            }
+            case ObjectType::BOOLEAN: {
+                int k = static_cast<BooleanObject*>(key.get())->value ? 1 : 0;
+                if (boolIndex[k] == NPOS) return false;
+                pos = boolIndex[k]; boolIndex[k] = NPOS;
+                break;
+            }
+            default: return false;
+        }
         entries.erase(entries.begin() + pos);
-        index.erase(it);
         // Shift every index after the removed slot
-        for (auto& kv : index) {
+        for (auto& kv : strIndex) {
             if (kv.second > pos) kv.second--;
+        }
+        for (auto& kv : intIndex) {
+            if (kv.second > pos) kv.second--;
+        }
+        for (int i = 0; i < 2; ++i) {
+            if (boolIndex[i] != NPOS && boolIndex[i] > pos) boolIndex[i]--;
         }
         return true;
     }
@@ -297,6 +371,7 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::FUNCTION:     return "fn";
         case ObjectType::BUILTIN:      return "builtin";
         case ObjectType::SIGNAL:       return "signal";
+        case ObjectType::COROUTINE:    return "coroutine";
         case ObjectType::RETURN_VALUE: return "return";
         case ObjectType::BREAK_SIGNAL: return "break";
         case ObjectType::CONTINUE_SIGNAL: return "continue";

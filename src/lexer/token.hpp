@@ -91,6 +91,7 @@ enum class TokenType {
     THIS,    // the current struct instance inside a method
     NEW,     // reserved (struct instantiation is Name(...) — keeps the surface clean)
     FINALLY, // try/catch/finally
+    YIELD,   // coroutine: pause and produce a value (RFC-014)
     WHILE,
     FOR,
     IN,
@@ -190,6 +191,7 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::THIS:            return "'this'";
         case TokenType::NEW:             return "'new'";
         case TokenType::FINALLY:         return "'finally'";
+        case TokenType::YIELD:           return "'yield'";
         case TokenType::WHILE:           return "'while'";
         case TokenType::FOR:             return "'for'";
         case TokenType::IN:              return "'in'";

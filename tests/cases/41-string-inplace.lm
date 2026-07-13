@@ -1,0 +1,59 @@
+# 1) self-append
+set s = "ab"
+s += s
+say s                       # abab
+
+# 2) iki değişken aynı stringi paylaşırken += kopyalamalı
+set a = "x"
+set b = a
+a += "Y"
+say a, b                    # xY x
+
+# 3) listede duran string mutasyona uğramamalı
+set base = "core"
+set xs = [base]
+base += "-mut"
+say base, xs[0]             # core-mut core
+
+# 4) map değeri
+set m = {"k": "v"}
+set v2 = m.k
+v2 += "!"
+say m.k, v2                 # v !değil... v v!
+
+# 5) t = t + e formu (normalize edilen)
+set t = "aa"
+set keep = t
+t = t + "bb"
+say t, keep                 # aabb aa
+
+# 6) upvalue üzerinden +=
+fn maker():
+    set acc = ""
+    fn add(x):
+        acc += x
+        return acc
+    return add
+set f = maker()
+f("1")
+f("2")
+say f("3")                  # 123
+
+# 7) sayılar += (davranış değişmemeli)
+set n = 5
+n += 2.5
+say n                       # 7.5
+
+# 8) hata mesajı korunmalı
+try:
+    set z = "a"
+    z += 5
+catch e:
+    say "err: {e}"
+
+# 9) const korunmalı
+const C = "sabit"
+try:
+    C += "x"
+catch e2:
+    say "const err yakalandı"

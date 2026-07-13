@@ -48,7 +48,7 @@ private:
         {"enum", TokenType::ENUM},
         {"this", TokenType::THIS},
         {"new", TokenType::NEW},
-        {"finally", TokenType::FINALLY},
+        {"finally", TokenType::FINALLY}, {"yield", TokenType::YIELD},
         {"while", TokenType::WHILE},
         {"for", TokenType::FOR},
         {"in", TokenType::IN},

@@ -36,6 +36,56 @@
 
 namespace Lume {
 
+// A single call frame. Namespace-scoped (not VM-private) so coroutine state can
+// hold its own frame stack.
+struct Frame {
+    // Raw pointer: the callee Value at stack_[base] keeps the closure alive
+    // until RETURN truncates the stack, so no refcount traffic per call.
+    ClosureObject* closure;
+    const uint8_t* ip;
+    size_t base;    // stack index of the callee value; locals start at base+1
+    int nargs;
+    // Cached from closure->proto->chunk so frame switches (call/return) do a
+    // flat load instead of chasing two shared_ptrs.
+    const Value* consts;
+    const Chunk* chunk;
+};
+
+// Active try handler (RFC-008): where to jump when a value is thrown.
+struct Handler {
+    size_t frameDepth;   // frames_.size() at the try
+    size_t stackTop;     // sp_ offset at the try
+    const uint8_t* catchIp;
+};
+
+// A suspended execution context: everything a running program owns. The main
+// program and each coroutine each have one; resume/yield swap them (RFC-014).
+struct ExecState {
+    std::unique_ptr<Value[]> stack;
+    size_t spOffset = 0;
+    std::vector<Frame> frames;
+    std::vector<std::shared_ptr<UpvalueCell>> openUpvalues;
+    std::vector<Handler> handlers;
+};
+
+// A coroutine value: a paused function that yields values and resumes where it
+// left off. Holds its own stack/frames while suspended.
+class CoroObject : public Object {
+public:
+    enum class Status { CREATED, SUSPENDED, RUNNING, DEAD };
+    std::shared_ptr<Object> fn;   // the closure to run on first resume
+    Status status = Status::CREATED;
+    ExecState state;              // saved stack/frames while suspended
+    CoroObject(std::shared_ptr<Object> f)
+        : Object(ObjectType::COROUTINE), fn(std::move(f)) {}
+    std::string inspect() const override {
+        const char* s = status == Status::CREATED   ? "created"
+                      : status == Status::SUSPENDED ? "suspended"
+                      : status == Status::RUNNING   ? "running" : "dead";
+        return std::string("<coroutine ") + s + ">";
+    }
+};
+
 class VM {
 public:
     static constexpr int MAX_FRAMES = 500;
@@ -51,6 +101,98 @@ public:
     static void setBaseDir(const std::string& dir) {
         baseDirs().clear();
         baseDirs().push_back(dir.empty() ? "." : dir);
+    }
+
+    // ===== Coroutines (RFC-014) =====
+
+    // Moves the live execution context (stack, frames, upvalues, handlers) out
+    // into an ExecState. The VM's members are left empty; the caller loads a
+    // replacement immediately.
+    ExecState saveExec() {
+        ExecState e;
+        e.spOffset = (size_t)(sp_ - stackMem_.get());
+        e.stack = std::move(stackMem_);
+        e.frames = std::move(frames_);
+        e.openUpvalues = std::move(openUpvalues_);
+        e.handlers = std::move(handlers_);
+        return e;
+    }
+    void loadExec(ExecState&& e) {
+        stackMem_ = std::move(e.stack);
+        sp_ = stackMem_.get() + e.spOffset;
+        frames_ = std::move(e.frames);
+        openUpvalues_ = std::move(e.openUpvalues);
+        handlers_ = std::move(e.handlers);
+    }
+
+    // resume(co, value): runs the coroutine until it yields or returns. Returns
+    // the yielded/returned value, or an error object.
+    std::shared_ptr<Object> resumeCoroutine(const std::shared_ptr<Object>& coObj,
+                                             const std::shared_ptr<Object>& arg, int line) {
+        auto* co = static_cast<CoroObject*>(coObj.get());
+        if (co->status == CoroObject::Status::DEAD)
+            return makeError("cannot resume a finished coroutine", line);
+        if (co->status == CoroObject::Status::RUNNING)
+            return makeError("cannot resume a coroutine that is already running", line);
+
+        ExecState caller = saveExec();
+        CoroObject* prevActive = activeCoro_;
+        bool prevYielded = yielded_;
+        activeCoro_ = co;
+
+        std::shared_ptr<Object> result;
+        if (co->status == CoroObject::Status::CREATED) {
+            // Fresh: give the coroutine its own stack and set up the fn call frame.
+            stackMem_ = std::make_unique<Value[]>(STACK_LIMIT);
+            sp_ = stackMem_.get();
+            frames_.clear();
+            openUpvalues_.clear();
+            handlers_.clear();
+            push(Value::object(co->fn));
+            // The first resume value is passed as the fn's argument only if it
+            // declares a parameter; a zero-parameter coroutine ignores it.
+            int coargc = 0;
+            auto* clo = static_cast<ClosureObject*>(co->fn.get());
+            if (clo->proto->paramCount >= 1) { push(Value::object(arg)); coargc = 1; }
+            co->status = CoroObject::Status::RUNNING;
+            auto err = callValue(coargc, line);
+            if (err != nullptr && isError(err)) {
+                co->status = CoroObject::Status::DEAD;
+                loadExec(std::move(caller));
+                activeCoro_ = prevActive; yielded_ = prevYielded;
+                return err;
+            }
+            yielded_ = false;
+            result = run(0);
+        } else {
+            // Suspended: restore its stack; the resume value becomes the value of
+            // the yield expression it paused on.
+            loadExec(std::move(co->state));
+            push(Value::object(arg));
+            co->status = CoroObject::Status::RUNNING;
+            yielded_ = false;
+            result = run(0);
+        }
+
+        std::shared_ptr<Object> out;
+        if (isError(result)) {
+            co->status = CoroObject::Status::DEAD;
+            out = result;
+        } else if (yielded_) {
+            // Paused at a yield: keep its context for the next resume.
+            co->status = CoroObject::Status::SUSPENDED;
+            co->state = saveExec();
+            out = yieldValue_ ? yieldValue_ : NULL_OBJ_;
+        } else {
+            // Ran to completion: the return value is on top of the coroutine stack.
+            co->status = CoroObject::Status::DEAD;
+            out = (sp_ > stackMem_.get()) ? toObject(pop()) : NULL_OBJ_;
+        }
+
+        loadExec(std::move(caller));
+        activeCoro_ = prevActive;
+        yielded_ = prevYielded;
+        return out;
     }
 
     // Compiles and runs a program. Returns NULL_OBJ_ or an ErrorObject.
@@ -236,19 +378,6 @@ public:
     }
 
 private:
-    struct Frame {
-        // Raw pointer: the callee Value at stack_[base] keeps the closure alive
-        // until RETURN truncates the stack, so no refcount traffic per call.
-        ClosureObject* closure;
-        const uint8_t* ip;
-        size_t base;    // stack index of the callee value; locals start at base+1
-        int nargs;
-        // Cached from closure->proto->chunk so frame switches (call/return) do a
-        // flat load instead of chasing two shared_ptrs.
-        const Value* consts;
-        const Chunk* chunk;
-    };
-
     GlobalTable globalsTable_;
     std::vector<Value> globals_;
     std::vector<uint8_t> globalDefined_;
@@ -259,14 +388,14 @@ private:
     Value* sp_;
     std::vector<Frame> frames_;
     std::vector<std::shared_ptr<UpvalueCell>> openUpvalues_; // sorted by slot
-
-    // Active try handlers (RFC-008): where to jump when a value is thrown.
-    struct Handler {
-        size_t frameDepth;   // frames_.size() at the try
-        size_t stackTop;     // sp_ offset at the try
-        const uint8_t* catchIp;
-    };
     std::vector<Handler> handlers_;
+
+    // Coroutine boundary state (RFC-014). yielded_ is set by the YIELD op to make
+    // run() unwind back to the resume() that invoked it; activeCoro_ is the
+    // coroutine currently executing (null = main program).
+    bool yielded_ = false;
+    CoroObject* activeCoro_ = nullptr;
+    std::shared_ptr<Object> yieldValue_;   // value handed out by the last YIELD
 
     static std::unordered_map<std::string, std::shared_ptr<MapObject>>& moduleCache() {
         static std::unordered_map<std::string, std::shared_ptr<MapObject>> c;
@@ -282,6 +411,9 @@ private:
             auto env = std::make_shared<Environment>();
             Builtins::installBuiltins(env);
             for (const auto& [k, v] : env->entries()) m[k] = 1;
+            // VM-bound coroutine builtins (installed separately) count as core too,
+            // so a file module doesn't re-export them.
+            for (const char* n : {"spawn", "resume", "co_status", "co_done"}) m[n] = 1;
             return m;
         }();
         return names;
@@ -291,14 +423,67 @@ private:
         auto env = std::make_shared<Environment>();
         Builtins::installBuiltins(env);
         for (const auto& [name, obj] : env->entries()) {
-            uint16_t slot = globalsTable_.slot(name);
-            if (slot >= globals_.size()) {
-                globals_.resize(slot + 1);
-                globalDefined_.resize(slot + 1, 0);
-            }
-            globals_[slot] = Value::object(obj);
-            globalDefined_[slot] = 1;
+            bindGlobal(name, obj);
         }
+        installCoroutineBuiltins();
+    }
+
+    void bindGlobal(const std::string& name, const std::shared_ptr<Object>& obj) {
+        uint16_t slot = globalsTable_.slot(name);
+        if (slot >= globals_.size()) {
+            globals_.resize(slot + 1);
+            globalDefined_.resize(slot + 1, 0);
+        }
+        globals_[slot] = Value::object(obj);
+        globalDefined_[slot] = 1;
+    }
+
+    // Coroutine builtins are VM-bound (they drive resume/state swaps), so they are
+    // installed here rather than in the VM-agnostic Builtins table.
+    void installCoroutineBuiltins() {
+        VM* self = this;
+        using Args = std::vector<std::shared_ptr<Object>>;
+        using CallFn = BuiltinObject::CallFn;
+
+        bindGlobal("spawn", std::make_shared<BuiltinObject>("spawn",
+            [](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+                if (a.size() != 1)
+                    return makeError("spawn() expects 1 argument (a function), got " +
+                                     std::to_string(a.size()), line);
+                if (a[0]->type() != ObjectType::FUNCTION)
+                    return makeError("spawn() expects a function, got " + typeName(a[0]->type()), line);
+                return std::make_shared<CoroObject>(a[0]);
+            }));
+
+        bindGlobal("resume", std::make_shared<BuiltinObject>("resume",
+            [self](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+                if (a.empty() || a.size() > 2)
+                    return makeError("resume() expects (coroutine, [value]), got " +
+                                     std::to_string(a.size()) + " arguments", line);
+                if (a[0]->type() != ObjectType::COROUTINE)
+                    return makeError("resume() expects a coroutine, got " + typeName(a[0]->type()), line);
+                auto arg = a.size() == 2 ? a[1] : NULL_OBJ_;
+                return self->resumeCoroutine(a[0], arg, line);
+            }));
+
+        bindGlobal("co_status", std::make_shared<BuiltinObject>("co_status",
+            [](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+                if (a.size() != 1 || a[0]->type() != ObjectType::COROUTINE)
+                    return makeError("co_status() expects a coroutine", line);
+                auto st = static_cast<CoroObject*>(a[0].get())->status;
+                const char* s = st == CoroObject::Status::CREATED   ? "created"
+                              : st == CoroObject::Status::SUSPENDED ? "suspended"
+                              : st == CoroObject::Status::RUNNING   ? "running" : "dead";
+                return std::make_shared<StringObject>(s);
+            }));
+
+        bindGlobal("co_done", std::make_shared<BuiltinObject>("co_done",
+            [](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+                if (a.size() != 1 || a[0]->type() != ObjectType::COROUTINE)
+                    return makeError("co_done() expects a coroutine", line);
+                return boolObj(static_cast<CoroObject*>(a[0].get())->status ==
+                               CoroObject::Status::DEAD);
+            }));
     }
 
     // The compiler may have registered new global names; size the tables to match.
@@ -551,12 +736,14 @@ private:
             &&L_LGET2,
             &&L_LGET_ADD_I,
             &&L_LGET_SUB_I,
+            &&L_ADD_INPLACE,
             &&L_LT_I_JF,
             &&L_LE_I_JF,
             &&L_GT_I_JF,
             &&L_GE_I_JF,
             &&L_EQ_I_JF,
             &&L_NE_I_JF,
+            &&L_YIELD_,
             &&L_HALT
             };
         #define VM_CASE(name) L_##name:
@@ -852,11 +1039,10 @@ private:
                     // Stack: [recv, method, a1..aN]. Pass recv as 'this' only when it
                     // is a struct instance (a map tagged with __type__); otherwise call
                     // plainly (module/plain-map field call keeps its original arity).
-                    static const std::shared_ptr<StringObject> typeKey =
-                        std::make_shared<StringObject>("__type__");
+                    static const std::string typeKey = "__type__";
                     Value& recv = peek(argc + 1);
                     bool isStruct = recv.isObjType(ObjectType::MAP) &&
-                        static_cast<MapObject*>(recv.obj.get())->get(typeKey) != nullptr;
+                        static_cast<MapObject*>(recv.obj.get())->getStr(typeKey) != nullptr;
                     syncOut();
                     {
                         std::shared_ptr<Object> err;
@@ -991,43 +1177,113 @@ private:
                     if (err != nullptr) VM_THROW(err);
                     VM_NEXT;
                 }
+                // Member-access inline cache: each site remembers the entry index
+                // that answered last time. A hit is verified against the LIVE entry
+                // (string equality, SSO memcmp) — a stale index can only miss, never
+                // return the wrong field. Struct factories insert fields in a fixed
+                // order, so every instance of a struct hits the same index.
+                #define IC_LOOKUP(mapPtr, propRef, icsIdx, entOut)                      \
+                    const MapObject* icm = (mapPtr);                                    \
+                    uint32_t& ic = frame->chunk->icache[icsIdx];                        \
+                    const std::pair<std::shared_ptr<Object>, std::shared_ptr<Object>>*  \
+                        entOut = nullptr;                                               \
+                    if (ic < icm->entries.size()) {                                     \
+                        const auto& cand = icm->entries[ic];                            \
+                        if (cand.first->type() == ObjectType::STRING &&                 \
+                            static_cast<StringObject*>(cand.first.get())->value ==      \
+                                (propRef)) {                                            \
+                            entOut = &cand;                                             \
+                        }                                                               \
+                    }                                                                   \
+                    if (entOut == nullptr) {                                            \
+                        size_t pos = icm->findStr(propRef);                             \
+                        if (pos != MapObject::NPOS) {                                   \
+                            ic = (uint32_t)pos;                                         \
+                            entOut = &icm->entries[pos];                                \
+                        }                                                               \
+                    }
+
                 VM_CASE(MEMBER_GET) {
-                    uint16_t nameC = readU16();
-                    Value obj = pop();
+                    uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
-                    auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
-                    if (isError(res)) VM_THROW(res);
-                    push(fromObject(res));
+                    Value* top = sp_ - 1;
+                    if (top->isObjType(ObjectType::MAP)) {
+                        IC_LOOKUP(static_cast<MapObject*>(top->obj.get()), prop, ics, ent)
+                        if (ent != nullptr) {
+                            *top = fromObject(ent->second);
+                            VM_NEXT_FAST;
+                        }
+                    }
+                    {
+                        Value obj = pop();
+                        auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
+                        if (isError(res)) VM_THROW(res);
+                        push(fromObject(res));
+                    }
                     VM_NEXT;
                 }
                 VM_CASE(MEMBER_GET_SAFE) {
-                    uint16_t nameC = readU16();
-                    Value obj = pop();
-                    if (obj.isNil()) { push(Value::nil()); VM_NEXT; } // a?.b -> null
+                    uint16_t nameC = readU16(), ics = readU16();
+                    Value* top = sp_ - 1;
+                    if (top->isNil()) VM_NEXT_FAST;            // a?.b -> null (in place)
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
-                    auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
-                    if (isError(res)) VM_THROW(res);
-                    push(fromObject(res));
+                    if (top->isObjType(ObjectType::MAP)) {
+                        IC_LOOKUP(static_cast<MapObject*>(top->obj.get()), prop, ics, ent)
+                        if (ent != nullptr) {
+                            *top = fromObject(ent->second);
+                            VM_NEXT_FAST;
+                        }
+                    }
+                    {
+                        Value obj = pop();
+                        auto res = Runtime::evalMemberAccess(toObject(obj), prop, currentLine());
+                        if (isError(res)) VM_THROW(res);
+                        push(fromObject(res));
+                    }
                     VM_NEXT;
                 }
                 VM_CASE(MEMBER_GET_KEEP) {
-                    uint16_t nameC = readU16();
+                    uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
-                    auto res = Runtime::evalMemberAccess(toObject(peek(0)), prop, currentLine());
-                    if (isError(res)) VM_THROW(res);
-                    push(fromObject(res));
+                    Value* top = sp_ - 1;
+                    if (top->isObjType(ObjectType::MAP)) {
+                        IC_LOOKUP(static_cast<MapObject*>(top->obj.get()), prop, ics, ent)
+                        if (ent != nullptr) {
+                            push(fromObject(ent->second));
+                            VM_NEXT_FAST;
+                        }
+                    }
+                    {
+                        auto res = Runtime::evalMemberAccess(toObject(peek(0)), prop, currentLine());
+                        if (isError(res)) VM_THROW(res);
+                        push(fromObject(res));
+                    }
                     VM_NEXT;
                 }
                 VM_CASE(MEMBER_SET) {
-                    uint16_t nameC = readU16();
-                    Value val = pop(), obj = pop();
+                    uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj.get())->value;
-                    auto err = memberSet(toObject(obj), prop, toObject(val), currentLine());
-                    if (err != nullptr) VM_THROW(err);
+                    Value* pobj = sp_ - 2; Value* pval = sp_ - 1;
+                    if (pobj->isObjType(ObjectType::MAP) &&
+                        !static_cast<MapObject*>(pobj->obj.get())->frozen) {
+                        auto* m = static_cast<MapObject*>(pobj->obj.get());
+                        IC_LOOKUP(m, prop, ics, ent)
+                        if (ent != nullptr) {
+                            const_cast<std::pair<std::shared_ptr<Object>,
+                                std::shared_ptr<Object>>*>(ent)->second = toObject(*pval);
+                            pval->obj.reset(); pobj->obj.reset(); sp_ -= 2;
+                            VM_NEXT_FAST;
+                        }
+                    }
+                    {
+                        Value val = pop(), obj = pop();
+                        auto err = memberSet(toObject(obj), prop, toObject(val), currentLine());
+                        if (err != nullptr) VM_THROW(err);
+                    }
                     VM_NEXT;
                 }
 
@@ -1410,6 +1666,42 @@ private:
                 VM_CASE(LGET_ADD_I) { LGET_ARITH_I("+", Value::integer(v->i + k), Value::real(v->d + k)) }
                 VM_CASE(LGET_SUB_I) { LGET_ARITH_I("-", Value::integer(v->i - k), Value::real(v->d - k)) }
 
+                VM_CASE(ADD_INPLACE) {
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;
+                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {
+                        pa->i += pb->i; --sp_; VM_NEXT_FAST;
+                    }
+                    if (pa->isNumber() && pb->isNumber()) {
+                        *pa = Value::real(pa->asDouble() + pb->asDouble()); --sp_; VM_NEXT_FAST;
+                    }
+                    if (pa->isObjType(ObjectType::STRING) && pb->isObjType(ObjectType::STRING)) {
+                        auto* ls = static_cast<StringObject*>(pa->obj.get());
+                        const std::string& rs = static_cast<StringObject*>(pb->obj.get())->value;
+                        // use_count == 2 ⇒ exactly [target slot] + [this stack copy]:
+                        // nobody else can observe the mutation, because the very next
+                        // instruction stores this same object back into the target.
+                        // (CPython does the identical refcount trick for s += "...".)
+                        if (pa->obj.use_count() == 2) {
+                            ls->value.append(rs);
+                            ls->lenCache = -1;
+                        } else {
+                            auto out = std::make_shared<StringObject>(std::string());
+                            out->value.reserve(ls->value.size() + rs.size());
+                            out->value.append(ls->value).append(rs);
+                            pa->obj = std::move(out);
+                        }
+                        pb->obj.reset(); --sp_;
+                        VM_NEXT_FAST;
+                    }
+                    {
+                        Value b = pop(), a = pop();
+                        auto res = Runtime::evalInfixExpression("+", toObject(a),
+                                                                toObject(b), currentLine());
+                        if (isError(res)) VM_THROW(res);
+                        push(fromObject(res));
+                    }
+                    VM_NEXT;
+                }
                 // Pop the top, compare against an i16 immediate, jump when NOT true.
                 #define CMP_I_JF(opStr, cmpInt, cmpDbl)                                 \
                     int16_t k = (int16_t)readU16(); uint16_t d = readU16();             \
@@ -1438,6 +1730,18 @@ private:
                 VM_CASE(EQ_I_JF) { CMP_I_JF("==", l == k, l == k) }
                 VM_CASE(NE_I_JF) { CMP_I_JF("!=", l != k, l != k) }
 
+                VM_CASE(YIELD_) {
+                    if (activeCoro_ == nullptr) {
+                        VM_THROW(makeError("yield used outside a coroutine", currentLine()));
+                    }
+                    // Hand the value out and unwind run() back to resumeCoroutine;
+                    // ip already points past this op, so resume continues here with
+                    // the next resume() value pushed as this expression's result.
+                    yieldValue_ = toObject(pop());
+                    yielded_ = true;
+                    syncOut();
+                    return NULL_OBJ_;
+                }
                 VM_CASE(HALT)
                     frames_.pop_back();
                     sp_ = stackMem_.get();
@@ -1535,7 +1839,10 @@ private:
         if (map->frozen) {
             return makeError("module '" + map->moduleName + "' cannot be modified (frozen)", line);
         }
-        map->set(std::make_shared<StringObject>(prop), val);
+        // Allocate the key object only when the field is genuinely new.
+        size_t pos = map->findStr(prop);
+        if (pos != MapObject::NPOS) map->entries[pos].second = val;
+        else map->setStr(std::make_shared<StringObject>(prop), prop, val);
         return nullptr;
     }
 };

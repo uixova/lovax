@@ -81,9 +81,12 @@ enum class Op : uint8_t {
     EQUAL_JF, NOT_EQUAL_JF,
     LGET2,                        // u16 a, u16 b: push two locals in one dispatch
     LGET_ADD_I, LGET_SUB_I,       // u16 slot, i16 imm: push local +/- imm (n-1 pattern)
+    ADD_INPLACE,                  // like ADD, but emitted only for 't += e' / 't = t + e':
+                                  // a uniquely-referenced string appends in place (no copy)
     LT_I_JF, LE_I_JF,             // i16 imm, u16 off: pop top, compare vs imm, jump if NOT true
     GT_I_JF, GE_I_JF,
     EQ_I_JF, NE_I_JF,
+    YIELD_,                       // pop a value, suspend the coroutine, hand it to resume()
 
     HALT            // end of the top-level script
 };
@@ -103,6 +106,15 @@ struct Chunk {
     std::vector<int> lines;            // source line per byte (for error messages)
     std::vector<Value> consts;
     std::vector<UseSpec> useSpecs;
+    // Inline-cache slots for member access sites (one per MEMBER_* instruction).
+    // Mutated by the VM at run time; a hit is verified against the live entry,
+    // so a stale index can only miss, never return a wrong field.
+    mutable std::vector<uint32_t> icache;
+
+    uint16_t addIC() {
+        icache.push_back(0xFFFFFFFFu);
+        return (uint16_t)(icache.size() - 1);
+    }
 
     void emit(uint8_t byte, int line) {
         code.push_back(byte);

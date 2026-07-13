@@ -26,7 +26,7 @@ namespace Runtime {
                              typeName(obj->type()) + "", line);
         }
         auto* map = static_cast<MapObject*>(obj.get());
-        auto val = map->get(std::make_shared<StringObject>(prop));
+        auto val = map->getStr(prop);   // zero-allocation string-key lookup
         if (val != nullptr) return val;
 
         if (!map->moduleName.empty()) {

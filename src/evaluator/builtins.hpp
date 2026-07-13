@@ -88,7 +88,11 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         const auto& a = args[0];
         switch (a->type()) {
             case ObjectType::STRING:
-                return std::make_shared<IntegerObject>(utf8Length(static_cast<StringObject*>(a.get())->value));
+                {
+                auto* so = static_cast<StringObject*>(a.get());
+                if (so->lenCache < 0) so->lenCache = utf8Length(so->value);
+                return std::make_shared<IntegerObject>(so->lenCache);
+            }
             case ObjectType::LIST:
                 return std::make_shared<IntegerObject>((long long)static_cast<ListObject*>(a.get())->elements.size());
             case ObjectType::MAP:
@@ -649,7 +653,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             auto* src = static_cast<MapObject*>(args[0].get());
             auto out = std::make_shared<MapObject>();
             out->entries = src->entries;
-            out->index = src->index;
+            out->copyIndexFrom(*src);
             return out;
         }
         return args[0]; // immutable types: no copy needed
@@ -692,7 +696,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                 return makeError("module '" + m->moduleName + "' cannot be modified (frozen)", line);
             }
             m->entries.clear();
-            m->index.clear();
+            m->clearIndex();
             return args[0];
         }
         return makeError("clear() expects a list or map, got " + typeName(args[0]->type()) + "", line);

@@ -1,0 +1,10 @@
+# exit: 0
+abab
+xY x
+core-mut core
+v v!
+aabb aa
+123
+7.5
+err: unsupported operation: string + int (use text() or "{...}" interpolation to convert)
+const err yakalandı
