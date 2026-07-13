@@ -260,6 +260,11 @@ public:
 
     std::shared_ptr<Object> loadModule(const UseSpec& spec, int line) {
         if (!spec.isFile) {
+            // Network access is gated at import: 'use net' needs --allow-net.
+            if (spec.target == "net" && !StdLib::perms().net) {
+                return makeError("permission denied: 'use net' requires --allow-net "
+                                 "(or --allow-all)", line);
+            }
             auto builtin = StdLib::getBuiltinModule(spec.target);
             if (builtin != nullptr) return builtin;
             // Installed package? lume_libs/<name>/<name>.lm or main.lm

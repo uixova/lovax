@@ -405,6 +405,27 @@ inline std::shared_ptr<StringObject> strKey(const std::string& k) {
     return std::make_shared<StringObject>(k);
 }
 
+// ===== Capability permissions (RFC-015, sandbox / --allow-* flags) =====
+// Default: everything allowed (a script you wrote, you trust). `lume --sandbox`
+// flips these to deny, and `--allow-net/read/write/env/run` grant back exactly
+// what a program needs. This is the runtime half of the malicious-package
+// defense (the other half is version pinning, RFC-007 phase 2): even an
+// installed package physically cannot open a socket or read your files unless
+// you allowed it.
+struct Perms {
+    bool net = true, read = true, write = true, env = true, run = true;
+};
+inline Perms& perms() { static Perms p; return p; }
+
+// Returns a catchable permission error when the capability is denied, else null.
+inline ObjPtr permGate(bool allowed, const char* what, const char* flag, int line) {
+    if (allowed) return nullptr;
+    return makeError(std::string("permission denied: ") + what + " requires " + flag +
+                     " (or --allow-all)", line);
+}
+#define LUME_GATE(cond, what, flag) \
+    do { if (auto _pe = permGate((cond), (what), (flag), line)) return _pe; } while (0)
+
 // ===== math module =====
 
 inline ObjPtr makeMathModule() {
@@ -1218,6 +1239,7 @@ inline ObjPtr makeFileModule() {
 
     // read_text(path): reads the file as a string
     def("read_text", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().read, "file read", "--allow-read");
         if (args.size() != 1) return argCountError("read_text", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "read_text", line, path)) return err;
@@ -1230,6 +1252,7 @@ inline ObjPtr makeFileModule() {
 
     // write_text(path, text): writes the string to a file (overwrites)
     def("write_text", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file write", "--allow-write");
         if (args.size() != 2 || args[1]->type() != ObjectType::STRING) {
             return makeError("write_text(path, text) expects two strings", line);
         }
@@ -1243,6 +1266,7 @@ inline ObjPtr makeFileModule() {
 
     // append_text(path, text): appends to the file (for log files)
     def("append_text", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file write", "--allow-write");
         if (args.size() != 2 || args[1]->type() != ObjectType::STRING) {
             return makeError("append_text(path, text) expects two strings", line);
         }
@@ -1256,6 +1280,7 @@ inline ObjPtr makeFileModule() {
 
     // read_lines(path): list of lines (line endings stripped)
     def("read_lines", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().read, "file read", "--allow-read");
         if (args.size() != 1) return argCountError("read_lines", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "read_lines", line, path)) return err;
@@ -1272,6 +1297,7 @@ inline ObjPtr makeFileModule() {
 
     // delete_file(path): deletes the file; returns success
     def("delete_file", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file delete", "--allow-write");
         if (args.size() != 1) return argCountError("delete_file", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "delete_file", line, path)) return err;
@@ -1281,6 +1307,7 @@ inline ObjPtr makeFileModule() {
 
     // make_dir(path): creates directories (nested included)
     def("make_dir", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "directory create", "--allow-write");
         if (args.size() != 1) return argCountError("make_dir", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "make_dir", line, path)) return err;
@@ -1291,6 +1318,7 @@ inline ObjPtr makeFileModule() {
 
     // list_dir(path): ALPHABETICAL list of names in a directory
     def("list_dir", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().read, "directory listing", "--allow-read");
         if (args.size() != 1) return argCountError("list_dir", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "list_dir", line, path)) return err;
@@ -1312,6 +1340,7 @@ inline ObjPtr makeFileModule() {
 
     // save_data(path, value): saves the value as JSON (game save system)
     def("save_data", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file write", "--allow-write");
         if (args.size() != 2) return argCountError("save_data", "2", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "save_data", line, path)) return err;
@@ -1327,6 +1356,7 @@ inline ObjPtr makeFileModule() {
 
     // load_data(path): parses a JSON file into a Lume value
     def("load_data", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().read, "file read", "--allow-read");
         if (args.size() != 1) return argCountError("load_data", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "load_data", line, path)) return err;
@@ -1352,6 +1382,7 @@ inline ObjPtr makeFileModule() {
     // For game assets, .bin saves, etc. A dedicated bytes type arrives with the VM;
     // until then files larger than 10 MB are rejected to avoid allocation storms.
     def("read_bytes", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().read, "file read", "--allow-read");
         if (args.size() != 1) return argCountError("read_bytes", "1", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "read_bytes", line, path)) return err;
@@ -1375,6 +1406,7 @@ inline ObjPtr makeFileModule() {
 
     // write_bytes(path, list): writes a list of ints (0-255) as a binary file
     def("write_bytes", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file write", "--allow-write");
         if (args.size() != 2) return argCountError("write_bytes", "2", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "write_bytes", line, path)) return err;
@@ -1403,6 +1435,7 @@ inline ObjPtr makeFileModule() {
     // read_csv(path[, separator]): list of rows; each row is a list of string cells.
     // Supports quoted fields: "a,b", "" escaping, newlines inside quotes.
     def("read_csv", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().read, "file read", "--allow-read");
         if (args.empty() || args.size() > 2) return argCountError("read_csv", "1-2", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "read_csv", line, path)) return err;
@@ -1468,6 +1501,7 @@ inline ObjPtr makeFileModule() {
 
     // write_csv(path, rows[, separator]): writes a list of lists as CSV
     def("write_csv", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file write", "--allow-write");
         if (args.size() < 2 || args.size() > 3) return argCountError("write_csv", "2-3", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "write_csv", line, path)) return err;
@@ -1516,6 +1550,7 @@ inline ObjPtr makeFileModule() {
         return boolObj(std::filesystem::is_directory(path, ec));
     });
     def("copy_file", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file write", "--allow-write");
         if (args.size() != 2 || args[1]->type() != ObjectType::STRING)
             return makeError("copy_file(from, to) expects two strings", line);
         std::string from;
@@ -1526,6 +1561,7 @@ inline ObjPtr makeFileModule() {
         return boolObj(!ec);
     });
     def("rename", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().write, "file rename", "--allow-write");
         if (args.size() != 2 || args[1]->type() != ObjectType::STRING)
             return makeError("rename(from, to) expects two strings", line);
         std::string from;
@@ -1564,6 +1600,7 @@ inline ObjPtr makeOsModule() {
 
     // env(name): reads an environment variable; null if unset
     def("env", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().env, "environment read", "--allow-env");
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
             return makeError("env(name) expects a string", line);
         }
@@ -1574,6 +1611,7 @@ inline ObjPtr makeOsModule() {
 
     // set_env(name, value): sets an environment variable for this process
     def("set_env", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LUME_GATE(perms().env, "environment write", "--allow-env");
         if (args.size() != 2 || args[0]->type() != ObjectType::STRING ||
             args[1]->type() != ObjectType::STRING) {
             return makeError("set_env(name, value) expects two strings", line);

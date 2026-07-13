@@ -124,6 +124,41 @@ int main(int argc, char* argv[]) {
         return Lume::Pkg::install(argc, argv);
     }
 
+    // Capability flags precede the script path: `lume --sandbox --allow-net app.lm`.
+    // Mentioning any permission flag opts into the sandbox (deny-all baseline),
+    // then --allow-* grants back exactly what's needed (Deno's model). With no
+    // permission flag, everything is allowed (your own script, you trust it).
+    int scriptIdx = 1;
+    bool anyPerm = false;
+    {
+        auto& p = Lume::StdLib::perms();
+        // First pass: does any permission flag appear before the script?
+        for (int i = 1; i < argc; ++i) {
+            std::string f = argv[i];
+            if (f == "--sandbox" || f == "--allow-all" || f == "--allow-net" ||
+                f == "--allow-read" || f == "--allow-write" || f == "--allow-env" ||
+                f == "--allow-run") { anyPerm = true; }
+            else break;
+        }
+        if (anyPerm) { p.net = p.read = p.write = p.env = p.run = false; }
+        for (; scriptIdx < argc; ++scriptIdx) {
+            std::string f = argv[scriptIdx];
+            if (f == "--sandbox") { /* deny-all baseline already applied */ }
+            else if (f == "--allow-all") { p.net = p.read = p.write = p.env = p.run = true; }
+            else if (f == "--allow-net")   p.net = true;
+            else if (f == "--allow-read")  p.read = true;
+            else if (f == "--allow-write") p.write = true;
+            else if (f == "--allow-env")   p.env = true;
+            else if (f == "--allow-run")   p.run = true;
+            else break; // first non-flag argument is the script path
+        }
+    }
+    if (scriptIdx >= argc) {
+        std::cerr << "[System Error] no script given after permission flags" << std::endl;
+        return 64;
+    }
+    arg = argv[scriptIdx];
+
     std::ifstream file(arg);
     if (!file.is_open()) {
         std::cerr << "[System Error] cannot open file: " << arg << std::endl;
@@ -155,7 +190,7 @@ int main(int argc, char* argv[]) {
     Lume::VM::setBaseDir(std::filesystem::path(arg).parent_path().string());
 
     // Extra CLI arguments after the script path are exposed via os.args()
-    for (int i = 2; i < argc; ++i) {
+    for (int i = scriptIdx + 1; i < argc; ++i) {
         Lume::StdLib::scriptArgs().push_back(argv[i]);
     }
 
