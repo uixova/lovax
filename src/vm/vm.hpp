@@ -332,9 +332,13 @@ public:
         }
 
         // The module runs on its own VM with its own globals; caches are shared.
+        // The VM is kept alive for the whole program so exported functions can
+        // resolve their module globals through a borrowed pointer (no leak: it
+        // lives in a static, like the module cache itself).
         loading.push_back(key);
         baseDirs().push_back(resolved.parent_path().string());
-        VM moduleVM;
+        moduleVMs().push_back(std::make_unique<VM>());
+        VM& moduleVM = *moduleVMs().back();
         auto result = moduleVM.interpret(program.get());
         baseDirs().pop_back();
         loading.pop_back();
@@ -371,10 +375,21 @@ public:
                   [](const auto& a, const auto& b) { return a.first < b.first; });
         auto mod = std::make_shared<MapObject>();
         for (auto& [name, val] : items) {
-            mod->set(std::make_shared<StringObject>(name), toObject(val));
+            auto obj = toObject(val);
+            // Rebind every exported function to this module's globals so it reads
+            // its module-level state even when called from another VM.
+            if (obj->type() == ObjectType::FUNCTION) {
+                static_cast<ClosureObject*>(obj.get())->moduleGlobals = &globals_;
+            }
+            mod->set(std::make_shared<StringObject>(name), obj);
         }
         mod->frozen = true;
         return mod;
+    }
+
+    static std::vector<std::unique_ptr<VM>>& moduleVMs() {
+        static std::vector<std::unique_ptr<VM>> vms;
+        return vms;
     }
 
 private:
@@ -776,6 +791,13 @@ private:
 
                 VM_CASE(GET_GLOBAL) {
                     uint16_t slot = readU16();
+                    // Module functions resolve globals against their own module.
+                    std::vector<Value>* mg = frame->closure->moduleGlobals;
+                    if (mg) {
+                        if (slot < mg->size()) push((*mg)[slot]);
+                        else push(Value::nil());
+                        VM_NEXT_FAST;
+                    }
                     if (!globalDefined_[slot]) {
                         const std::string& name = globalsTable_.names[slot];
                         VM_THROW(makeError(
@@ -793,6 +815,12 @@ private:
                 }
                 VM_CASE(SET_GLOBAL) {
                     uint16_t slot = readU16();
+                    std::vector<Value>* mg = frame->closure->moduleGlobals;
+                    if (mg) {
+                        if (slot < mg->size()) (*mg)[slot] = pop();
+                        else pop();
+                        VM_NEXT_FAST;
+                    }
                     if (!globalDefined_[slot]) {
                         const std::string& name = globalsTable_.names[slot];
                         VM_THROW(makeError(
@@ -1065,6 +1093,9 @@ private:
                     uint16_t protoIdx = readU16();
                     auto holder = std::static_pointer_cast<ProtoObject>(constant(protoIdx).obj);
                     auto closure = std::make_shared<ClosureObject>(holder->proto);
+                    // Functions created inside a module keep resolving globals
+                    // against that module.
+                    closure->moduleGlobals = frame->closure->moduleGlobals;
                     uint16_t upvalCount = readU16();
                     for (uint16_t i = 0; i < upvalCount; ++i) {
                         uint8_t isLocal = readByte();

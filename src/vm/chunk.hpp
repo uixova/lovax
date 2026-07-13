@@ -165,6 +165,12 @@ class ClosureObject : public Object {
 public:
     std::shared_ptr<Proto> proto;
     std::vector<std::shared_ptr<UpvalueCell>> upvalues;
+    // Non-null for functions that belong to an imported file module: their
+    // GET_GLOBAL/SET_GLOBAL slots resolve against the MODULE's global table (kept
+    // alive for the program), not the caller's — so a module function can read
+    // its own module-level state no matter which VM invokes it. Borrowed pointer
+    // (the module VM is kept alive), so no ownership cycle / leak.
+    std::vector<Value>* moduleGlobals = nullptr;
 
     ClosureObject(std::shared_ptr<Proto> p)
         : Object(ObjectType::FUNCTION), proto(std::move(p)) {}

@@ -6,3 +6,10 @@ fn selamla(isim):
 
 fn topla_hepsi(liste):
     return sum(liste)
+
+set sayac = 0
+fn arttir():
+    sayac += 1
+    return sayac
+fn taban_ile(x):
+    return SÜRÜM + x

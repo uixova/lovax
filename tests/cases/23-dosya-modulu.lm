@@ -7,3 +7,6 @@ say y.SÜRÜM
 use "lib/yardımcı.lm": selamla
 say selamla("dünya")
 say keys(yardımcı)
+say yardımcı.arttir()
+say yardımcı.arttir()
+say yardımcı.taban_ile(10)
