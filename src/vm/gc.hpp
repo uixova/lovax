@@ -68,9 +68,11 @@ template <class T> bool operator!=(std::nullptr_t, const Ref<T>& a) { return a.p
 template <class T, class... A>
 Ref<T> makeObj(A&&... args); // defined after gcAlloc below
 
-// static_pointer_cast replacement.
+// static_pointer_cast replacement (from a Ref or a raw Object*).
 template <class T, class U>
 Ref<T> refCast(const Ref<U>& r) { return Ref<T>(static_cast<T*>(r.p)); }
+template <class T>
+Ref<T> refCast(Object* p) { return Ref<T>(static_cast<T*>(p)); }
 
 inline void gcMarkObject(Object* o); // fwd; defined in object.hpp once Object is complete
 void gcCollect();                    // fwd; defined in object.hpp (slow path)

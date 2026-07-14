@@ -14,14 +14,18 @@ namespace Lume {
 
 enum class VKind : uint8_t { NIL, BOOL, INT, FLOAT, OBJ };
 
+// 16-byte tagged value (matches Lua 5.4, which also keeps a native int64). A
+// NaN-boxed 8-byte value is a LuaJIT trick that only works WITHOUT a 64-bit int
+// (the NaN payload is ~48 bits); Lume keeps exact int64, so a clean tagged union
+// is both correct and portable — no per-platform pointer-bit assumptions.
 struct Value {
     VKind kind = VKind::NIL;
     union {
         bool b;
         long long i;
         double d;
+        Object* obj;   // engaged only when kind == OBJ; lifetime managed by the GC
     };
-    Ref<Object> obj; // engaged only when kind == OBJ
 
     Value() : kind(VKind::NIL), i(0) {}
     static Value nil()                { Value v; v.kind = VKind::NIL;   v.i = 0; return v; }
@@ -29,7 +33,7 @@ struct Value {
     static Value integer(long long x) { Value v; v.kind = VKind::INT;   v.i = x; return v; }
     static Value real(double x)       { Value v; v.kind = VKind::FLOAT; v.d = x; return v; }
     static Value object(Ref<Object> o) {
-        Value v; v.kind = VKind::OBJ; v.i = 0; v.obj = std::move(o); return v;
+        Value v; v.kind = VKind::OBJ; v.obj = o.get(); return v;
     }
 
     bool isNil()   const { return kind == VKind::NIL; }
@@ -70,7 +74,7 @@ inline Value fromObject(const Ref<Object>& o) {
 // Truthiness (Python model), fast path for immediates.
 // GC: mark the object a Value points at (immediates carry no pointer).
 inline void gcMarkValue(const Value& v) {
-    if (v.kind == VKind::OBJ) gcMarkObject(v.obj.get());
+    if (v.kind == VKind::OBJ) gcMarkObject(v.obj);
 }
 
 inline bool valueTruthy(const Value& v) {
