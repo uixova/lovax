@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.11.0 — value representation: a tracing garbage collector
+
+The value model is rebuilt for the engine era (RFC-013). `std::shared_ptr<Object>`
+is retired in favor of a **tracing mark-sweep garbage collector** and a **16-byte
+tagged value** — the prerequisites for the JIT and the game engine's memory
+budget. Same language, 67 golden tests bit-for-bit in both dispatch modes.
+
+### Tracing GC (RFC-013)
+- `src/vm/gc.hpp`: an intrusive mark-sweep heap. Allocation never collects
+  mid-operation; it flags a request the VM services at **safepoints** (loop
+  back-edges + calls), where the value stack is the complete root set. This is
+  what makes a precise collector safe to retrofit onto a VM that holds objects in
+  C++ locals throughout.
+- `Ref<T>`: a one-word non-owning pointer that preserved the `shared_ptr` call
+  sites, so the conversion was near-churn-free. Precise roots across every live
+  VM (main + modules), coroutine states, singletons, and permanent-rooted
+  builtin modules; per-type `gcMark` walks the object graph.
+
+### 16-byte value (not NaN-box)
+- `Value` is now 16 bytes (was 32): tag + `union{int64, double, Object*}`. This
+  matches **Lua 5.4**, the int64 peer. An 8-byte NaN-box was rejected: its ~48-bit
+  payload cannot hold Lume's native int64 (LuaJIT NaN-boxes only because it lacks
+  int64), and it carries per-platform pointer-bit hazards. Portable and exact.
+
+### Safety (the whole point)
+- `LUME_GC_STRESS` collects on **every** allocation, turning any missed root into
+  an immediate use-after-free. Under GC-stress + ASan/UBSan, all 67 golden + the
+  fuzz and sandbox gates are **clean**. Heavy allocation stays memory-bounded.
+
+### Known follow-ups (v0.11.x)
+- Incremental GC (≤1 ms pauses, write barriers) — deliberately its own gated
+  effort: a missed write barrier reintroduces use-after-free, so it is not rushed.
+  The current stop-the-world collector is correct and sufficient pre-engine.
+- In-place string append is temporarily off (no cheap uniqueness check under a
+  tracing GC); the string suite is still ~5 ms.
+
 ## v0.10.0 — general-purpose + safe: net, packages, sandbox
 
 Lume stops being game-only. It can now open sockets, install version-pinned
