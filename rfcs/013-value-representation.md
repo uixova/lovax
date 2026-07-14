@@ -47,10 +47,28 @@ value is the whole `fib` gap.
 
 Both are correct; (2) is the safer first move and de-risks (1).
 
-## Decision
+## Update (v0.11): NaN-boxing rejected for Lume — int64 conflict
 
-**Defer to a dedicated v0.10 "value representation" effort — do NOT squeeze it in
-now.** Reasoning:
+Implementing the value model surfaced a hard constraint: **NaN-boxing an 8-byte
+value is incompatible with Lume's native `int64`.** A NaN-boxed value has only
+~48–51 bits of payload, so a full 64-bit integer does not fit. LuaJIT gets away
+with NaN-boxing precisely because it has *no* int64 (numbers are doubles, 53-bit
+safe). Lua 5.4, which *does* have int64, therefore uses a **16-byte tagged union**
+— not NaN-boxing.
+
+So Lume follows Lua 5.4: a **16-byte tagged `Value`** (tag + `union{int64, double,
+Object*}`), down from 24 (Ref era) / 32 (shared_ptr era). This keeps exact int64,
+is fully portable (no per-platform pointer-bit assumptions — a real NaN-box
+hazard on ARM / 5-level paging), and matches the value size of the int64 peer we
+actually compete with (Lua 5.4). Boxing large ints to fake an 8-byte value, or
+adding a range check to every int op, would slow the exact hot path (`fib`) we
+mean to speed up. Decision recorded; `LUME_SAFE_VALUES` is unnecessary since the
+16-byte encoding *is* the safe, portable one.
+
+## Historical note: original defer decision (v0.9)
+
+**Deferred to a dedicated v0.10+ "value representation" effort — do NOT squeeze
+it in now.** Reasoning:
 
 - It touches essentially every `std::shared_ptr<Object>` in the codebase
   (object model, runtime, builtins, stdlib, VM). It cannot be done incrementally

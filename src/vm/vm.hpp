@@ -438,7 +438,7 @@ public:
                 // Skip untouched core builtins; keep user redefinitions.
                 if (globals_[i].isObj() &&
                     globals_[i].obj->type() == ObjectType::BUILTIN &&
-                    static_cast<BuiltinObject*>(globals_[i].obj.get())->name == name) {
+                    static_cast<BuiltinObject*>(globals_[i].obj)->name == name) {
                     continue;
                 }
             }
@@ -621,7 +621,7 @@ private:
         Value& callee = peek(argc);
 
         if (callee.isObjType(ObjectType::FUNCTION)) {
-            auto* closure = static_cast<ClosureObject*>(callee.obj.get());
+            auto* closure = static_cast<ClosureObject*>(callee.obj);
             const auto& proto = *closure->proto;
 
             if (proto.variadic) {
@@ -927,13 +927,13 @@ private:
 
                 VM_CASE(EQUAL) {
                     bool eq = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj.reset(); sp_[-2].obj.reset();
+                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr;
                     sp_[-2].kind = VKind::BOOL; sp_[-2].b = eq; --sp_;
                     VM_NEXT_FAST;
                 }
                 VM_CASE(NOT_EQUAL) {
                     bool eq = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj.reset(); sp_[-2].obj.reset();
+                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr;
                     sp_[-2].kind = VKind::BOOL; sp_[-2].b = !eq; --sp_;
                     VM_NEXT_FAST;
                 }
@@ -1081,7 +1081,7 @@ private:
                 }
                 VM_CASE(NOT_) {
                     bool t = valueTruthy(sp_[-1]);
-                    sp_[-1].obj.reset();
+                    sp_[-1].obj = nullptr;
                     sp_[-1].kind = VKind::BOOL; sp_[-1].b = !t;
                     VM_NEXT_FAST;
                 }
@@ -1121,7 +1121,7 @@ private:
                     {
                         Value& callee = peek(argc);
                         if (callee.isObjType(ObjectType::FUNCTION)) {
-                            ClosureObject* cl = static_cast<ClosureObject*>(callee.obj.get());
+                            ClosureObject* cl = static_cast<ClosureObject*>(callee.obj);
                             const Proto& p = *cl->proto;
                             if (!p.variadic && argc == p.paramCount &&
                                 frames_.size() < MAX_FRAMES &&
@@ -1155,7 +1155,7 @@ private:
                     static const std::string typeKey = "__type__";
                     Value& recv = peek(argc + 1);
                     bool isStruct = recv.isObjType(ObjectType::MAP) &&
-                        static_cast<MapObject*>(recv.obj.get())->getStr(typeKey) != nullptr;
+                        static_cast<MapObject*>(recv.obj)->getStr(typeKey) != nullptr;
                     syncOut();
                     {
                         Ref<Object> err;
@@ -1247,7 +1247,7 @@ private:
                 VM_CASE(INDEX_GET) {
                     Value idx = pop(), obj = pop();
                     if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
-                        auto* list = static_cast<ListObject*>(obj.obj.get());
+                        auto* list = static_cast<ListObject*>(obj.obj);
                         long long i = idx.i;
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
@@ -1265,7 +1265,7 @@ private:
                     Value& obj = peek(1);
                     Value& idx = peek(0);
                     if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
-                        auto* list = static_cast<ListObject*>(obj.obj.get());
+                        auto* list = static_cast<ListObject*>(obj.obj);
                         long long i = idx.i;
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
@@ -1283,7 +1283,7 @@ private:
                 VM_CASE(INDEX_SET) {
                     Value val = pop(), idx = pop(), obj = pop();
                     if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
-                        auto* list = static_cast<ListObject*>(obj.obj.get());
+                        auto* list = static_cast<ListObject*>(obj.obj);
                         long long i = idx.i;
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
@@ -1325,10 +1325,10 @@ private:
                 VM_CASE(MEMBER_GET) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj.get())->value;
+                        static_cast<StringObject*>(constant(nameC).obj)->value;
                     Value* top = sp_ - 1;
                     if (top->isObjType(ObjectType::MAP)) {
-                        IC_LOOKUP(static_cast<MapObject*>(top->obj.get()), prop, ics, ent)
+                        IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
                         if (ent != nullptr) {
                             *top = fromObject(ent->second);
                             VM_NEXT_FAST;
@@ -1347,9 +1347,9 @@ private:
                     Value* top = sp_ - 1;
                     if (top->isNil()) VM_NEXT_FAST;            // a?.b -> null (in place)
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj.get())->value;
+                        static_cast<StringObject*>(constant(nameC).obj)->value;
                     if (top->isObjType(ObjectType::MAP)) {
-                        IC_LOOKUP(static_cast<MapObject*>(top->obj.get()), prop, ics, ent)
+                        IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
                         if (ent != nullptr) {
                             *top = fromObject(ent->second);
                             VM_NEXT_FAST;
@@ -1366,10 +1366,10 @@ private:
                 VM_CASE(MEMBER_GET_KEEP) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj.get())->value;
+                        static_cast<StringObject*>(constant(nameC).obj)->value;
                     Value* top = sp_ - 1;
                     if (top->isObjType(ObjectType::MAP)) {
-                        IC_LOOKUP(static_cast<MapObject*>(top->obj.get()), prop, ics, ent)
+                        IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
                         if (ent != nullptr) {
                             push(fromObject(ent->second));
                             VM_NEXT_FAST;
@@ -1385,16 +1385,16 @@ private:
                 VM_CASE(MEMBER_SET) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj.get())->value;
+                        static_cast<StringObject*>(constant(nameC).obj)->value;
                     Value* pobj = sp_ - 2; Value* pval = sp_ - 1;
                     if (pobj->isObjType(ObjectType::MAP) &&
-                        !static_cast<MapObject*>(pobj->obj.get())->frozen) {
-                        auto* m = static_cast<MapObject*>(pobj->obj.get());
+                        !static_cast<MapObject*>(pobj->obj)->frozen) {
+                        auto* m = static_cast<MapObject*>(pobj->obj);
                         IC_LOOKUP(m, prop, ics, ent)
                         if (ent != nullptr) {
                             const_cast<std::pair<Ref<Object>,
                                 Ref<Object>>*>(ent)->second = toObject(*pval);
-                            pval->obj.reset(); pobj->obj.reset(); sp_ -= 2;
+                            pval->obj = nullptr; pobj->obj = nullptr; sp_ -= 2;
                             VM_NEXT_FAST;
                         }
                     }
@@ -1489,7 +1489,7 @@ private:
                     // Range iteration is the hot loop shape (for i in 0..n): all-scalar,
                     // in-place slot writes, direct dispatch.
                     {
-                        IterObject* itp = static_cast<IterObject*>(peek().obj.get());
+                        IterObject* itp = static_cast<IterObject*>(peek().obj);
                         if (itp->kind == IterObject::Kind::RANGE) {
                             auto* r = static_cast<RangeObject*>(itp->source.get());
                             if (r->step > 0 ? itp->index >= r->end : itp->index <= r->end) {
@@ -1635,7 +1635,7 @@ private:
                         VM_THROW(makeError("'is' expects a type name string on the right "
                                            "(e.g. x is \"int\")", currentLine()));
                     }
-                    const std::string& want = static_cast<StringObject*>(name.obj.get())->value;
+                    const std::string& want = static_cast<StringObject*>(name.obj)->value;
                     push(Value::boolean(valueTypeName(val) == want));
                     VM_NEXT;
                 }
@@ -1646,7 +1646,7 @@ private:
                         VM_THROW(makeError("unpacking assignment expects a list, got " +
                                            valueTypeName(v), currentLine()));
                     }
-                    auto* list = static_cast<ListObject*>(v.obj.get());
+                    auto* list = static_cast<ListObject*>(v.obj);
                     if (list->elements.size() != n) {
                         VM_THROW(makeError("unpacking mismatch: " + std::to_string(n) +
                                            " target(s) but list has " +
@@ -1665,7 +1665,7 @@ private:
                 VM_CASE(RUNTIME_ERROR) {
                     uint16_t msgC = readU16();
                     const std::string& msg =
-                        static_cast<StringObject*>(constant(msgC).obj.get())->value;
+                        static_cast<StringObject*>(constant(msgC).obj)->value;
                     VM_THROW(makeError(msg, currentLine()));
                 }
 
@@ -1753,14 +1753,14 @@ private:
                 VM_CASE(EQUAL_JF) {
                     uint16_t d = readU16();
                     bool t = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj.reset(); sp_[-2].obj.reset(); sp_ -= 2;
+                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr; sp_ -= 2;
                     if (!t) ip += d;
                     VM_NEXT_FAST;
                 }
                 VM_CASE(NOT_EQUAL_JF) {
                     uint16_t d = readU16();
                     bool t = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj.reset(); sp_[-2].obj.reset(); sp_ -= 2;
+                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr; sp_ -= 2;
                     if (t) ip += d;
                     VM_NEXT_FAST;
                 }
@@ -1795,22 +1795,18 @@ private:
                         *pa = Value::real(pa->asDouble() + pb->asDouble()); --sp_; VM_NEXT_FAST;
                     }
                     if (pa->isObjType(ObjectType::STRING) && pb->isObjType(ObjectType::STRING)) {
-                        auto* ls = static_cast<StringObject*>(pa->obj.get());
-                        const std::string& rs = static_cast<StringObject*>(pb->obj.get())->value;
-                        // use_count == 2 ⇒ exactly [target slot] + [this stack copy]:
-                        // nobody else can observe the mutation, because the very next
-                        // instruction stores this same object back into the target.
-                        // (CPython does the identical refcount trick for s += "...".)
-                        if (pa->obj.use_count() == 2) {
-                            ls->value.append(rs);
-                            ls->lenCache = -1;
-                        } else {
-                            auto out = makeObj<StringObject>(std::string());
-                            out->value.reserve(ls->value.size() + rs.size());
-                            out->value.append(ls->value).append(rs);
-                            pa->obj = std::move(out);
-                        }
-                        pb->obj.reset(); --sp_;
+                        // Under a tracing GC there is no cheap uniqueness check, so
+                        // always build a fresh string (correct — never mutates a
+                        // possibly-shared one). makeObj can't collect mid-instruction
+                        // (deferred to the next safepoint), so ls/rs stay valid.
+                        // TODO(v0.11-perf): restore in-place append with a builder flag.
+                        auto* ls = static_cast<StringObject*>(pa->obj);
+                        const std::string& rs = static_cast<StringObject*>(pb->obj)->value;
+                        auto out = makeObj<StringObject>(std::string());
+                        out->value.reserve(ls->value.size() + rs.size());
+                        out->value.append(ls->value).append(rs);
+                        pa->obj = out.get();
+                        pb->obj = nullptr; --sp_;
                         VM_NEXT_FAST;
                     }
                     {
