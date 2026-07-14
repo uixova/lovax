@@ -21,14 +21,14 @@ struct Value {
         long long i;
         double d;
     };
-    std::shared_ptr<Object> obj; // engaged only when kind == OBJ
+    Ref<Object> obj; // engaged only when kind == OBJ
 
     Value() : kind(VKind::NIL), i(0) {}
     static Value nil()                { Value v; v.kind = VKind::NIL;   v.i = 0; return v; }
     static Value boolean(bool x)      { Value v; v.kind = VKind::BOOL;  v.b = x; return v; }
     static Value integer(long long x) { Value v; v.kind = VKind::INT;   v.i = x; return v; }
     static Value real(double x)       { Value v; v.kind = VKind::FLOAT; v.d = x; return v; }
-    static Value object(std::shared_ptr<Object> o) {
+    static Value object(Ref<Object> o) {
         Value v; v.kind = VKind::OBJ; v.i = 0; v.obj = std::move(o); return v;
     }
 
@@ -45,19 +45,19 @@ struct Value {
 };
 
 // Boxes a Value into the heap Object model (for builtins, containers, slow paths).
-inline std::shared_ptr<Object> toObject(const Value& v) {
+inline Ref<Object> toObject(const Value& v) {
     switch (v.kind) {
         case VKind::NIL:   return NULL_OBJ_;
         case VKind::BOOL:  return v.b ? TRUE_OBJ : FALSE_OBJ;
-        case VKind::INT:   return std::make_shared<IntegerObject>(v.i);
-        case VKind::FLOAT: return std::make_shared<FloatObject>(v.d);
+        case VKind::INT:   return makeObj<IntegerObject>(v.i);
+        case VKind::FLOAT: return makeObj<FloatObject>(v.d);
         case VKind::OBJ:   return v.obj;
     }
     return NULL_OBJ_;
 }
 
 // Unwraps a heap Object into a Value (numbers/bools/null become immediates).
-inline Value fromObject(const std::shared_ptr<Object>& o) {
+inline Value fromObject(const Ref<Object>& o) {
     switch (o->type()) {
         case ObjectType::NULL_OBJ: return Value::nil();
         case ObjectType::BOOLEAN:  return Value::boolean(static_cast<BooleanObject*>(o.get())->value);
@@ -68,6 +68,11 @@ inline Value fromObject(const std::shared_ptr<Object>& o) {
 }
 
 // Truthiness (Python model), fast path for immediates.
+// GC: mark the object a Value points at (immediates carry no pointer).
+inline void gcMarkValue(const Value& v) {
+    if (v.kind == VKind::OBJ) gcMarkObject(v.obj.get());
+}
+
 inline bool valueTruthy(const Value& v) {
     switch (v.kind) {
         case VKind::NIL:   return false;

@@ -25,3 +25,9 @@ tests/tmp/
 # Local research notes (not part of the repo)
 terms.txt
 gemini.txt
+
+# GC/dispatch test binaries + scratch
+lume_gcstress
+lume_sw
+lume_leak
+err.log

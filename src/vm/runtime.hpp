@@ -13,13 +13,13 @@
 namespace Lume {
 namespace Runtime {
 
-    inline bool isValidMapKey(const std::shared_ptr<Object>& key) {
+    inline bool isValidMapKey(const Ref<Object>& key) {
         return key->type() == ObjectType::STRING ||
                key->type() == ObjectType::INTEGER ||
                key->type() == ObjectType::BOOLEAN;
     }
 
-    inline std::shared_ptr<Object> evalMemberAccess(const std::shared_ptr<Object>& obj,
+    inline Ref<Object> evalMemberAccess(const Ref<Object>& obj,
                                                     const std::string& prop, int line) {
         if (obj->type() != ObjectType::MAP) {
             return makeError("'.' access expects a map or module, got " +
@@ -46,8 +46,8 @@ namespace Runtime {
                          "\" (check with has())", line);
     }
 
-    inline std::shared_ptr<Object> evalIndexAccess(const std::shared_ptr<Object>& obj,
-                                                   const std::shared_ptr<Object>& idx,
+    inline Ref<Object> evalIndexAccess(const Ref<Object>& obj,
+                                                   const Ref<Object>& idx,
                                                    int line) {
         if (obj->type() == ObjectType::LIST) {
             if (idx->type() != ObjectType::INTEGER) {
@@ -89,17 +89,22 @@ namespace Runtime {
                 return makeError("string index out of range: " + idx->inspect() +
                                  " (length " + std::to_string(n) + ")", line);
             }
-            return std::make_shared<StringObject>(utf8At(s, i));
+            return makeObj<StringObject>(utf8At(s, i));
         }
 
         return makeError("indexing only works on list, map and string; got " +
                          typeName(obj->type()) + "", line);
     }
 
-    inline std::shared_ptr<Object> evalInfixExpression(const std::string& op,
-                                                       const std::shared_ptr<Object>& left,
-                                                       const std::shared_ptr<Object>& right,
+    inline Ref<Object> evalInfixExpression(const std::string& op,
+                                                       const Ref<Object>& left,
+                                                       const Ref<Object>& right,
                                                        int line) {
+        // The caller reached here after popping the operands into C++ locals, so
+        // they are no longer on the value stack. Root them: the concat/repeat
+        // branches below allocate (which can trigger a collection).
+        GcRoot _lr(left.get());
+        GcRoot _rr(right.get());
         // Equality is defined for every type pair
         if (op == "==") return boolObj(objectEquals(left, right));
         if (op == "!=") return boolObj(!objectEquals(left, right));
@@ -143,7 +148,7 @@ namespace Runtime {
         if (left->type() == ObjectType::STRING && right->type() == ObjectType::STRING) {
             const std::string& l = static_cast<StringObject*>(left.get())->value;
             const std::string& r = static_cast<StringObject*>(right.get())->value;
-            if (op == "+")  return std::make_shared<StringObject>(l + r);
+            if (op == "+")  return makeObj<StringObject>(l + r);
             if (op == "<")  return boolObj(l < r);
             if (op == ">")  return boolObj(l > r);
             if (op == "<=") return boolObj(l <= r);
@@ -166,14 +171,14 @@ namespace Runtime {
                 std::string out;
                 out.reserve(s.size() * (size_t)count);
                 for (long long i = 0; i < count; ++i) out += s;
-                return std::make_shared<StringObject>(out);
+                return makeObj<StringObject>(out);
             }
         }
 
         // List concatenation: [1] + [2] -> [1, 2]
         if (left->type() == ObjectType::LIST && right->type() == ObjectType::LIST) {
             if (op == "+") {
-                auto out = std::make_shared<ListObject>();
+                auto out = makeObj<ListObject>();
                 auto* la = static_cast<ListObject*>(left.get());
                 auto* lb = static_cast<ListObject*>(right.get());
                 out->elements.reserve(la->elements.size() + lb->elements.size());
@@ -189,24 +194,24 @@ namespace Runtime {
             long long l = static_cast<IntegerObject*>(left.get())->value;
             long long r = static_cast<IntegerObject*>(right.get())->value;
 
-            if (op == "+") return std::make_shared<IntegerObject>(l + r);
-            if (op == "-") return std::make_shared<IntegerObject>(l - r);
-            if (op == "*") return std::make_shared<IntegerObject>(l * r);
+            if (op == "+") return makeObj<IntegerObject>(l + r);
+            if (op == "-") return makeObj<IntegerObject>(l - r);
+            if (op == "*") return makeObj<IntegerObject>(l * r);
             if (op == "/") {
                 if (r == 0) return makeError("division by zero", line);
                 // Floor division: keeps the identity with floor-mod -> (a / b) * b + a % b == a
                 long long q = l / r;
                 if ((l % r != 0) && ((l < 0) != (r < 0))) q--;
-                return std::make_shared<IntegerObject>(q);
+                return makeObj<IntegerObject>(q);
             }
-            if (op == "&") return std::make_shared<IntegerObject>(l & r);
-            if (op == "|") return std::make_shared<IntegerObject>(l | r);
-            if (op == "^") return std::make_shared<IntegerObject>(l ^ r);
+            if (op == "&") return makeObj<IntegerObject>(l & r);
+            if (op == "|") return makeObj<IntegerObject>(l | r);
+            if (op == "^") return makeObj<IntegerObject>(l ^ r);
             if (op == "<<" || op == ">>") {
                 if (r < 0 || r > 63) {
                     return makeError("shift amount must be within 0-63: " + std::to_string(r), line);
                 }
-                return std::make_shared<IntegerObject>(op == "<<" ? (l << r) : (l >> r));
+                return makeObj<IntegerObject>(op == "<<" ? (l << r) : (l >> r));
             }
             if (op == "%") {
                 if (r == 0) return makeError("modulo by zero", line);
@@ -214,15 +219,15 @@ namespace Runtime {
                 // The right behavior for grid/angle wrapping in games: -5 % 3 -> 1
                 long long m = l % r;
                 if (m != 0 && ((m < 0) != (r < 0))) m += r;
-                return std::make_shared<IntegerObject>(m);
+                return makeObj<IntegerObject>(m);
             }
             if (op == "**") {
                 double result = std::pow((double)l, (double)r);
                 // Non-negative exponent with an integral result stays int (2 ** 10 -> 1024)
                 if (r >= 0 && result == std::floor(result) && std::fabs(result) < 9.2e18) {
-                    return std::make_shared<IntegerObject>((long long)result);
+                    return makeObj<IntegerObject>((long long)result);
                 }
-                return std::make_shared<FloatObject>(result);
+                return makeObj<FloatObject>(result);
             }
             if (op == "<")  return boolObj(l < r);
             if (op == ">")  return boolObj(l > r);
@@ -241,22 +246,22 @@ namespace Runtime {
                        ? static_cast<FloatObject*>(right.get())->value
                        : (double)static_cast<IntegerObject*>(right.get())->value;
 
-            if (op == "+") return std::make_shared<FloatObject>(l + r);
-            if (op == "-") return std::make_shared<FloatObject>(l - r);
-            if (op == "*") return std::make_shared<FloatObject>(l * r);
+            if (op == "+") return makeObj<FloatObject>(l + r);
+            if (op == "-") return makeObj<FloatObject>(l - r);
+            if (op == "*") return makeObj<FloatObject>(l * r);
             if (op == "/") {
                 if (r == 0.0) return makeError("division by zero", line);
-                return std::make_shared<FloatObject>(l / r);
+                return makeObj<FloatObject>(l / r);
             }
             if (op == "%") {
                 if (r == 0.0) return makeError("modulo by zero", line);
                 // Floor mod (Python/Lua rule), float version
                 double m = std::fmod(l, r);
                 if (m != 0.0 && ((m < 0.0) != (r < 0.0))) m += r;
-                return std::make_shared<FloatObject>(m);
+                return makeObj<FloatObject>(m);
             }
             if (op == "**") {
-                return std::make_shared<FloatObject>(std::pow(l, r));
+                return makeObj<FloatObject>(std::pow(l, r));
             }
             if (op == "<")  return boolObj(l < r);
             if (op == ">")  return boolObj(l > r);

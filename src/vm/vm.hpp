@@ -73,11 +73,21 @@ struct ExecState {
 class CoroObject : public Object {
 public:
     enum class Status { CREATED, SUSPENDED, RUNNING, DEAD };
-    std::shared_ptr<Object> fn;   // the closure to run on first resume
+    Ref<Object> fn;   // the closure to run on first resume
     Status status = Status::CREATED;
     ExecState state;              // saved stack/frames while suspended
-    CoroObject(std::shared_ptr<Object> f)
+    CoroObject(Ref<Object> f)
         : Object(ObjectType::COROUTINE), fn(std::move(f)) {}
+    void gcMark() override {
+        gcMarkObject(fn.get());
+        // Suspended context (empty while running — the VM marks the live copy).
+        if (state.stack) {
+            Value* base = state.stack.get();
+            for (size_t i = 0; i < state.spOffset; ++i) gcMarkValue(base[i]);
+        }
+        for (auto& f : state.frames) gcMarkObject(f.closure);
+        for (auto& u : state.openUpvalues) if (u) gcMarkValue(u->value);
+    }
     std::string inspect() const override {
         const char* s = status == Status::CREATED   ? "created"
                       : status == Status::SUSPENDED ? "suspended"
@@ -94,7 +104,50 @@ public:
     VM() {
         stackMem_ = std::make_unique<Value[]>(STACK_LIMIT);
         sp_ = stackMem_.get();
+        // Register for GC root scanning + install the collector's root callback once.
+        liveVMs().push_back(this);
+        Heap::get().markRoots = &VM::markAllRoots;
         installBuiltinGlobals();
+    }
+    ~VM() {
+        auto& v = liveVMs();
+        v.erase(std::remove(v.begin(), v.end(), this), v.end());
+    }
+
+    // Every VM whose stack/globals/frames are live roots for the GC.
+    static std::vector<VM*>& liveVMs() { static std::vector<VM*> v; return v; }
+
+    // Execution contexts swapped out of a VM into a C++ local during a coroutine
+    // resume — still live roots while the coroutine runs.
+    static std::vector<ExecState*>& savedStates() { static std::vector<ExecState*> v; return v; }
+
+    static void markExecState(const ExecState& s) {
+        if (s.stack) {
+            Value* base = s.stack.get();
+            for (size_t i = 0; i < s.spOffset; ++i) gcMarkValue(base[i]);
+        }
+        for (auto& f : s.frames) gcMarkObject(f.closure);
+        for (auto& u : s.openUpvalues) if (u) gcMarkValue(u->value);
+    }
+
+    // Marks this VM's own live references (called by markAllRoots).
+    void markOwnRoots() {
+        for (Value* p = stackMem_.get(); p < sp_; ++p) gcMarkValue(*p);
+        for (auto& g : globals_) gcMarkValue(g);
+        for (auto& f : frames_) gcMarkObject(f.closure);
+        for (auto& u : openUpvalues_) if (u) gcMarkValue(u->value);
+        if (yieldValue_) gcMarkObject(yieldValue_.get());
+        if (activeCoro_) gcMarkObject(activeCoro_);
+    }
+
+    // The GC's root callback: singletons, every live VM, and the file-module cache.
+    static void markAllRoots() {
+        gcMarkObject(TRUE_OBJ.get());
+        gcMarkObject(FALSE_OBJ.get());
+        gcMarkObject(NULL_OBJ_.get());
+        for (VM* vm : liveVMs()) vm->markOwnRoots();
+        for (ExecState* s : savedStates()) markExecState(*s);
+        for (auto& kv : moduleCache()) gcMarkObject(kv.second.get());
     }
 
     // Relative module paths resolve from the entry script's directory.
@@ -127,8 +180,8 @@ public:
 
     // resume(co, value): runs the coroutine until it yields or returns. Returns
     // the yielded/returned value, or an error object.
-    std::shared_ptr<Object> resumeCoroutine(const std::shared_ptr<Object>& coObj,
-                                             const std::shared_ptr<Object>& arg, int line) {
+    Ref<Object> resumeCoroutine(const Ref<Object>& coObj,
+                                             const Ref<Object>& arg, int line) {
         auto* co = static_cast<CoroObject*>(coObj.get());
         if (co->status == CoroObject::Status::DEAD)
             return makeError("cannot resume a finished coroutine", line);
@@ -136,11 +189,16 @@ public:
             return makeError("cannot resume a coroutine that is already running", line);
 
         ExecState caller = saveExec();
+        // The caller's whole context now lives in a C++ local; register it as a GC
+        // root for the duration, or a collection while the coroutine runs would
+        // free the resumer's objects. RAII pop covers both the normal and error exit.
+        savedStates().push_back(&caller);
+        struct PopSaved { ~PopSaved() { savedStates().pop_back(); } } _popSaved;
         CoroObject* prevActive = activeCoro_;
         bool prevYielded = yielded_;
         activeCoro_ = co;
 
-        std::shared_ptr<Object> result;
+        Ref<Object> result;
         if (co->status == CoroObject::Status::CREATED) {
             // Fresh: give the coroutine its own stack and set up the fn call frame.
             stackMem_ = std::make_unique<Value[]>(STACK_LIMIT);
@@ -174,7 +232,7 @@ public:
             result = run(0);
         }
 
-        std::shared_ptr<Object> out;
+        Ref<Object> out;
         if (isError(result)) {
             co->status = CoroObject::Status::DEAD;
             out = result;
@@ -196,12 +254,19 @@ public:
     }
 
     // Compiles and runs a program. Returns NULL_OBJ_ or an ErrorObject.
-    std::shared_ptr<Object> interpret(const Program* program) {
+    Ref<Object> interpret(const Program* program) {
+        // GC stays off through compilation and frame setup: the compile-time
+        // constants live in the proto (a shared_ptr, invisible to the GC) and are
+        // only reachable once the top-level closure is built and pushed as a root.
+        // Enabling GC afterwards makes them reachable via closure -> proto -> consts.
+        bool wasEnabled = Heap::get().enabled;
+        Heap::get().enabled = false;
+
         Compiler compiler(globalsTable_);
         auto proto = compiler.compileProgram(program);
         syncGlobalSlots();
 
-        auto closure = std::make_shared<ClosureObject>(proto);
+        auto closure = makeObj<ClosureObject>(proto);
         push(Value::object(closure));
         // Reserve the script frame's local slots (for-loop variables) just like a
         // function call would, so the value stack runs above them.
@@ -209,7 +274,10 @@ public:
         frames_.reserve(MAX_FRAMES);
         frames_.push_back({closure.get(), proto->chunk.code.data(), 0, 0,
                            proto->chunk.consts.data(), &proto->chunk});
+
+        Heap::get().enabled = true;   // closure is rooted on the stack now
         auto result = run(0);
+        Heap::get().enabled = wasEnabled;
         return isError(result) ? result : NULL_OBJ_;
     }
 
@@ -223,8 +291,8 @@ public:
     }
 
     // Native -> Lume call bridge (builtins calling closures: filter/emit/sort_by).
-    std::shared_ptr<Object> callFromNative(const std::shared_ptr<Object>& fn,
-                                           const std::vector<std::shared_ptr<Object>>& args,
+    Ref<Object> callFromNative(const Ref<Object>& fn,
+                                           const std::vector<Ref<Object>>& args,
                                            int line) {
         if (fn->type() == ObjectType::BUILTIN) {
             auto* b = static_cast<BuiltinObject*>(fn.get());
@@ -246,8 +314,8 @@ public:
 
     BuiltinObject::CallFn callFn() {
         VM* self = this;
-        return [self](const std::shared_ptr<Object>& f,
-                      const std::vector<std::shared_ptr<Object>>& a,
+        return [self](const Ref<Object>& f,
+                      const std::vector<Ref<Object>>& a,
                       int l) { return self->callFromNative(f, a, l); };
     }
 
@@ -258,7 +326,7 @@ public:
         return dirs;
     }
 
-    std::shared_ptr<Object> loadModule(const UseSpec& spec, int line) {
+    Ref<Object> loadModule(const UseSpec& spec, int line) {
         if (!spec.isFile) {
             // Network access is gated at import: 'use net' needs --allow-net.
             if (spec.target == "net" && !StdLib::perms().net) {
@@ -289,7 +357,7 @@ public:
         return loadFileModule(spec.target, line);
     }
 
-    std::shared_ptr<Object> loadFileModule(const std::string& rawPath, int line) {
+    Ref<Object> loadFileModule(const std::string& rawPath, int line) {
         namespace fs = std::filesystem;
 
         fs::path p(rawPath);
@@ -361,7 +429,7 @@ public:
     }
 
     // Exports this VM's defined, non-builtin globals as a frozen module map.
-    std::shared_ptr<MapObject> exportGlobals() {
+    Ref<MapObject> exportGlobals() {
         std::vector<std::pair<std::string, Value>> items;
         for (size_t i = 0; i < globalsTable_.names.size(); ++i) {
             if (!globalDefined_[i]) continue;
@@ -378,15 +446,17 @@ public:
         }
         std::sort(items.begin(), items.end(),
                   [](const auto& a, const auto& b) { return a.first < b.first; });
-        auto mod = std::make_shared<MapObject>();
+        auto mod = makeObj<MapObject>();
+        GcRoot mr(mod.get());
         for (auto& [name, val] : items) {
             auto obj = toObject(val);
+            GcRoot og(obj.get());   // protect while the key string is allocated
             // Rebind every exported function to this module's globals so it reads
             // its module-level state even when called from another VM.
             if (obj->type() == ObjectType::FUNCTION) {
                 static_cast<ClosureObject*>(obj.get())->moduleGlobals = &globals_;
             }
-            mod->set(std::make_shared<StringObject>(name), obj);
+            mod->set(makeObj<StringObject>(name), obj);
         }
         mod->frozen = true;
         return mod;
@@ -415,10 +485,10 @@ private:
     // coroutine currently executing (null = main program).
     bool yielded_ = false;
     CoroObject* activeCoro_ = nullptr;
-    std::shared_ptr<Object> yieldValue_;   // value handed out by the last YIELD
+    Ref<Object> yieldValue_;   // value handed out by the last YIELD
 
-    static std::unordered_map<std::string, std::shared_ptr<MapObject>>& moduleCache() {
-        static std::unordered_map<std::string, std::shared_ptr<MapObject>> c;
+    static std::unordered_map<std::string, Ref<MapObject>>& moduleCache() {
+        static std::unordered_map<std::string, Ref<MapObject>> c;
         return c;
     }
     static std::vector<std::string>& loadingStack() {
@@ -448,7 +518,7 @@ private:
         installCoroutineBuiltins();
     }
 
-    void bindGlobal(const std::string& name, const std::shared_ptr<Object>& obj) {
+    void bindGlobal(const std::string& name, const Ref<Object>& obj) {
         uint16_t slot = globalsTable_.slot(name);
         if (slot >= globals_.size()) {
             globals_.resize(slot + 1);
@@ -462,21 +532,21 @@ private:
     // installed here rather than in the VM-agnostic Builtins table.
     void installCoroutineBuiltins() {
         VM* self = this;
-        using Args = std::vector<std::shared_ptr<Object>>;
+        using Args = std::vector<Ref<Object>>;
         using CallFn = BuiltinObject::CallFn;
 
-        bindGlobal("spawn", std::make_shared<BuiltinObject>("spawn",
-            [](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+        bindGlobal("spawn", makeObj<BuiltinObject>("spawn",
+            [](const Args& a, int line, const CallFn&) -> Ref<Object> {
                 if (a.size() != 1)
                     return makeError("spawn() expects 1 argument (a function), got " +
                                      std::to_string(a.size()), line);
                 if (a[0]->type() != ObjectType::FUNCTION)
                     return makeError("spawn() expects a function, got " + typeName(a[0]->type()), line);
-                return std::make_shared<CoroObject>(a[0]);
+                return makeObj<CoroObject>(a[0]);
             }));
 
-        bindGlobal("resume", std::make_shared<BuiltinObject>("resume",
-            [self](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+        bindGlobal("resume", makeObj<BuiltinObject>("resume",
+            [self](const Args& a, int line, const CallFn&) -> Ref<Object> {
                 if (a.empty() || a.size() > 2)
                     return makeError("resume() expects (coroutine, [value]), got " +
                                      std::to_string(a.size()) + " arguments", line);
@@ -486,19 +556,19 @@ private:
                 return self->resumeCoroutine(a[0], arg, line);
             }));
 
-        bindGlobal("co_status", std::make_shared<BuiltinObject>("co_status",
-            [](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+        bindGlobal("co_status", makeObj<BuiltinObject>("co_status",
+            [](const Args& a, int line, const CallFn&) -> Ref<Object> {
                 if (a.size() != 1 || a[0]->type() != ObjectType::COROUTINE)
                     return makeError("co_status() expects a coroutine", line);
                 auto st = static_cast<CoroObject*>(a[0].get())->status;
                 const char* s = st == CoroObject::Status::CREATED   ? "created"
                               : st == CoroObject::Status::SUSPENDED ? "suspended"
                               : st == CoroObject::Status::RUNNING   ? "running" : "dead";
-                return std::make_shared<StringObject>(s);
+                return makeObj<StringObject>(s);
             }));
 
-        bindGlobal("co_done", std::make_shared<BuiltinObject>("co_done",
-            [](const Args& a, int line, const CallFn&) -> std::shared_ptr<Object> {
+        bindGlobal("co_done", makeObj<BuiltinObject>("co_done",
+            [](const Args& a, int line, const CallFn&) -> Ref<Object> {
                 if (a.size() != 1 || a[0]->type() != ObjectType::COROUTINE)
                     return makeError("co_done() expects a coroutine", line);
                 return boolObj(static_cast<CoroObject*>(a[0].get())->status ==
@@ -547,7 +617,7 @@ private:
     // ===== Calls =====
 
     // Returns nullptr on success, or an ErrorObject.
-    std::shared_ptr<Object> callValue(int argc, int line) {
+    Ref<Object> callValue(int argc, int line) {
         Value& callee = peek(argc);
 
         if (callee.isObjType(ObjectType::FUNCTION)) {
@@ -563,7 +633,8 @@ private:
                                      " parameter(s), got " + std::to_string(argc), line);
                 }
                 int extra = argc - fixed;
-                auto rest = std::make_shared<ListObject>();
+                auto rest = makeObj<ListObject>();
+                GcRoot rr(rest.get());
                 for (int i = extra - 1; i >= 0; --i) rest->elements.push_back(toObject(peek(i)));
                 sp_ -= extra;
                 push(Value::object(rest));
@@ -594,15 +665,22 @@ private:
         }
 
         if (callee.isObjType(ObjectType::BUILTIN)) {
-            auto builtin = std::static_pointer_cast<BuiltinObject>(callee.obj);
-            std::vector<std::shared_ptr<Object>> args;
+            auto builtin = refCast<BuiltinObject>(callee.obj);
+            std::vector<Ref<Object>> args;
             args.reserve(argc);
             for (int i = argc - 1; i >= 0; --i) args.push_back(toObject(peek(i)));
+            // Root the args during the call: toObject boxes immediate args into
+            // fresh objects that are NOT on the value stack, so a builtin that
+            // allocates (or calls back into Lume) would otherwise free them.
+            Heap& h = Heap::get();
+            size_t rootBase = h.tempRoots.size();
+            for (auto& a : args) h.tempRoots.push_back(a.get());
             auto result = builtin->fn(args, line, callFn());
+            h.tempRoots.resize(rootBase);
             if (isError(result)) return result;
             sp_ -= argc + 1;
             push(fromObject(result));
-            return std::shared_ptr<Object>(nullptr); // handled fully
+            return Ref<Object>(nullptr); // handled fully
         }
 
         return makeError("not a function, cannot be called: " + valueTypeName(callee), line);
@@ -610,7 +688,7 @@ private:
 
     // ===== The run loop =====
 
-    std::shared_ptr<Object> run(size_t exitFrameDepth) {
+    Ref<Object> run(size_t exitFrameDepth) {
         Frame* frame = &frames_.back();
         const uint8_t* ip = frame->ip;
         const Value* consts = frame->consts;
@@ -641,14 +719,14 @@ private:
         auto constant = [&](uint16_t idx) -> const Value& { return consts[idx]; };
 
         // Unwinds everything and reports; the first error is terminal.
-        auto runtimeError = [&](const std::shared_ptr<Object>& err) -> std::shared_ptr<Object> {
+        auto runtimeError = [&](const Ref<Object>& err) -> Ref<Object> {
             frames_.resize(exitFrameDepth);
             return err;
         };
 
         // Error dispatch (RFC-008): if a try handler is active within this run's
         // frame window, unwind to it, bind the error message, and resume in catch.
-        auto tryHandle = [&](const std::shared_ptr<Object>& err) -> bool {
+        auto tryHandle = [&](const Ref<Object>& err) -> bool {
             if (handlers_.empty() || handlers_.back().frameDepth < exitFrameDepth) return false;
             Handler h = handlers_.back();
             handlers_.pop_back();
@@ -659,7 +737,7 @@ private:
             sp_ = stackMem_.get() + h.stackTop;
             std::string msg = isError(err) ? static_cast<ErrorObject*>(err.get())->message
                                            : valueInspect(fromObject(err));
-            push(Value::object(std::make_shared<StringObject>(msg)));
+            push(Value::object(makeObj<StringObject>(msg)));
             frame = &frames_.back();
             ip = h.catchIp;
             consts = frame->consts;
@@ -667,7 +745,7 @@ private:
             return true;
         };
         // Raises err: jump to the nearest handler, or unwind and return it.
-        #define VM_THROW(E) { std::shared_ptr<Object> _e = (E); if (tryHandle(_e)) continue; frames_.resize(exitFrameDepth); return _e; }
+        #define VM_THROW(E) { Ref<Object> _e = (E); if (tryHandle(_e)) continue; frames_.resize(exitFrameDepth); return _e; }
 
         for (;;) {
 #ifdef LUME_CG
@@ -1021,7 +1099,7 @@ private:
                     if (!valueTruthy(pop())) ip += d;
                     VM_NEXT_FAST;
                 }
-                VM_CASE(LOOP) { uint16_t d = readU16(); ip -= d; VM_NEXT_FAST; }
+                VM_CASE(LOOP) { uint16_t d = readU16(); ip -= d; gcSafepoint(); VM_NEXT; }
                 VM_CASE(AND_KEEP) {
                     uint16_t d = readU16();
                     if (!valueTruthy(peek())) ip += d;
@@ -1037,6 +1115,7 @@ private:
 
                 VM_CASE(CALL) {
                     int argc = readByte();
+                    gcSafepoint();   // stack = [callee, args..] are all roots here
                     // Exact-arity closure call, inlined: no defaults in play, no
                     // variadic collection — the dominant call shape in real code.
                     {
@@ -1068,6 +1147,7 @@ private:
                 }
                 VM_CASE(CALL_METHOD) {
                     int argc = readByte();
+                    gcSafepoint();   // stack = [recv, method, args..] are all roots
                     int line = currentLine();
                     // Stack: [recv, method, a1..aN]. Pass recv as 'this' only when it
                     // is a struct instance (a map tagged with __type__); otherwise call
@@ -1078,7 +1158,7 @@ private:
                         static_cast<MapObject*>(recv.obj.get())->getStr(typeKey) != nullptr;
                     syncOut();
                     {
-                        std::shared_ptr<Object> err;
+                        Ref<Object> err;
                         if (isStruct) {
                             Value* basep = sp_ - argc - 2;   // [0]=recv, [1]=method
                             std::swap(basep[0], basep[1]);   // -> [method, recv, args..]
@@ -1096,8 +1176,8 @@ private:
                 }
                 VM_CASE(CLOSURE) {
                     uint16_t protoIdx = readU16();
-                    auto holder = std::static_pointer_cast<ProtoObject>(constant(protoIdx).obj);
-                    auto closure = std::make_shared<ClosureObject>(holder->proto);
+                    auto holder = refCast<ProtoObject>(constant(protoIdx).obj);
+                    auto closure = makeObj<ClosureObject>(holder->proto);
                     // Functions created inside a module keep resolving globals
                     // against that module.
                     closure->moduleGlobals = frame->closure->moduleGlobals;
@@ -1135,7 +1215,8 @@ private:
 
                 VM_CASE(LIST) {
                     uint16_t n = readU16();
-                    auto list = std::make_shared<ListObject>();
+                    auto list = makeObj<ListObject>();
+                    GcRoot lr(list.get());   // boxing int elements allocates -> GC
                     list->elements.reserve(n);
                     for (int i = n - 1; i >= 0; --i) list->elements.push_back(toObject(peek(i)));
                     sp_ -= n;
@@ -1144,10 +1225,12 @@ private:
                 }
                 VM_CASE(MAP) {
                     uint16_t n = readU16();
-                    auto map = std::make_shared<MapObject>();
+                    auto map = makeObj<MapObject>();
+                    GcRoot mr(map.get());    // boxing keys/values allocates -> GC
                     int line = currentLine();
                     for (int i = 0; i < n; ++i) {
                         auto key = toObject(peek((n - i) * 2 - 1));
+                        GcRoot kr(key.get()); // protect key while the value is boxed
                         auto val = toObject(peek((n - i) * 2 - 2));
                         if (!Runtime::isValidMapKey(key)) {
                             VM_THROW(makeError(
@@ -1221,7 +1304,7 @@ private:
                 #define IC_LOOKUP(mapPtr, propRef, icsIdx, entOut)                      \
                     const MapObject* icm = (mapPtr);                                    \
                     uint32_t& ic = frame->chunk->icache[icsIdx];                        \
-                    const std::pair<std::shared_ptr<Object>, std::shared_ptr<Object>>*  \
+                    const std::pair<Ref<Object>, Ref<Object>>*  \
                         entOut = nullptr;                                               \
                     if (ic < icm->entries.size()) {                                     \
                         const auto& cand = icm->entries[ic];                            \
@@ -1309,8 +1392,8 @@ private:
                         auto* m = static_cast<MapObject*>(pobj->obj.get());
                         IC_LOOKUP(m, prop, ics, ent)
                         if (ent != nullptr) {
-                            const_cast<std::pair<std::shared_ptr<Object>,
-                                std::shared_ptr<Object>>*>(ent)->second = toObject(*pval);
+                            const_cast<std::pair<Ref<Object>,
+                                Ref<Object>>*>(ent)->second = toObject(*pval);
                             pval->obj.reset(); pobj->obj.reset(); sp_ -= 2;
                             VM_NEXT_FAST;
                         }
@@ -1328,7 +1411,7 @@ private:
                     std::string out;
                     for (int i = n - 1; i >= 0; --i) out += valueInspect(peek(i));
                     sp_ -= n;
-                    push(Value::object(std::make_shared<StringObject>(out)));
+                    push(Value::object(makeObj<StringObject>(out)));
                     VM_NEXT;
                 }
                 VM_CASE(SAY) {
@@ -1362,8 +1445,9 @@ private:
                 }
 
                 VM_CASE(FOR_SETUP) {
-                    Value iterable = pop();
-                    auto iter = std::make_shared<IterObject>();
+                    Value iterable = peek();   // stays on the stack (a root) while we allocate
+                    auto iter = makeObj<IterObject>();
+                    GcRoot ir(iter.get());
                     auto obj = toObject(iterable);
                     switch (obj->type()) {
                         case ObjectType::LIST:
@@ -1393,7 +1477,7 @@ private:
                                 "for loops iterate over list, range, string or map; got " +
                                 typeName(obj->type()), currentLine()));
                     }
-                    push(Value::object(iter));
+                    sp_[-1] = Value::object(iter);   // replace the iterable with its iterator
                     VM_NEXT;
                 }
                 VM_CASE(FOR_NEXT) {
@@ -1419,7 +1503,7 @@ private:
                             VM_NEXT_FAST;
                         }
                     }
-                    auto iter = std::static_pointer_cast<IterObject>(peek().obj);
+                    auto iter = refCast<IterObject>(peek().obj);
 
                     Value first, second;
                     bool done = false;
@@ -1444,7 +1528,7 @@ private:
                             if (iter->bytePos >= sv.size()) done = true;
                             else {
                                 int len = utf8CharLen((unsigned char)sv[iter->bytePos]);
-                                second = Value::object(std::make_shared<StringObject>(sv.substr(iter->bytePos, len)));
+                                second = Value::object(makeObj<StringObject>(sv.substr(iter->bytePos, len)));
                                 first = Value::integer(iter->index);
                                 iter->bytePos += len; iter->index++;
                             }
@@ -1497,7 +1581,7 @@ private:
 
                     if (!spec.names.empty()) {
                         for (size_t i = 0; i < spec.names.size(); ++i) {
-                            auto val = map->get(std::make_shared<StringObject>(spec.names[i]));
+                            auto val = map->get(makeObj<StringObject>(spec.names[i]));
                             if (val == nullptr) {
                                 VM_THROW(makeError(
                                     "'" + map->moduleName + "' module has no member '" +
@@ -1542,7 +1626,7 @@ private:
                     if (a.kind != VKind::INT || b.kind != VKind::INT) {
                         VM_THROW(makeError("range operator '..' expects two integers", currentLine()));
                     }
-                    push(Value::object(std::make_shared<RangeObject>(a.i, b.i, 1)));
+                    push(Value::object(makeObj<RangeObject>(a.i, b.i, 1)));
                     VM_NEXT;
                 }
                 VM_CASE(IS_TYPE) {
@@ -1596,7 +1680,7 @@ private:
                     {                                                                   \
                         Value a = pop();                                                \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
-                            std::make_shared<IntegerObject>(k), currentLine());         \
+                            makeObj<IntegerObject>(k), currentLine());         \
                         if (isError(res)) VM_THROW(res);                                \
                         push(fromObject(res));                                          \
                     }                                                                   \
@@ -1617,7 +1701,7 @@ private:
                     {
                         Value a = pop();
                         auto res = Runtime::evalInfixExpression("%", toObject(a),
-                            std::make_shared<IntegerObject>(k), currentLine());
+                            makeObj<IntegerObject>(k), currentLine());
                         if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
@@ -1630,7 +1714,7 @@ private:
                     {                                                                   \
                         Value a = pop();                                                \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
-                            std::make_shared<IntegerObject>(k), currentLine());         \
+                            makeObj<IntegerObject>(k), currentLine());         \
                         if (isError(res)) VM_THROW(res);                                \
                         push(fromObject(res));                                          \
                     }                                                                   \
@@ -1693,7 +1777,7 @@ private:
                     if (v->kind == VKind::FLOAT) { push(dblExpr); VM_NEXT_FAST; }       \
                     {                                                                   \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(*v),    \
-                            std::make_shared<IntegerObject>(k), currentLine());         \
+                            makeObj<IntegerObject>(k), currentLine());         \
                         if (isError(res)) VM_THROW(res);                                \
                         push(fromObject(res));                                          \
                     }                                                                   \
@@ -1721,7 +1805,7 @@ private:
                             ls->value.append(rs);
                             ls->lenCache = -1;
                         } else {
-                            auto out = std::make_shared<StringObject>(std::string());
+                            auto out = makeObj<StringObject>(std::string());
                             out->value.reserve(ls->value.size() + rs.size());
                             out->value.append(ls->value).append(rs);
                             pa->obj = std::move(out);
@@ -1753,7 +1837,7 @@ private:
                     {                                                                   \
                         Value a = pop();                                                \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
-                            std::make_shared<IntegerObject>(k), currentLine());         \
+                            makeObj<IntegerObject>(k), currentLine());         \
                         if (isError(res)) VM_THROW(res);                                \
                         if (!objectTruthy(res)) ip += d;                                \
                     }                                                                   \
@@ -1794,9 +1878,9 @@ private:
 
     // ===== Assignment targets (same messages as the tree-walker) =====
 
-    std::shared_ptr<Object> indexSet(const std::shared_ptr<Object>& obj,
-                                     const std::shared_ptr<Object>& idx,
-                                     const std::shared_ptr<Object>& val, int line) {
+    Ref<Object> indexSet(const Ref<Object>& obj,
+                                     const Ref<Object>& idx,
+                                     const Ref<Object>& val, int line) {
         if (obj->type() == ObjectType::LIST) {
             auto* list = static_cast<ListObject*>(obj.get());
             if (idx->type() != ObjectType::INTEGER) {
@@ -1829,7 +1913,7 @@ private:
     }
 
     // list[a:b] / string[a:b] with Python rules (negative indices, clamped, end-exclusive)
-    std::shared_ptr<Object> sliceOp(const std::shared_ptr<Object>& obj,
+    Ref<Object> sliceOp(const Ref<Object>& obj,
                                     const Value& startV, const Value& endV, int line) {
         if (startV.kind != VKind::NIL && startV.kind != VKind::INT)
             return makeError("slice bounds must be integers", line);
@@ -1848,7 +1932,7 @@ private:
             long long n = (long long)list->elements.size();
             long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
             long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
-            auto out = std::make_shared<ListObject>();
+            auto out = makeObj<ListObject>();
             for (long long i = a; i < b; ++i) out->elements.push_back(list->elements[i]);
             return out;
         }
@@ -1858,15 +1942,15 @@ private:
             long long n = (long long)offs.size() - 1;
             long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
             long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
-            if (a >= b) return std::make_shared<StringObject>("");
-            return std::make_shared<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
+            if (a >= b) return makeObj<StringObject>("");
+            return makeObj<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
         }
         return makeError("slicing only works on list and string, got " + typeName(obj->type()), line);
     }
 
-    std::shared_ptr<Object> memberSet(const std::shared_ptr<Object>& obj,
+    Ref<Object> memberSet(const Ref<Object>& obj,
                                       const std::string& prop,
-                                      const std::shared_ptr<Object>& val, int line) {
+                                      const Ref<Object>& val, int line) {
         if (obj->type() != ObjectType::MAP) {
             return makeError("member assignment (object.field = ...) only works on maps, got " +
                              typeName(obj->type()), line);
@@ -1878,7 +1962,7 @@ private:
         // Allocate the key object only when the field is genuinely new.
         size_t pos = map->findStr(prop);
         if (pos != MapObject::NPOS) map->entries[pos].second = val;
-        else map->setStr(std::make_shared<StringObject>(prop), prop, val);
+        else map->setStr(makeObj<StringObject>(prop), prop, val);
         return nullptr;
     }
 };
