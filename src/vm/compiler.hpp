@@ -88,7 +88,7 @@ private:
 
     uint16_t addConst(Value v) { return (uint16_t)chunk().addConst(std::move(v)); }
     uint16_t strConst(const std::string& s) {
-        return addConst(Value::object(std::make_shared<StringObject>(s)));
+        return addConst(Value::object(makeObj<StringObject>(s)));
     }
 
     void emitConst(Value v, int line) {
@@ -665,7 +665,7 @@ private:
     void compileEnum(const EnumStatement* e) {
         int line = e->token.line;
         for (size_t i = 0; i < e->members.size(); ++i) {
-            emitConst(Value::object(std::make_shared<StringObject>(e->members[i])), line);
+            emitConst(Value::object(makeObj<StringObject>(e->members[i])), line);
             emitConst(Value::integer((long long)i), line);
         }
         emitOp(Op::MAP, line);
@@ -711,15 +711,15 @@ private:
 
         // Build the instance map: __type__, then fields, then methods.
         int pairCount = 1 + (int)st->fields.size() + (int)st->methods.size();
-        emitConst(Value::object(std::make_shared<StringObject>("__type__")), line);
-        emitConst(Value::object(std::make_shared<StringObject>(st->name)), line);
+        emitConst(Value::object(makeObj<StringObject>("__type__")), line);
+        emitConst(Value::object(makeObj<StringObject>(st->name)), line);
         for (size_t i = 0; i < st->fields.size(); ++i) {
-            emitConst(Value::object(std::make_shared<StringObject>(st->fields[i])), line);
+            emitConst(Value::object(makeObj<StringObject>(st->fields[i])), line);
             emitOp(Op::GET_LOCAL, line);
             emitU16((uint16_t)i, line);
         }
         for (const auto& m : st->methods) {
-            emitConst(Value::object(std::make_shared<StringObject>(m->name->value)), line);
+            emitConst(Value::object(makeObj<StringObject>(m->name->value)), line);
             compileFunction(m.get(), /*asMethod=*/true);
         }
         emitOp(Op::MAP, line);
@@ -733,7 +733,7 @@ private:
         ctx_ = saved;
 
         emitOp(Op::CLOSURE, line);
-        emitU16(addConst(Value::object(std::make_shared<ProtoObject>(proto))), line);
+        emitU16(addConst(Value::object(makeObj<ProtoObject>(proto))), line);
         emitU16((uint16_t)upvals.size(), line);
         for (const auto& u : upvals) {
             emitU8(u.isLocal ? 1 : 0, line);
@@ -846,7 +846,7 @@ private:
                           expr->line());
                 break;
             case NodeType::STRING_LITERAL:
-                emitConst(Value::object(std::make_shared<StringObject>(
+                emitConst(Value::object(makeObj<StringObject>(
                               static_cast<const StringLiteral*>(expr)->value)),
                           expr->line());
                 break;
@@ -1117,7 +1117,7 @@ private:
         ctx_ = saved;
 
         emitOp(Op::CLOSURE, line);
-        emitU16(addConst(Value::object(std::make_shared<ProtoObject>(proto))), line);
+        emitU16(addConst(Value::object(makeObj<ProtoObject>(proto))), line);
         emitU16((uint16_t)upvals.size(), line);
         for (const auto& u : upvals) {
             emitU8(u.isLocal ? 1 : 0, line);

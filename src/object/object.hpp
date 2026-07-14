@@ -36,11 +36,69 @@ public:
     // virtual call. type() stays for readability and returns the same tag.
     const ObjectType tag;
 
+    // GC bookkeeping (RFC-013). gcNext links every heap object; gcMarked is the
+    // mark bit. Set by the tracing collector only — never on the hot path.
+    Object* gcNext = nullptr;
+    bool gcMarked = false;
+
     explicit Object(ObjectType t) : tag(t) {}
     virtual ~Object() = default;
     ObjectType type() const { return tag; }
     virtual std::string inspect() const = 0;
+
+    // Marks this object's outgoing references (children). Leaf objects (numbers,
+    // strings, bools) have none. Container/closure types override this.
+    virtual void gcMark() {}
 };
+
+} // namespace Lume — reopened below; gc.hpp needs Object complete
+#include "../vm/gc.hpp"
+namespace Lume {
+
+// Marks an object gray: sets the bit and queues it for child-scanning. Safe on
+// null and on already-marked objects (the graph may have cycles).
+inline void gcMarkObject(Object* o) {
+    if (o == nullptr || o->gcMarked) return;
+    o->gcMarked = true;
+    Heap::get().worklist.push_back(o);
+}
+
+// One full stop-the-world mark-sweep cycle.
+inline void gcCollect() {
+    Heap& h = Heap::get();
+    if (h.collecting) return;
+    h.collecting = true;
+
+    // 1. Mark roots: permanent (singletons/modules), the runtime's VM roots, and
+    //    any C++-held temporaries.
+    for (Object* r : h.permanentRoots) gcMarkObject(r);
+    if (h.markRoots) h.markRoots();
+    for (Object* r : h.tempRoots) gcMarkObject(r);
+
+    // 2. Trace: drain the gray worklist, marking each object's children.
+    while (!h.worklist.empty()) {
+        Object* o = h.worklist.back();
+        h.worklist.pop_back();
+        o->gcMark();
+    }
+
+    // 3. Sweep: free the unmarked, clear the mark bit on survivors.
+    Object** link = &h.first;
+    while (*link) {
+        Object* o = *link;
+        if (o->gcMarked) {
+            o->gcMarked = false;
+            link = &o->gcNext;
+        } else {
+            *link = o->gcNext;
+            delete o;
+        }
+    }
+
+    h.nextGC = h.bytesAllocated * 2;
+    if (h.nextGC < 1024 * 1024) h.nextGC = 1024 * 1024;
+    h.collecting = false;
+}
 
 // Human-friendly float printing: 6.28 (not 6.280000), 2.0 (not 2 — keep the type visible)
 inline std::string formatFloat(double v) {
@@ -97,14 +155,14 @@ public:
 
 // ===== Shared constants (singletons) =====
 // Single instances so true/false/null never allocate new objects.
-inline const std::shared_ptr<BooleanObject> TRUE_OBJ  = std::make_shared<BooleanObject>(true);
-inline const std::shared_ptr<BooleanObject> FALSE_OBJ = std::make_shared<BooleanObject>(false);
-inline const std::shared_ptr<NullObject>    NULL_OBJ_ = std::make_shared<NullObject>();
+inline const Ref<BooleanObject> TRUE_OBJ  = makeObj<BooleanObject>(true);
+inline const Ref<BooleanObject> FALSE_OBJ = makeObj<BooleanObject>(false);
+inline const Ref<NullObject>    NULL_OBJ_ = makeObj<NullObject>();
 
-inline std::shared_ptr<BooleanObject> boolObj(bool b) { return b ? TRUE_OBJ : FALSE_OBJ; }
+inline Ref<BooleanObject> boolObj(bool b) { return b ? TRUE_OBJ : FALSE_OBJ; }
 
 // Shows strings quoted inside nested structures: say ["a"] -> ["a"]
-inline std::string inspectQuoted(const std::shared_ptr<Object>& obj) {
+inline std::string inspectQuoted(const Ref<Object>& obj) {
     if (obj->type() == ObjectType::STRING) {
         return "\"" + obj->inspect() + "\"";
     }
@@ -115,7 +173,8 @@ inline std::string inspectQuoted(const std::shared_ptr<Object>& obj) {
 class ListObject : public Object {
 public:
     ListObject() : Object(ObjectType::LIST) {}
-    std::vector<std::shared_ptr<Object>> elements;
+    std::vector<Ref<Object>> elements;
+    void gcMark() override { for (auto& e : elements) gcMarkObject(e.get()); }
     std::string inspect() const override {
         std::string out = "[";
         for (size_t i = 0; i < elements.size(); ++i) {
@@ -131,7 +190,7 @@ public:
 class MapObject : public Object {
 public:
     MapObject() : Object(ObjectType::MAP) {}
-    std::vector<std::pair<std::shared_ptr<Object>, std::shared_ptr<Object>>> entries;
+    std::vector<std::pair<Ref<Object>, Ref<Object>>> entries;
     // Typed indexes: no key-tag string is ever built for a lookup. String keys
     // hash the raw bytes, int/bool keys never touch a string at all.
     std::unordered_map<std::string, size_t> strIndex;
@@ -140,6 +199,10 @@ public:
     size_t boolIndex[2] = {NPOS, NPOS};
     bool frozen = false;          // true: immutable (modules)
     std::string moduleName;       // module name if this is a module (for errors + inspect)
+
+    void gcMark() override {
+        for (auto& e : entries) { gcMarkObject(e.first.get()); gcMarkObject(e.second.get()); }
+    }
 
     void copyIndexFrom(const MapObject& src) {
         strIndex = src.strIndex;
@@ -154,7 +217,7 @@ public:
     }
 
     // Zero-allocation lookups by native key
-    std::shared_ptr<Object> getStr(const std::string& k) const {
+    Ref<Object> getStr(const std::string& k) const {
         auto it = strIndex.find(k);
         return it == strIndex.end() ? nullptr : entries[it->second].second;
     }
@@ -162,15 +225,15 @@ public:
         auto it = strIndex.find(k);
         return it == strIndex.end() ? NPOS : it->second;
     }
-    void setStr(const std::shared_ptr<Object>& key, const std::string& k,
-                const std::shared_ptr<Object>& val) {
+    void setStr(const Ref<Object>& key, const std::string& k,
+                const Ref<Object>& val) {
         auto it = strIndex.find(k);
         if (it != strIndex.end()) { entries[it->second].second = val; return; }
         strIndex[k] = entries.size();
         entries.push_back({key, val});
     }
 
-    void set(const std::shared_ptr<Object>& key, const std::shared_ptr<Object>& val) {
+    void set(const Ref<Object>& key, const Ref<Object>& val) {
         switch (key->type()) {
             case ObjectType::STRING:
                 setStr(key, static_cast<StringObject*>(key.get())->value, val);
@@ -194,7 +257,7 @@ public:
         }
     }
 
-    std::shared_ptr<Object> get(const std::shared_ptr<Object>& key) const {
+    Ref<Object> get(const Ref<Object>& key) const {
         switch (key->type()) {
             case ObjectType::STRING:
                 return getStr(static_cast<StringObject*>(key.get())->value);
@@ -210,7 +273,7 @@ public:
         }
     }
 
-    bool remove(const std::shared_ptr<Object>& key) {
+    bool remove(const Ref<Object>& key) {
         size_t pos = NPOS;
         switch (key->type()) {
             case ObjectType::STRING: {
@@ -285,13 +348,13 @@ public:
 // CallFn: lets a builtin invoke Lume functions (for each/filter/emit) — RFC-005
 class BuiltinObject : public Object {
 public:
-    using CallFn = std::function<std::shared_ptr<Object>(
-        const std::shared_ptr<Object>& fn,
-        const std::vector<std::shared_ptr<Object>>& args,
+    using CallFn = std::function<Ref<Object>(
+        const Ref<Object>& fn,
+        const std::vector<Ref<Object>>& args,
         int line)>;
 
-    using BuiltinFn = std::function<std::shared_ptr<Object>(
-        const std::vector<std::shared_ptr<Object>>&, int line, const CallFn&)>;
+    using BuiltinFn = std::function<Ref<Object>(
+        const std::vector<Ref<Object>>&, int line, const CallFn&)>;
 
     std::string name;
     BuiltinFn fn;
@@ -305,7 +368,8 @@ public:
 class SignalObject : public Object {
 public:
     SignalObject() : Object(ObjectType::SIGNAL) {}
-    std::vector<std::shared_ptr<Object>> listeners;
+    std::vector<Ref<Object>> listeners;
+    void gcMark() override { for (auto& l : listeners) gcMarkObject(l.get()); }
     std::string inspect() const override {
         return "signal(" + std::to_string(listeners.size()) + " listeners)";
     }
@@ -313,9 +377,10 @@ public:
 
 class ReturnValueObject : public Object {
 public:
-    std::shared_ptr<Object> value;
-    ReturnValueObject(std::shared_ptr<Object> val)
+    Ref<Object> value;
+    ReturnValueObject(Ref<Object> val)
         : Object(ObjectType::RETURN_VALUE), value(val) {}
+    void gcMark() override { gcMarkObject(value.get()); }
     std::string inspect() const override { return value->inspect(); }
 };
 
@@ -349,12 +414,12 @@ public:
     }
 };
 
-inline bool isError(const std::shared_ptr<Object>& obj) {
+inline bool isError(const Ref<Object>& obj) {
     return obj != nullptr && obj->type() == ObjectType::ERROR;
 }
 
-inline std::shared_ptr<ErrorObject> makeError(const std::string& msg, int line = 0) {
-    return std::make_shared<ErrorObject>(msg, line);
+inline Ref<ErrorObject> makeError(const std::string& msg, int line = 0) {
+    return makeObj<ErrorObject>(msg, line);
 }
 
 // Returns the type name (for the kind() builtin and error messages)
@@ -384,7 +449,7 @@ inline std::string typeName(ObjectType t) {
 // The evaluator AND builtins (contains, find, sort_by, filter) use the same rules.
 
 // Deep equality: numbers compare across types (5 == 5.0), lists/maps by content, functions by identity
-inline bool objectEquals(const std::shared_ptr<Object>& a, const std::shared_ptr<Object>& b) {
+inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
     bool aNum = (a->type() == ObjectType::INTEGER || a->type() == ObjectType::FLOAT);
     bool bNum = (b->type() == ObjectType::INTEGER || b->type() == ObjectType::FLOAT);
     if (aNum && bNum) {
@@ -437,7 +502,7 @@ inline bool objectEquals(const std::shared_ptr<Object>& a, const std::shared_ptr
 }
 
 // Truthiness rules (Python model): null, false, 0, 0.0, "", [], {} -> false
-inline bool objectTruthy(const std::shared_ptr<Object>& obj) {
+inline bool objectTruthy(const Ref<Object>& obj) {
     switch (obj->type()) {
         case ObjectType::NULL_OBJ: return false;
         case ObjectType::BOOLEAN:  return static_cast<BooleanObject*>(obj.get())->value;

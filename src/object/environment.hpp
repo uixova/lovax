@@ -10,7 +10,7 @@ namespace Lume {
 
 class Environment {
 private:
-    std::unordered_map<std::string, std::shared_ptr<Object>> store;
+    std::unordered_map<std::string, Ref<Object>> store;
     std::shared_ptr<Environment> outer; // Outer scope (e.g. the global environment)
 
 public:
@@ -21,7 +21,7 @@ public:
     Environment(std::shared_ptr<Environment> outerEnv) : outer(outerEnv) {}
 
     // Finds the variable; returns nullptr if missing (evaluator raises the error with line info)
-    std::shared_ptr<Object> get(const std::string& name) {
+    Ref<Object> get(const std::string& name) {
         auto it = store.find(name);
         if (it != store.end()) {
             return it->second;
@@ -33,20 +33,20 @@ public:
     }
 
     // 'set' semantics (RFC-001): defines/overwrites in the CURRENT scope
-    std::shared_ptr<Object> define(const std::string& name, std::shared_ptr<Object> val) {
+    Ref<Object> define(const std::string& name, Ref<Object> val) {
         store[name] = val;
         return val;
     }
 
     // Module export: exposes everything defined in this scope (for file modules)
-    const std::unordered_map<std::string, std::shared_ptr<Object>>& entries() const {
+    const std::unordered_map<std::string, Ref<Object>>& entries() const {
         return store;
     }
 
     // Bare assignment semantics (RFC-001): walks the scope chain for the variable,
     // updates it where found. Returns false if not found (evaluator raises the error).
     // This also lets closures update counters in outer scopes.
-    bool assign(const std::string& name, std::shared_ptr<Object> val) {
+    bool assign(const std::string& name, Ref<Object> val) {
         auto it = store.find(name);
         if (it != store.end()) {
             it->second = val;

@@ -148,6 +148,7 @@ public:
     std::shared_ptr<Proto> proto;
     ProtoObject(std::shared_ptr<Proto> p)
         : Object(ObjectType::RETURN_VALUE), proto(std::move(p)) {}
+    void gcMark() override { for (auto& c : proto->chunk.consts) gcMarkValue(c); }
     std::string inspect() const override { return "<proto>"; }
 };
 
@@ -174,6 +175,12 @@ public:
 
     ClosureObject(std::shared_ptr<Proto> p)
         : Object(ObjectType::FUNCTION), proto(std::move(p)) {}
+    void gcMark() override {
+        for (auto& c : proto->chunk.consts) gcMarkValue(c);
+        // Closed upvalues own their Value; open ones live on the stack (a root),
+        // and their cell->value is a harmless default until closed.
+        for (auto& u : upvalues) if (u) gcMarkValue(u->value);
+    }
     std::string inspect() const override {
         return "fn " + (proto->name.empty() ? "?" : proto->name) + "(...)";
     }
@@ -184,10 +191,14 @@ class IterObject : public Object {
 public:
     IterObject() : Object(ObjectType::RETURN_VALUE) {}
     enum class Kind { LIST, RANGE, STRING, MAP_KEYS } kind;
-    std::shared_ptr<Object> source;                 // list/range/string source
-    std::vector<std::shared_ptr<Object>> snapshot;  // map keys snapshot
+    Ref<Object> source;                 // list/range/string source
+    std::vector<Ref<Object>> snapshot;  // map keys snapshot
     long long index = 0;                            // element index / range value
     size_t bytePos = 0;                             // UTF-8 position for strings
+    void gcMark() override {
+        gcMarkObject(source.get());
+        for (auto& s : snapshot) gcMarkObject(s.get());
+    }
     std::string inspect() const override { return "<iterator>"; }
 };
 

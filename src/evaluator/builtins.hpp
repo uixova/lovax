@@ -25,8 +25,8 @@
 namespace Lume {
 namespace Builtins {
 
-using Args = std::vector<std::shared_ptr<Object>>;
-using ObjPtr = std::shared_ptr<Object>;
+using Args = std::vector<Ref<Object>>;
+using ObjPtr = Ref<Object>;
 using CallFn = BuiltinObject::CallFn;
 
 // ===== Helpers =====
@@ -54,7 +54,8 @@ inline std::mt19937_64& rng() {
 inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
     if (depth > 100) return makeError("clone() structure too deep (nesting limit 100)", line);
     if (v->type() == ObjectType::LIST) {
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr56(out.get());
         for (const auto& e : static_cast<ListObject*>(v.get())->elements) {
             auto c = deepClone(e, line, depth + 1);
             if (isError(c)) return c;
@@ -63,7 +64,8 @@ inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
         return out;
     }
     if (v->type() == ObjectType::MAP) {
-        auto out = std::make_shared<MapObject>();
+        auto out = makeObj<MapObject>();
+        GcRoot _gr65(out.get());
         for (const auto& e : static_cast<MapObject*>(v.get())->entries) {
             auto c = deepClone(e.second, line, depth + 1);
             if (isError(c)) return c;
@@ -79,7 +81,7 @@ inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
 inline void installBuiltins(const std::shared_ptr<Environment>& env) {
 
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        env->define(name, std::make_shared<BuiltinObject>(name, std::move(fn)));
+        env->define(name, makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     // --- len(x): length. Counts UTF-8 code points for strings ("şey" -> 3) ---
@@ -91,14 +93,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                 {
                 auto* so = static_cast<StringObject*>(a.get());
                 if (so->lenCache < 0) so->lenCache = utf8Length(so->value);
-                return std::make_shared<IntegerObject>(so->lenCache);
+                return makeObj<IntegerObject>(so->lenCache);
             }
             case ObjectType::LIST:
-                return std::make_shared<IntegerObject>((long long)static_cast<ListObject*>(a.get())->elements.size());
+                return makeObj<IntegerObject>((long long)static_cast<ListObject*>(a.get())->elements.size());
             case ObjectType::MAP:
-                return std::make_shared<IntegerObject>((long long)static_cast<MapObject*>(a.get())->entries.size());
+                return makeObj<IntegerObject>((long long)static_cast<MapObject*>(a.get())->entries.size());
             case ObjectType::RANGE:
-                return std::make_shared<IntegerObject>(static_cast<RangeObject*>(a.get())->length());
+                return makeObj<IntegerObject>(static_cast<RangeObject*>(a.get())->length());
             default:
                 return makeError("len() expects string/list/map/range, got " + typeName(a->type()) + "", line);
         }
@@ -107,7 +109,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- text(x): converts any value to a string (RFC-002: no implicit conversion) ---
     def("text", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("text", "1", args.size(), line);
-        return std::make_shared<StringObject>(args[0]->inspect());
+        return makeObj<StringObject>(args[0]->inspect());
     });
 
     // --- num(x): converts text to a number; "42" -> 42, "3.14" -> 3.14 ---
@@ -124,11 +126,11 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             if (s.find('.') != std::string::npos || s.find('e') != std::string::npos) {
                 double d = std::stod(s, &pos);
                 if (pos != s.size()) throw std::invalid_argument("");
-                return std::make_shared<FloatObject>(d);
+                return makeObj<FloatObject>(d);
             }
             long long v = std::stoll(s, &pos);
             if (pos != s.size()) throw std::invalid_argument("");
-            return std::make_shared<IntegerObject>(v);
+            return makeObj<IntegerObject>(v);
         } catch (...) {
             return makeError("num() could not convert: \"" + s + "\" is not a valid number", line);
         }
@@ -137,7 +139,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- kind(x): returns the type name: "int", "float", "string", "list"... ---
     def("kind", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("kind", "1", args.size(), line);
-        return std::make_shared<StringObject>(typeName(args[0]->type()));
+        return makeObj<StringObject>(typeName(args[0]->type()));
     });
 
     // --- push(list, element): appends, returns the list (chainable) ---
@@ -200,7 +202,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() != ObjectType::MAP) {
             return makeError("keys() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
+        GcRoot _gr202(list.get());
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
             list->elements.push_back(e.first);
         }
@@ -213,7 +216,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() != ObjectType::MAP) {
             return makeError("values() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
+        GcRoot _gr215(list.get());
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
             list->elements.push_back(e.second);
         }
@@ -244,7 +248,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() == 1) { end = vals[0]; }
         else { start = vals[0]; end = vals[1]; if (args.size() == 3) step = vals[2]; }
         if (step == 0) return makeError("range() step cannot be 0", line);
-        return std::make_shared<RangeObject>(start, end, step);
+        return makeObj<RangeObject>(start, end, step);
     });
 
     // ===== Math (core) =====
@@ -253,10 +257,10 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 1) return argCountError("abs", "1", args.size(), line);
         if (args[0]->type() == ObjectType::INTEGER) {
             long long v = static_cast<IntegerObject*>(args[0].get())->value;
-            return std::make_shared<IntegerObject>(v < 0 ? -v : v);
+            return makeObj<IntegerObject>(v < 0 ? -v : v);
         }
         if (args[0]->type() == ObjectType::FLOAT) {
-            return std::make_shared<FloatObject>(std::fabs(asDouble(args[0])));
+            return makeObj<FloatObject>(std::fabs(asDouble(args[0])));
         }
         return makeError("abs() expects a number, got " + typeName(args[0]->type()) + "", line);
     });
@@ -288,8 +292,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             double v = asDouble(args[i]);
             if (isMin ? (v < best) : (v > best)) best = v;
         }
-        if (allInt) return std::make_shared<IntegerObject>((long long)best);
-        return std::make_shared<FloatObject>(best);
+        if (allInt) return makeObj<IntegerObject>((long long)best);
+        return makeObj<FloatObject>(best);
     };
     def("min", [minMax](const Args& a, int l, const CallFn&) { return minMax(a, l, true); });
     def("max", [minMax](const Args& a, int l, const CallFn&) { return minMax(a, l, false); });
@@ -301,7 +305,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         }
         double v = asDouble(args[0]);
         if (v < 0) return makeError("sqrt() cannot take a negative number", line);
-        return std::make_shared<FloatObject>(std::sqrt(v));
+        return makeObj<FloatObject>(std::sqrt(v));
     });
 
     // floor/ceil/round return ints (handy for coord -> pixel in games)
@@ -311,7 +315,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             if (!isNumeric(args[0])) {
                 return makeError(name + "() expects a number, got " + typeName(args[0]->type()) + "", line);
             }
-            return std::make_shared<IntegerObject>((long long)f(asDouble(args[0])));
+            return makeObj<IntegerObject>((long long)f(asDouble(args[0])));
         };
     };
     def("floor", intRound("floor", std::floor));
@@ -328,16 +332,16 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() == ObjectType::INTEGER && args[1]->type() == ObjectType::INTEGER &&
             asDouble(args[1]) >= 0 && result == std::floor(result) &&
             std::fabs(result) < 9.2e18) {
-            return std::make_shared<IntegerObject>((long long)result);
+            return makeObj<IntegerObject>((long long)result);
         }
-        return std::make_shared<FloatObject>(result);
+        return makeObj<FloatObject>(result);
     });
 
     // --- random(): float in 0..1 | random(a, b): int in a..b (both INCLUSIVE) ---
     def("random", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.empty()) {
             std::uniform_real_distribution<double> dist(0.0, 1.0);
-            return std::make_shared<FloatObject>(dist(rng()));
+            return makeObj<FloatObject>(dist(rng()));
         }
         if (args.size() == 2 &&
             args[0]->type() == ObjectType::INTEGER && args[1]->type() == ObjectType::INTEGER) {
@@ -345,7 +349,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             long long b = static_cast<IntegerObject*>(args[1].get())->value;
             if (a > b) std::swap(a, b);
             std::uniform_int_distribution<long long> dist(a, b);
-            return std::make_shared<IntegerObject>(dist(rng()));
+            return makeObj<IntegerObject>(dist(rng()));
         }
         return makeError("random() takes no arguments or two integers: random(1, 6)", line);
     });
@@ -364,7 +368,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (!args.empty()) return argCountError("clock", "0", args.size(), line);
         auto now = std::chrono::steady_clock::now().time_since_epoch();
         double secs = std::chrono::duration<double>(now).count();
-        return std::make_shared<FloatObject>(secs);
+        return makeObj<FloatObject>(secs);
     });
 
     // --- ask("question"): prompts the user, returns the line as a string (sibling of say) ---
@@ -375,7 +379,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         }
         std::string input;
         if (!std::getline(std::cin, input)) return NULL_OBJ_;
-        return std::make_shared<StringObject>(input);
+        return makeObj<StringObject>(input);
     });
 
     // ===== General collection utilities (core — like Python's sorted/sum/filter) =====
@@ -413,15 +417,15 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             const std::string& s = static_cast<StringObject*>(args[0].get())->value;
             const std::string& sub = static_cast<StringObject*>(args[1].get())->value;
             size_t byteIdx = s.find(sub);
-            if (byteIdx == std::string::npos) return std::make_shared<IntegerObject>(-1);
-            return std::make_shared<IntegerObject>(utf8Length(s.substr(0, byteIdx)));
+            if (byteIdx == std::string::npos) return makeObj<IntegerObject>(-1);
+            return makeObj<IntegerObject>(utf8Length(s.substr(0, byteIdx)));
         }
         if (args[0]->type() == ObjectType::LIST) {
             const auto& els = static_cast<ListObject*>(args[0].get())->elements;
             for (size_t i = 0; i < els.size(); ++i) {
-                if (objectEquals(els[i], args[1])) return std::make_shared<IntegerObject>((long long)i);
+                if (objectEquals(els[i], args[1])) return makeObj<IntegerObject>((long long)i);
             }
-            return std::make_shared<IntegerObject>(-1);
+            return makeObj<IntegerObject>(-1);
         }
         return makeError("find() expects a string or list, got " + typeName(args[0]->type()) + "", line);
     });
@@ -447,8 +451,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             long long b = (args.size() == 3)
                           ? normalize(static_cast<IntegerObject*>(args[2].get())->value, n)
                           : n;
-            if (a >= b) return std::make_shared<StringObject>("");
-            return std::make_shared<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
+            if (a >= b) return makeObj<StringObject>("");
+            return makeObj<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
         }
         if (args[0]->type() == ObjectType::LIST) {
             const auto& els = static_cast<ListObject*>(args[0].get())->elements;
@@ -457,7 +461,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             long long b = (args.size() == 3)
                           ? normalize(static_cast<IntegerObject*>(args[2].get())->value, n)
                           : n;
-            auto out = std::make_shared<ListObject>();
+            auto out = makeObj<ListObject>();
+            GcRoot _gr459(out.get());
             for (long long i = a; i < b; ++i) out->elements.push_back(els[i]);
             return out;
         }
@@ -480,7 +485,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             for (size_t k = offs.size() - 1; k > 0; --k) {
                 out += s.substr(offs[k - 1], offs[k] - offs[k - 1]);
             }
-            return std::make_shared<StringObject>(out);
+            return makeObj<StringObject>(out);
         }
         return makeError("reverse() expects a list or string, got " + typeName(args[0]->type()) + "", line);
     });
@@ -527,13 +532,19 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         std::vector<std::pair<ObjPtr, ObjPtr>> keyed; // (key, element)
         keyed.reserve(els.size());
         bool allNum = true, allStr = true;
+        // Keys computed by the callback aren't on the value stack; root them so a
+        // collection during a later callback can't free earlier keys.
+        Heap& h = Heap::get();
+        size_t rb = h.tempRoots.size();
         for (const auto& e : els) {
             auto key = call(args[1], {e}, line);
-            if (isError(key)) return key;
+            if (isError(key)) { h.tempRoots.resize(rb); return key; }
+            h.tempRoots.push_back(key.get());
             if (!isNumeric(key)) allNum = false;
             if (key->type() != ObjectType::STRING) allStr = false;
             keyed.push_back({key, e});
         }
+        h.tempRoots.resize(rb);  // sort below makes no calls -> no collection
         if (!allNum && !allStr) {
             return makeError("sort_by() keys must be all numbers or all strings", line);
         }
@@ -563,8 +574,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             total += asDouble(e);
             if (e->type() == ObjectType::INTEGER) totalInt += static_cast<IntegerObject*>(e.get())->value;
         }
-        if (allInt) return std::make_shared<IntegerObject>(totalInt);
-        return std::make_shared<FloatObject>(total);
+        if (allInt) return makeObj<IntegerObject>(totalInt);
+        return makeObj<FloatObject>(total);
     });
 
     // each(list, fn): calls fn(element) for every element
@@ -590,7 +601,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             return makeError("filter(list, fn) expects a list and a function", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr592(out.get());
         for (const auto& e : els) {
             auto r = call(args[1], {e}, line);
             if (isError(r)) return r;
@@ -607,7 +619,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             return makeError("transform(list, fn) expects a list and a function", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr609(out.get());
         out->elements.reserve(els.size());
         for (const auto& e : els) {
             auto r = call(args[1], {e}, line);
@@ -645,13 +658,15 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     def("copy", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("copy", "1", args.size(), line);
         if (args[0]->type() == ObjectType::LIST) {
-            auto out = std::make_shared<ListObject>();
+            auto out = makeObj<ListObject>();
+            GcRoot _gr647(out.get());
             out->elements = static_cast<ListObject*>(args[0].get())->elements;
             return out;
         }
         if (args[0]->type() == ObjectType::MAP) {
             auto* src = static_cast<MapObject*>(args[0].get());
-            auto out = std::make_shared<MapObject>();
+            auto out = makeObj<MapObject>();
+            GcRoot _gr653(out.get());
             out->entries = src->entries;
             out->copyIndexFrom(*src);
             return out;
@@ -708,7 +723,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() != ObjectType::MAP || args[1]->type() != ObjectType::MAP) {
             return makeError("merge(m1, m2) expects two maps", line);
         }
-        auto out = std::make_shared<MapObject>();
+        auto out = makeObj<MapObject>();
+        GcRoot _gr710(out.get());
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) out->set(e.first, e.second);
         for (const auto& e : static_cast<MapObject*>(args[1].get())->entries) out->set(e.first, e.second);
         return out;
@@ -721,11 +737,13 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
             return makeError("enumerate() expects a list", line);
         }
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr723(out.get());
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         for (size_t i = 0; i < els.size(); ++i) {
-            auto pair = std::make_shared<ListObject>();
-            pair->elements.push_back(std::make_shared<IntegerObject>((long long)i));
+            auto pair = makeObj<ListObject>();
+            GcRoot _gr726(pair.get());
+            pair->elements.push_back(makeObj<IntegerObject>((long long)i));
             pair->elements.push_back(els[i]);
             out->elements.push_back(pair);
         }
@@ -740,10 +758,12 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         }
         const auto& la = static_cast<ListObject*>(args[0].get())->elements;
         const auto& lb = static_cast<ListObject*>(args[1].get())->elements;
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr742(out.get());
         size_t n = std::min(la.size(), lb.size());
         for (size_t i = 0; i < n; ++i) {
-            auto pair = std::make_shared<ListObject>();
+            auto pair = makeObj<ListObject>();
+            GcRoot _gr745(pair.get());
             pair->elements.push_back(la[i]);
             pair->elements.push_back(lb[i]);
             out->elements.push_back(pair);
@@ -778,7 +798,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
             return makeError("sorted() expects a list", line);
         }
-        auto copy = std::make_shared<ListObject>();
+        auto copy = makeObj<ListObject>();
+        GcRoot _gr780(copy.get());
         copy->elements = static_cast<ListObject*>(args[0].get())->elements;
         // Reuse the core sort() by looking it up would be circular; sort here directly.
         auto& els = copy->elements;
@@ -836,7 +857,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // flat(list): flattens one level of nesting
     def("flat", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("flat() expects a list", line);
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr838(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
             if (e->type() == ObjectType::LIST) {
                 for (const auto& inner : static_cast<ListObject*>(e.get())->elements)
@@ -849,7 +871,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // unique(list): first occurrences only, order preserved
     def("unique", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("unique() expects a list", line);
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr851(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
             bool seen = false;
             for (const auto& k : out->elements) if (objectEquals(k, e)) { seen = true; break; }
@@ -861,7 +884,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // dump(x): debug text with strings quoted (say prints raw; dump shows structure)
     def("dump", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("dump", "1", args.size(), line);
-        return std::make_shared<StringObject>(inspectQuoted(args[0]));
+        return makeObj<StringObject>(inspectQuoted(args[0]));
     });
 
     // get(map, key[, default]): safe map read (null or default if the key is absent)
@@ -877,9 +900,11 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // entries(map) -> [[k, v], ...]
     def("entries", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::MAP) return makeError("entries() expects a map", line);
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
+        GcRoot _gr879(out.get());
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
-            auto pair = std::make_shared<ListObject>();
+            auto pair = makeObj<ListObject>();
+            GcRoot _gr881(pair.get());
             pair->elements.push_back(e.first);
             pair->elements.push_back(e.second);
             out->elements.push_back(pair);
@@ -890,7 +915,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // to_map(pairs): inverse of entries — builds a map from [[k, v], ...]
     def("to_map", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("to_map() expects a list of [key, value] pairs", line);
-        auto out = std::make_shared<MapObject>();
+        auto out = makeObj<MapObject>();
+        GcRoot _gr892(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
             if (e->type() != ObjectType::LIST ||
                 static_cast<ListObject*>(e.get())->elements.size() != 2) {
@@ -936,7 +962,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             (args[1]->type() != ObjectType::FUNCTION && args[1]->type() != ObjectType::BUILTIN)) {
             return makeError("group_by(list, fn) expects a list and a function", line);
         }
-        auto out = std::make_shared<MapObject>();
+        auto out = makeObj<MapObject>();
+        GcRoot _gr938(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
             auto key = call(args[1], {e}, line);
             if (isError(key)) return key;
@@ -945,7 +972,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                 return makeError("group_by() keys must be string, int or bool", line);
             }
             auto bucket = out->get(key);
-            if (bucket == nullptr) { bucket = std::make_shared<ListObject>(); out->set(key, bucket); }
+            if (bucket == nullptr) { bucket = makeObj<ListObject>(); out->set(key, bucket); }
             static_cast<ListObject*>(bucket.get())->elements.push_back(e);
         }
         return out;
@@ -971,10 +998,10 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             long long mid = (lo + hi) / 2;
             int c;
             if (!cmp(els[mid], args[1], c)) return makeError("binary_search() needs a uniformly typed sorted list", line);
-            if (c == 0) return std::make_shared<IntegerObject>(mid);
+            if (c == 0) return makeObj<IntegerObject>(mid);
             if (c < 0) lo = mid + 1; else hi = mid - 1;
         }
-        return std::make_shared<IntegerObject>(-1);
+        return makeObj<IntegerObject>(-1);
     });
 
     // exit([code]): stops the program immediately

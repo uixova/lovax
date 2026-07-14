@@ -232,8 +232,8 @@ struct JsonParser {
         }
         std::string numStr = s.substr(start, i - start);
         try {
-            if (isFloat) out = std::make_shared<FloatObject>(std::stod(numStr));
-            else out = std::make_shared<IntegerObject>(std::stoll(numStr));
+            if (isFloat) out = makeObj<FloatObject>(std::stod(numStr));
+            else out = makeObj<IntegerObject>(std::stoll(numStr));
         } catch (...) {
             return fail("could not parse number: " + numStr);
         }
@@ -314,13 +314,13 @@ struct JsonParser {
         }
         if (i >= s.size()) return fail("unterminated string");
         i++; // closing quote
-        out = std::make_shared<StringObject>(str);
+        out = makeObj<StringObject>(str);
         return true;
     }
 
     bool parseArray(ObjPtr& out, int depth) {
         i++; // '['
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
         skipWs();
         if (i < s.size() && s[i] == ']') { i++; out = list; return true; }
         while (true) {
@@ -338,7 +338,7 @@ struct JsonParser {
 
     bool parseObject(ObjPtr& out, int depth) {
         i++; // '{'
-        auto map = std::make_shared<MapObject>();
+        auto map = makeObj<MapObject>();
         skipWs();
         if (i < s.size() && s[i] == '}') { i++; out = map; return true; }
         while (true) {
@@ -401,8 +401,8 @@ inline bool easeByName(const std::string& name, double t, double& out) {
 
 // ===== Module construction helpers =====
 
-inline std::shared_ptr<StringObject> strKey(const std::string& k) {
-    return std::make_shared<StringObject>(k);
+inline Ref<StringObject> strKey(const std::string& k) {
+    return makeObj<StringObject>(k);
 }
 
 // ===== Capability permissions (RFC-015, sandbox / --allow-* flags) =====
@@ -432,13 +432,13 @@ inline ObjPtr makeMathModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
 
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
-    mod->set(strKey("PI"),  std::make_shared<FloatObject>(3.14159265358979323846));
-    mod->set(strKey("TAU"), std::make_shared<FloatObject>(6.28318530717958647692));
+    mod->set(strKey("PI"),  makeObj<FloatObject>(3.14159265358979323846));
+    mod->set(strKey("TAU"), makeObj<FloatObject>(6.28318530717958647692));
 
     // lerp(a, b, t): linear interpolation — t=0 -> a, t=1 -> b
     def("lerp", [](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -447,7 +447,7 @@ inline ObjPtr makeMathModule() {
             return makeError("lerp(a, b, t) expects three numbers", line);
         }
         double a = asDouble(args[0]), b = asDouble(args[1]), t = asDouble(args[2]);
-        return std::make_shared<FloatObject>(a + (b - a) * t);
+        return makeObj<FloatObject>(a + (b - a) * t);
     });
 
     // clamp(x, lo, hi): clamps the value into the range
@@ -461,8 +461,8 @@ inline ObjPtr makeMathModule() {
         double x = asDouble(args[0]), lo = asDouble(args[1]), hi = asDouble(args[2]);
         if (lo > hi) return makeError("clamp() lower bound cannot exceed the upper bound", line);
         double r = x < lo ? lo : (x > hi ? hi : x);
-        if (allInt) return std::make_shared<IntegerObject>((long long)r);
-        return std::make_shared<FloatObject>(r);
+        if (allInt) return makeObj<IntegerObject>((long long)r);
+        return makeObj<FloatObject>(r);
     });
 
     // remap(x, a1, b1, a2, b2): maps x from range [a1,b1] to [a2,b2]
@@ -475,7 +475,7 @@ inline ObjPtr makeMathModule() {
         double a1 = asDouble(args[1]), b1 = asDouble(args[2]);
         double a2 = asDouble(args[3]), b2 = asDouble(args[4]);
         if (b1 == a1) return makeError("remap() source range has zero width (a1 == b1)", line);
-        return std::make_shared<FloatObject>(a2 + (x - a1) * (b2 - a2) / (b1 - a1));
+        return makeObj<FloatObject>(a2 + (x - a1) * (b2 - a2) / (b1 - a1));
     });
 
     // sign(x): -1, 0, or 1
@@ -483,7 +483,7 @@ inline ObjPtr makeMathModule() {
         if (args.size() != 1) return argCountError("sign", "1", args.size(), line);
         if (!isNumeric(args[0])) return makeError("sign() expects a number", line);
         double v = asDouble(args[0]);
-        return std::make_shared<IntegerObject>(v > 0 ? 1 : (v < 0 ? -1 : 0));
+        return makeObj<IntegerObject>(v > 0 ? 1 : (v < 0 ? -1 : 0));
     });
 
     // wrap(x, min, max): wraps the value into the range (angles, grids) — max EXCLUSIVE
@@ -499,11 +499,11 @@ inline ObjPtr makeMathModule() {
             long long lo = static_cast<IntegerObject*>(args[1].get())->value;
             long long hi = static_cast<IntegerObject*>(args[2].get())->value;
             if (hi <= lo) return makeError("wrap() max must be greater than min", line);
-            return std::make_shared<IntegerObject>(lo + floorMod(x - lo, hi - lo));
+            return makeObj<IntegerObject>(lo + floorMod(x - lo, hi - lo));
         }
         double x = asDouble(args[0]), lo = asDouble(args[1]), hi = asDouble(args[2]);
         if (hi <= lo) return makeError("wrap() max must be greater than min", line);
-        return std::make_shared<FloatObject>(lo + floorModF(x - lo, hi - lo));
+        return makeObj<FloatObject>(lo + floorModF(x - lo, hi - lo));
     });
 
     // move_toward(current, target, delta): moves toward target by at most delta (Godot)
@@ -513,8 +513,8 @@ inline ObjPtr makeMathModule() {
             if (!isNumeric(a)) return makeError("move_toward() expects three numbers", line);
         }
         double cur = asDouble(args[0]), target = asDouble(args[1]), delta = asDouble(args[2]);
-        if (std::fabs(target - cur) <= delta) return std::make_shared<FloatObject>(target);
-        return std::make_shared<FloatObject>(cur + (target > cur ? delta : -delta));
+        if (std::fabs(target - cur) <= delta) return makeObj<FloatObject>(target);
+        return makeObj<FloatObject>(cur + (target > cur ? delta : -delta));
     });
 
     // dist(x1, y1, x2, y2): distance between two points
@@ -525,7 +525,7 @@ inline ObjPtr makeMathModule() {
         }
         double dx = asDouble(args[2]) - asDouble(args[0]);
         double dy = asDouble(args[3]) - asDouble(args[1]);
-        return std::make_shared<FloatObject>(std::hypot(dx, dy));
+        return makeObj<FloatObject>(std::hypot(dx, dy));
     });
 
     // Trigonometry + angle conversion
@@ -533,7 +533,7 @@ inline ObjPtr makeMathModule() {
         return [name, f](const Args& args, int line, const CallFn&) -> ObjPtr {
             if (args.size() != 1) return argCountError(name, "1", args.size(), line);
             if (!isNumeric(args[0])) return makeError(name + "() expects a number", line);
-            return std::make_shared<FloatObject>(f(asDouble(args[0])));
+            return makeObj<FloatObject>(f(asDouble(args[0])));
         };
     };
     def("sin", floatFn1("sin", std::sin));
@@ -542,7 +542,7 @@ inline ObjPtr makeMathModule() {
     def("atan2", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("atan2", "2", args.size(), line);
         if (!isNumeric(args[0]) || !isNumeric(args[1])) return makeError("atan2(y, x) expects two numbers", line);
-        return std::make_shared<FloatObject>(std::atan2(asDouble(args[0]), asDouble(args[1])));
+        return makeObj<FloatObject>(std::atan2(asDouble(args[0]), asDouble(args[1])));
     });
     def("deg", floatFn1("deg", [](double r) { return r * 180.0 / 3.14159265358979323846; }));
     def("rad", floatFn1("rad", [](double d) { return d * 3.14159265358979323846 / 180.0; }));
@@ -550,13 +550,13 @@ inline ObjPtr makeMathModule() {
         if (args.size() != 1 || !isNumeric(args[0])) return makeError("asin() expects a number", line);
         double v = asDouble(args[0]);
         if (v < -1 || v > 1) return makeError("asin() expects a value in -1..1", line);
-        return std::make_shared<FloatObject>(std::asin(v));
+        return makeObj<FloatObject>(std::asin(v));
     });
     def("acos", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || !isNumeric(args[0])) return makeError("acos() expects a number", line);
         double v = asDouble(args[0]);
         if (v < -1 || v > 1) return makeError("acos() expects a value in -1..1", line);
-        return std::make_shared<FloatObject>(std::acos(v));
+        return makeObj<FloatObject>(std::acos(v));
     });
     def("exp", floatFn1("exp", std::exp));
     // log(x): natural log | log(x, base)
@@ -566,11 +566,11 @@ inline ObjPtr makeMathModule() {
         }
         double v = asDouble(args[0]);
         if (v <= 0) return makeError("log() expects a positive number", line);
-        if (args.size() == 1) return std::make_shared<FloatObject>(std::log(v));
+        if (args.size() == 1) return makeObj<FloatObject>(std::log(v));
         if (!isNumeric(args[1])) return makeError("log() base must be a number", line);
         double base = asDouble(args[1]);
         if (base <= 0 || base == 1) return makeError("log() base must be positive and not 1", line);
-        return std::make_shared<FloatObject>(std::log(v) / std::log(base));
+        return makeObj<FloatObject>(std::log(v) / std::log(base));
     });
     // snap(x, step): rounds to the nearest multiple (grid alignment) — snap(13, 5) -> 15.0
     def("snap", [](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -579,28 +579,28 @@ inline ObjPtr makeMathModule() {
         }
         double step = asDouble(args[1]);
         if (step == 0) return makeError("snap() step cannot be 0", line);
-        return std::make_shared<FloatObject>(std::round(asDouble(args[0]) / step) * step);
+        return makeObj<FloatObject>(std::round(asDouble(args[0]) / step) * step);
     });
 
-    mod->set(strKey("INF"), std::make_shared<FloatObject>(std::numeric_limits<double>::infinity()));
+    mod->set(strKey("INF"), makeObj<FloatObject>(std::numeric_limits<double>::infinity()));
 
     // inverse_lerp(a, b, v): where v falls between a and b as 0..1
     def("inverse_lerp", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 3 || !isNumeric(args[0]) || !isNumeric(args[1]) || !isNumeric(args[2]))
             return makeError("inverse_lerp(a, b, v) expects three numbers", line);
         double a = asDouble(args[0]), b = asDouble(args[1]), v = asDouble(args[2]);
-        if (a == b) return std::make_shared<FloatObject>(0.0);
-        return std::make_shared<FloatObject>((v - a) / (b - a));
+        if (a == b) return makeObj<FloatObject>(0.0);
+        return makeObj<FloatObject>((v - a) / (b - a));
     });
     // smoothstep(a, b, t): smooth Hermite interpolation, clamped
     def("smoothstep", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 3 || !isNumeric(args[0]) || !isNumeric(args[1]) || !isNumeric(args[2]))
             return makeError("smoothstep(a, b, t) expects three numbers", line);
         double a = asDouble(args[0]), b = asDouble(args[1]), t = asDouble(args[2]);
-        if (a == b) return std::make_shared<FloatObject>(0.0);
+        if (a == b) return makeObj<FloatObject>(0.0);
         t = (t - a) / (b - a);
         if (t < 0) t = 0; if (t > 1) t = 1;
-        return std::make_shared<FloatObject>(t * t * (3 - 2 * t));
+        return makeObj<FloatObject>(t * t * (3 - 2 * t));
     });
     // ping_pong(t, length): bounces t back and forth in [0, length]
     def("ping_pong", [](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -609,7 +609,7 @@ inline ObjPtr makeMathModule() {
         double t = asDouble(args[0]), len = asDouble(args[1]);
         if (len <= 0) return makeError("ping_pong() length must be positive", line);
         double m = floorModF(t, len * 2);
-        return std::make_shared<FloatObject>(m <= len ? m : len * 2 - m);
+        return makeObj<FloatObject>(m <= len ? m : len * 2 - m);
     });
     // approx(a, b[, eps]): float equality within a tolerance
     def("approx", [](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -632,16 +632,16 @@ inline ObjPtr makeMathModule() {
         long long a = std::llabs(static_cast<IntegerObject*>(args[0].get())->value);
         long long b = std::llabs(static_cast<IntegerObject*>(args[1].get())->value);
         while (b) { long long t = b; b = a % b; a = t; }
-        return std::make_shared<IntegerObject>(a);
+        return makeObj<IntegerObject>(a);
     });
     def("lcm", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || args[0]->type() != ObjectType::INTEGER || args[1]->type() != ObjectType::INTEGER)
             return makeError("lcm(a, b) expects two integers", line);
         long long a = std::llabs(static_cast<IntegerObject*>(args[0].get())->value);
         long long b = std::llabs(static_cast<IntegerObject*>(args[1].get())->value);
-        if (a == 0 || b == 0) return std::make_shared<IntegerObject>(0);
+        if (a == 0 || b == 0) return makeObj<IntegerObject>(0);
         long long g = a; long long bb = b; while (bb) { long long t = bb; bb = g % bb; g = t; }
-        return std::make_shared<IntegerObject>(a / g * b);
+        return makeObj<IntegerObject>(a / g * b);
     });
     def("factorial", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::INTEGER)
@@ -650,11 +650,12 @@ inline ObjPtr makeMathModule() {
         if (n < 0) return makeError("factorial() expects n >= 0", line);
         if (n > 20) return makeError("factorial() overflows for n > 20", line);
         long long r = 1; for (long long i = 2; i <= n; ++i) r *= i;
-        return std::make_shared<IntegerObject>(r);
+        return makeObj<IntegerObject>(r);
     });
 
     mod->frozen = true;
     mod->moduleName = "math";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -665,9 +666,9 @@ inline ObjPtr makeGameModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
 
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     // ease(t, "out_bounce"): Penner easing — t is clamped to [0,1]
@@ -686,7 +687,7 @@ inline ObjPtr makeGameModule() {
                              "in_out_quad, in_cubic, out_cubic, in_out_cubic, in_sine, out_sine, "
                              "in_out_sine, out_back, out_elastic, out_bounce)", line);
         }
-        return std::make_shared<FloatObject>(out);
+        return makeObj<FloatObject>(out);
     });
 
     // pick(list): random element
@@ -746,7 +747,7 @@ inline ObjPtr makeGameModule() {
     // signal(): new signal object
     def("signal", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("signal", "0", args.size(), line);
-        return std::make_shared<SignalObject>();
+        return makeObj<SignalObject>();
     });
 
     // connect(signal, fn): adds a listener (the same function is not added twice)
@@ -809,19 +810,19 @@ inline ObjPtr makeGameModule() {
         if (args.size() != 1 || !isNumeric(args[0])) {
             return makeError("timer(seconds) expects a number", line);
         }
-        auto t = std::make_shared<MapObject>();
-        t->set(std::make_shared<StringObject>("duration"),
-               std::make_shared<FloatObject>(asDouble(args[0])));
-        t->set(std::make_shared<StringObject>("start"),
-               std::make_shared<FloatObject>(nowSeconds()));
+        auto t = makeObj<MapObject>();
+        t->set(makeObj<StringObject>("duration"),
+               makeObj<FloatObject>(asDouble(args[0])));
+        t->set(makeObj<StringObject>("start"),
+               makeObj<FloatObject>(nowSeconds()));
         return t;
     });
 
     auto timerFields = [](const ObjPtr& t, double& süre, double& start) -> bool {
         if (t->type() != ObjectType::MAP) return false;
         auto* m = static_cast<MapObject*>(t.get());
-        auto s = m->get(std::make_shared<StringObject>("duration"));
-        auto b = m->get(std::make_shared<StringObject>("start"));
+        auto s = m->get(makeObj<StringObject>("duration"));
+        auto b = m->get(makeObj<StringObject>("start"));
         if (s == nullptr || b == nullptr || !isNumeric(s) || !isNumeric(b)) return false;
         süre = asDouble(s);
         start = asDouble(b);
@@ -844,7 +845,7 @@ inline ObjPtr makeGameModule() {
             return makeError("timer_left() expects an object created by timer()", line);
         }
         double left = süre - (nowSeconds() - start);
-        return std::make_shared<FloatObject>(left > 0 ? left : 0.0);
+        return makeObj<FloatObject>(left > 0 ? left : 0.0);
     });
 
     // timer_reset(t): restarts the countdown (cooldown pattern)
@@ -854,8 +855,8 @@ inline ObjPtr makeGameModule() {
             return makeError("timer_reset() expects an object created by timer()", line);
         }
         static_cast<MapObject*>(args[0].get())->set(
-            std::make_shared<StringObject>("start"),
-            std::make_shared<FloatObject>(nowSeconds()));
+            makeObj<StringObject>("start"),
+            makeObj<FloatObject>(nowSeconds()));
         return args[0];
     });
 
@@ -887,11 +888,12 @@ inline ObjPtr makeGameModule() {
         double sx = smooth(xf), sy = smooth(yf);
         double a = n00 + (n10 - n00) * sx;
         double b = n01 + (n11 - n01) * sx;
-        return std::make_shared<FloatObject>(a + (b - a) * sy);
+        return makeObj<FloatObject>(a + (b - a) * sy);
     });
 
     mod->frozen = true;
     mod->moduleName = "game";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -902,9 +904,9 @@ inline ObjPtr makeTextModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
 
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     // split(text, separator): splits into parts; "" splits into characters
@@ -915,12 +917,12 @@ inline ObjPtr makeTextModule() {
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         const std::string& sep = static_cast<StringObject*>(args[1].get())->value;
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
         if (sep.empty()) {
             size_t i = 0;
             while (i < s.size()) {
                 int len = utf8CharLen(static_cast<unsigned char>(s[i]));
-                list->elements.push_back(std::make_shared<StringObject>(s.substr(i, len)));
+                list->elements.push_back(makeObj<StringObject>(s.substr(i, len)));
                 i += len;
             }
             return list;
@@ -929,10 +931,10 @@ inline ObjPtr makeTextModule() {
         while (true) {
             size_t found = s.find(sep, pos);
             if (found == std::string::npos) {
-                list->elements.push_back(std::make_shared<StringObject>(s.substr(pos)));
+                list->elements.push_back(makeObj<StringObject>(s.substr(pos)));
                 break;
             }
-            list->elements.push_back(std::make_shared<StringObject>(s.substr(pos, found - pos)));
+            list->elements.push_back(makeObj<StringObject>(s.substr(pos, found - pos)));
             pos = found + sep.size();
         }
         return list;
@@ -951,7 +953,7 @@ inline ObjPtr makeTextModule() {
             if (i > 0) out += sep;
             out += els[i]->inspect();
         }
-        return std::make_shared<StringObject>(out);
+        return makeObj<StringObject>(out);
     });
 
     // upper/lower: Turkish-aware (i→İ, ı→I, ş→Ş ...)
@@ -959,14 +961,14 @@ inline ObjPtr makeTextModule() {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
             return makeError("upper() expects a string", line);
         }
-        return std::make_shared<StringObject>(
+        return makeObj<StringObject>(
             caseConvert(static_cast<StringObject*>(args[0].get())->value, true));
     });
     def("lower", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
             return makeError("lower() expects a string", line);
         }
-        return std::make_shared<StringObject>(
+        return makeObj<StringObject>(
             caseConvert(static_cast<StringObject*>(args[0].get())->value, false));
     });
 
@@ -977,9 +979,9 @@ inline ObjPtr makeTextModule() {
         }
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         size_t a = s.find_first_not_of(" \t\r\n");
-        if (a == std::string::npos) return std::make_shared<StringObject>("");
+        if (a == std::string::npos) return makeObj<StringObject>("");
         size_t b = s.find_last_not_of(" \t\r\n");
-        return std::make_shared<StringObject>(s.substr(a, b - a + 1));
+        return makeObj<StringObject>(s.substr(a, b - a + 1));
     });
 
     // replace(text, old, new): replaces all occurrences
@@ -1001,7 +1003,7 @@ inline ObjPtr makeTextModule() {
             out += to;
             pos = found + from.size();
         }
-        return std::make_shared<StringObject>(out);
+        return makeObj<StringObject>(out);
     });
 
     def("starts_with", [](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -1047,7 +1049,7 @@ inline ObjPtr makeTextModule() {
             out += (char)(0x80 | ((u >> 6) & 0x3F));
             out += (char)(0x80 | (u & 0x3F));
         }
-        return std::make_shared<StringObject>(out);
+        return makeObj<StringObject>(out);
     });
 
     // ord(char): Unicode code point of a single character
@@ -1069,7 +1071,7 @@ inline ObjPtr makeTextModule() {
                                 ((unsigned char)sv[2] & 0x3F);
         else cp = ((c0 & 0x07) << 18) | (((unsigned char)sv[1] & 0x3F) << 12) |
                   (((unsigned char)sv[2] & 0x3F) << 6) | ((unsigned char)sv[3] & 0x3F);
-        return std::make_shared<IntegerObject>((long long)cp);
+        return makeObj<IntegerObject>((long long)cp);
     });
 
     // count(text, needle): number of (non-overlapping) occurrences
@@ -1087,7 +1089,7 @@ inline ObjPtr makeTextModule() {
             n++;
             pos += needle.size();
         }
-        return std::make_shared<IntegerObject>(n);
+        return makeObj<IntegerObject>(n);
     });
 
     // pad_start / pad_end: pads text to a target length with a fill character (UTF-8 aware)
@@ -1113,7 +1115,7 @@ inline ObjPtr makeTextModule() {
             if (hedef <= mevcut) return args[0];
             std::string pad;
             for (long long i = mevcut; i < hedef; ++i) pad += dolgu;
-            return std::make_shared<StringObject>(atStart ? pad + sv : sv + pad);
+            return makeObj<StringObject>(atStart ? pad + sv : sv + pad);
         };
     };
     def("pad_start", padFn(true));
@@ -1131,7 +1133,7 @@ inline ObjPtr makeTextModule() {
         }
         char buf[64];
         std::snprintf(buf, sizeof(buf), "%.*f", (int)digits, asDouble(args[0]));
-        return std::make_shared<StringObject>(buf);
+        return makeObj<StringObject>(buf);
     });
 
     // lines(text): splits into a list of lines (handles \r\n and \n)
@@ -1139,14 +1141,14 @@ inline ObjPtr makeTextModule() {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING)
             return makeError("lines(text) expects a string", line);
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
-        auto out = std::make_shared<ListObject>();
+        auto out = makeObj<ListObject>();
         std::string cur;
         for (size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == '\n') { out->elements.push_back(std::make_shared<StringObject>(cur)); cur.clear(); }
+            if (s[i] == '\n') { out->elements.push_back(makeObj<StringObject>(cur)); cur.clear(); }
             else if (s[i] == '\r') { /* skip */ }
             else cur += s[i];
         }
-        out->elements.push_back(std::make_shared<StringObject>(cur));
+        out->elements.push_back(makeObj<StringObject>(cur));
         return out;
     });
     // capitalize(text): first letter upper, rest lower (Turkish-aware)
@@ -1154,11 +1156,11 @@ inline ObjPtr makeTextModule() {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING)
             return makeError("capitalize(text) expects a string", line);
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
-        if (s.empty()) return std::make_shared<StringObject>("");
+        if (s.empty()) return makeObj<StringObject>("");
         int len = utf8CharLen((unsigned char)s[0]);
         std::string first = caseConvert(s.substr(0, len), true);
         std::string rest = caseConvert(s.substr(len), false);
-        return std::make_shared<StringObject>(first + rest);
+        return makeObj<StringObject>(first + rest);
     });
     auto charClass = [](const std::string& name, int (*pred)(int)) {
         return [name, pred](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -1183,11 +1185,12 @@ inline ObjPtr makeTextModule() {
         const std::string& s = static_cast<StringObject*>(args[0].get())->value;
         std::string out; out.reserve(s.size() * (size_t)n);
         for (long long i = 0; i < n; ++i) out += s;
-        return std::make_shared<StringObject>(out);
+        return makeObj<StringObject>(out);
     });
 
     mod->frozen = true;
     mod->moduleName = "strings";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -1214,9 +1217,9 @@ inline ObjPtr makeFileModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
 
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     auto pathArg = [](const Args& args, const std::string& fname, int line,
@@ -1247,7 +1250,7 @@ inline ObjPtr makeFileModule() {
         if (!f.is_open()) return makeError("cannot open file: " + path, line);
         std::stringstream buf;
         buf << f.rdbuf();
-        return std::make_shared<StringObject>(buf.str());
+        return makeObj<StringObject>(buf.str());
     });
 
     // write_text(path, text): writes the string to a file (overwrites)
@@ -1286,11 +1289,11 @@ inline ObjPtr makeFileModule() {
         if (auto err = pathArg(args, "read_lines", line, path)) return err;
         std::ifstream f(path, std::ios::binary);
         if (!f.is_open()) return makeError("cannot open file: " + path, line);
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
         std::string ln;
         while (std::getline(f, ln)) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-            list->elements.push_back(std::make_shared<StringObject>(ln));
+            list->elements.push_back(makeObj<StringObject>(ln));
         }
         return list;
     });
@@ -1331,9 +1334,9 @@ inline ObjPtr makeFileModule() {
             names.push_back(entry.path().filename().string());
         }
         std::sort(names.begin(), names.end());
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
         for (const auto& n : names) {
-            list->elements.push_back(std::make_shared<StringObject>(n));
+            list->elements.push_back(makeObj<StringObject>(n));
         }
         return list;
     });
@@ -1395,11 +1398,11 @@ inline ObjPtr makeFileModule() {
         f.seekg(0);
         std::vector<char> buf((size_t)size);
         f.read(buf.data(), size);
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
         list->elements.reserve((size_t)size);
         for (char c : buf) {
             list->elements.push_back(
-                std::make_shared<IntegerObject>((long long)(unsigned char)c));
+                makeObj<IntegerObject>((long long)(unsigned char)c));
         }
         return list;
     });
@@ -1453,21 +1456,21 @@ inline ObjPtr makeFileModule() {
         buf << f.rdbuf();
         std::string content = buf.str();
 
-        auto rows = std::make_shared<ListObject>();
-        auto row = std::make_shared<ListObject>();
+        auto rows = makeObj<ListObject>();
+        auto row = makeObj<ListObject>();
         std::string cell;
         bool inQuotes = false;
         size_t i = 0;
         char sc = sep[0];
 
         auto pushCell = [&]() {
-            row->elements.push_back(std::make_shared<StringObject>(cell));
+            row->elements.push_back(makeObj<StringObject>(cell));
             cell.clear();
         };
         auto pushRow = [&]() {
             pushCell();
             rows->elements.push_back(row);
-            row = std::make_shared<ListObject>();
+            row = makeObj<ListObject>();
         };
 
         while (i < content.size()) {
@@ -1540,7 +1543,7 @@ inline ObjPtr makeFileModule() {
         std::error_code ec;
         auto sz = std::filesystem::file_size(path, ec);
         if (ec) return makeError("cannot stat file: " + path, line);
-        return std::make_shared<IntegerObject>((long long)sz);
+        return makeObj<IntegerObject>((long long)sz);
     });
     def("is_dir", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("is_dir", "1", args.size(), line);
@@ -1574,6 +1577,7 @@ inline ObjPtr makeFileModule() {
 
     mod->frozen = true;
     mod->moduleName = "file";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -1593,9 +1597,9 @@ inline ObjPtr makeOsModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
 
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     // env(name): reads an environment variable; null if unset
@@ -1606,7 +1610,7 @@ inline ObjPtr makeOsModule() {
         }
         const char* v = std::getenv(static_cast<StringObject*>(args[0].get())->value.c_str());
         if (v == nullptr) return NULL_OBJ_;
-        return std::make_shared<StringObject>(v);
+        return makeObj<StringObject>(v);
     });
 
     // set_env(name, value): sets an environment variable for this process
@@ -1630,11 +1634,11 @@ inline ObjPtr makeOsModule() {
     def("platform", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("platform", "0", args.size(), line);
 #if defined(_WIN32)
-        return std::make_shared<StringObject>("windows");
+        return makeObj<StringObject>("windows");
 #elif defined(__APPLE__)
-        return std::make_shared<StringObject>("macos");
+        return makeObj<StringObject>("macos");
 #else
-        return std::make_shared<StringObject>("linux");
+        return makeObj<StringObject>("linux");
 #endif
     });
 
@@ -1644,15 +1648,15 @@ inline ObjPtr makeOsModule() {
         std::error_code ec;
         auto p = std::filesystem::current_path(ec);
         if (ec) return makeError("cannot read the working directory", line);
-        return std::make_shared<StringObject>(p.string());
+        return makeObj<StringObject>(p.string());
     });
 
     // args(): extra command-line arguments passed after the script path
     def("args", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("args", "0", args.size(), line);
-        auto list = std::make_shared<ListObject>();
+        auto list = makeObj<ListObject>();
         for (const auto& a : scriptArgs()) {
-            list->elements.push_back(std::make_shared<StringObject>(a));
+            list->elements.push_back(makeObj<StringObject>(a));
         }
         return list;
     });
@@ -1667,35 +1671,36 @@ inline ObjPtr makeOsModule() {
             }
             p /= static_cast<StringObject*>(a.get())->value;
         }
-        return std::make_shared<StringObject>(p.string());
+        return makeObj<StringObject>(p.string());
     });
 
     def("basename", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) return makeError("basename(path) expects a string", line);
-        return std::make_shared<StringObject>(std::filesystem::path(static_cast<StringObject*>(args[0].get())->value).filename().string());
+        return makeObj<StringObject>(std::filesystem::path(static_cast<StringObject*>(args[0].get())->value).filename().string());
     });
     def("dirname", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) return makeError("dirname(path) expects a string", line);
-        return std::make_shared<StringObject>(std::filesystem::path(static_cast<StringObject*>(args[0].get())->value).parent_path().string());
+        return makeObj<StringObject>(std::filesystem::path(static_cast<StringObject*>(args[0].get())->value).parent_path().string());
     });
     def("extension", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::STRING) return makeError("extension(path) expects a string", line);
-        return std::make_shared<StringObject>(std::filesystem::path(static_cast<StringObject*>(args[0].get())->value).extension().string());
+        return makeObj<StringObject>(std::filesystem::path(static_cast<StringObject*>(args[0].get())->value).extension().string());
     });
     def("temp_dir", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("temp_dir", "0", args.size(), line);
         std::error_code ec;
-        return std::make_shared<StringObject>(std::filesystem::temp_directory_path(ec).string());
+        return makeObj<StringObject>(std::filesystem::temp_directory_path(ec).string());
     });
     def("home_dir", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("home_dir", "0", args.size(), line);
         const char* h = std::getenv("HOME");
         if (!h) h = std::getenv("USERPROFILE");
-        return h ? (ObjPtr)std::make_shared<StringObject>(h) : NULL_OBJ_;
+        return h ? (ObjPtr)makeObj<StringObject>(h) : NULL_OBJ_;
     });
 
     mod->frozen = true;
     mod->moduleName = "os";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -1704,21 +1709,21 @@ inline ObjPtr makeOsModule() {
 inline ObjPtr makeTimeModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     // now(): seconds since the Unix epoch (float)
     def("now", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("now", "0", args.size(), line);
         auto d = std::chrono::system_clock::now().time_since_epoch();
-        return std::make_shared<FloatObject>(std::chrono::duration<double>(d).count());
+        return makeObj<FloatObject>(std::chrono::duration<double>(d).count());
     });
     def("now_ms", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (!args.empty()) return argCountError("now_ms", "0", args.size(), line);
         auto d = std::chrono::system_clock::now().time_since_epoch();
-        return std::make_shared<IntegerObject>(
+        return makeObj<IntegerObject>(
             (long long)std::chrono::duration_cast<std::chrono::milliseconds>(d).count());
     });
     auto toTm = [](const Args& args, std::tm& out) -> bool {
@@ -1738,14 +1743,14 @@ inline ObjPtr makeTimeModule() {
         if (args.size() > 1) return argCountError("date", "0-1", args.size(), line);
         std::tm tm{};
         if (!toTm(args, tm)) return makeError("date([unix]) expects a number", line);
-        auto m = std::make_shared<MapObject>();
-        m->set(strKey("year"),    std::make_shared<IntegerObject>(tm.tm_year + 1900));
-        m->set(strKey("month"),   std::make_shared<IntegerObject>(tm.tm_mon + 1));
-        m->set(strKey("day"),     std::make_shared<IntegerObject>(tm.tm_mday));
-        m->set(strKey("hour"),    std::make_shared<IntegerObject>(tm.tm_hour));
-        m->set(strKey("minute"),  std::make_shared<IntegerObject>(tm.tm_min));
-        m->set(strKey("second"),  std::make_shared<IntegerObject>(tm.tm_sec));
-        m->set(strKey("weekday"), std::make_shared<IntegerObject>(tm.tm_wday));
+        auto m = makeObj<MapObject>();
+        m->set(strKey("year"),    makeObj<IntegerObject>(tm.tm_year + 1900));
+        m->set(strKey("month"),   makeObj<IntegerObject>(tm.tm_mon + 1));
+        m->set(strKey("day"),     makeObj<IntegerObject>(tm.tm_mday));
+        m->set(strKey("hour"),    makeObj<IntegerObject>(tm.tm_hour));
+        m->set(strKey("minute"),  makeObj<IntegerObject>(tm.tm_min));
+        m->set(strKey("second"),  makeObj<IntegerObject>(tm.tm_sec));
+        m->set(strKey("weekday"), makeObj<IntegerObject>(tm.tm_wday));
         return m;
     });
     // date_text([unix]): "YYYY-MM-DD HH:MM:SS"
@@ -1755,11 +1760,12 @@ inline ObjPtr makeTimeModule() {
         if (!toTm(args, tm)) return makeError("date_text([unix]) expects a number", line);
         char buf[32];
         std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
-        return std::make_shared<StringObject>(buf);
+        return makeObj<StringObject>(buf);
     });
 
     mod->frozen = true;
     mod->moduleName = "time";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -1778,27 +1784,27 @@ namespace CanvasImpl {
     inline MapObject* asCanvas(const ObjPtr& v) {
         if (v->type() != ObjectType::MAP) return nullptr;
         auto* m = static_cast<MapObject*>(v.get());
-        if (m->get(std::make_shared<StringObject>("__canvas__")) == nullptr) return nullptr;
+        if (m->get(makeObj<StringObject>("__canvas__")) == nullptr) return nullptr;
         return m;
     }
     inline long long dim(MapObject* c, const char* k) {
-        auto v = c->get(std::make_shared<StringObject>(k));
+        auto v = c->get(makeObj<StringObject>(k));
         return v && v->type() == ObjectType::INTEGER ? static_cast<IntegerObject*>(v.get())->value : 0;
     }
     inline ListObject* cbuf(MapObject* c) {
-        return static_cast<ListObject*>(c->get(std::make_shared<StringObject>("buf")).get());
+        return static_cast<ListObject*>(c->get(makeObj<StringObject>("buf")).get());
     }
     inline ListObject* ccol(MapObject* c) {
-        return static_cast<ListObject*>(c->get(std::make_shared<StringObject>("col")).get());
+        return static_cast<ListObject*>(c->get(makeObj<StringObject>("col")).get());
     }
 }
 
 inline ObjPtr makeCanvasModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
     using CanvasImpl::asCanvas;
 
@@ -1809,15 +1815,15 @@ inline ObjPtr makeCanvasModule() {
         long long w = static_cast<IntegerObject*>(args[0].get())->value;
         long long h = static_cast<IntegerObject*>(args[1].get())->value;
         if (w <= 0 || h <= 0 || w > 1000 || h > 1000) return makeError("create() size out of range (1..1000)", line);
-        auto c = std::make_shared<MapObject>();
+        auto c = makeObj<MapObject>();
         c->set(strKey("__canvas__"), TRUE_OBJ);
-        c->set(strKey("w"), std::make_shared<IntegerObject>(w));
-        c->set(strKey("h"), std::make_shared<IntegerObject>(h));
-        auto b = std::make_shared<ListObject>();
-        auto col = std::make_shared<ListObject>();
+        c->set(strKey("w"), makeObj<IntegerObject>(w));
+        c->set(strKey("h"), makeObj<IntegerObject>(h));
+        auto b = makeObj<ListObject>();
+        auto col = makeObj<ListObject>();
         for (long long i = 0; i < w * h; ++i) {
-            b->elements.push_back(std::make_shared<StringObject>(" "));
-            col->elements.push_back(std::make_shared<StringObject>("white"));
+            b->elements.push_back(makeObj<StringObject>(" "));
+            col->elements.push_back(makeObj<StringObject>("white"));
         }
         c->set(strKey("buf"), b);
         c->set(strKey("col"), col);
@@ -1980,6 +1986,7 @@ inline ObjPtr makeCanvasModule() {
 
     mod->frozen = true;
     mod->moduleName = "canvas";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
@@ -2013,9 +2020,9 @@ inline ObjPtr makeNetModule() {
     static ObjPtr cached = nullptr;
     if (cached) return cached;
     netInit();
-    auto mod = std::make_shared<MapObject>();
+    auto mod = makeObj<MapObject>();
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        mod->set(strKey(name), std::make_shared<BuiltinObject>(name, std::move(fn)));
+        mod->set(strKey(name), makeObj<BuiltinObject>(name, std::move(fn)));
     };
 
     // tcp_listen(port) -> server socket handle
@@ -2034,7 +2041,7 @@ inline ObjPtr makeNetModule() {
         addr.sin_port = htons((uint16_t)port);
         if (::bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { auto e = netErr("tcp_listen (bind)", line); netCloseFd(fd); return e; }
         if (::listen(fd, 16) < 0) { auto e = netErr("tcp_listen (listen)", line); netCloseFd(fd); return e; }
-        return std::make_shared<IntegerObject>(fd);
+        return makeObj<IntegerObject>(fd);
     });
 
     // tcp_accept(server) -> client socket handle (blocks until a client connects)
@@ -2043,7 +2050,7 @@ inline ObjPtr makeNetModule() {
             return makeError("net.tcp_accept(server) expects a socket handle", line);
         int c = (int)::accept((int)netInt(a[0]), nullptr, nullptr);
         if (c < 0) return netErr("tcp_accept", line);
-        return std::make_shared<IntegerObject>(c);
+        return makeObj<IntegerObject>(c);
     });
 
     // tcp_connect(host, port) -> client socket handle
@@ -2061,7 +2068,7 @@ inline ObjPtr makeNetModule() {
             auto e = netErr("tcp_connect", line); freeaddrinfo(res); netCloseFd(fd); return e;
         }
         freeaddrinfo(res);
-        return std::make_shared<IntegerObject>(fd);
+        return makeObj<IntegerObject>(fd);
     });
 
     // send(sock, text) -> bytes sent
@@ -2071,7 +2078,7 @@ inline ObjPtr makeNetModule() {
         const std::string& s = netStr(a[1]);
         long long n = ::send((int)netInt(a[0]), s.data(), (int)s.size(), 0);
         if (n < 0) return netErr("send", line);
-        return std::make_shared<IntegerObject>(n);
+        return makeObj<IntegerObject>(n);
     });
 
     // recv(sock, [maxbytes=4096]) -> string ("" when the peer closed)
@@ -2084,7 +2091,7 @@ inline ObjPtr makeNetModule() {
         long long n = ::recv((int)netInt(a[0]), &buf[0], (int)maxb, 0);
         if (n < 0) return netErr("recv", line);
         buf.resize((size_t)n);
-        return std::make_shared<StringObject>(buf);
+        return makeObj<StringObject>(buf);
     });
 
     // set_timeout(sock, seconds) -> null. 0 = blocking forever. Prevents hangs.
@@ -2119,7 +2126,7 @@ inline ObjPtr makeNetModule() {
         if (!a.empty()) return argCountError("udp_socket", "0", a.size(), line);
         int fd = (int)::socket(AF_INET, SOCK_DGRAM, 0);
         if (fd < 0) return netErr("udp_socket", line);
-        return std::make_shared<IntegerObject>(fd);
+        return makeObj<IntegerObject>(fd);
     });
     // udp_bind(sock, port) -> null
     def("udp_bind", [](const Args& a, int line, const CallFn&) -> ObjPtr {
@@ -2140,7 +2147,7 @@ inline ObjPtr makeNetModule() {
         const std::string& s = netStr(a[3]);
         long long n = ::sendto((int)netInt(a[0]), s.data(), (int)s.size(), 0, (sockaddr*)&addr, sizeof(addr));
         if (n < 0) return netErr("udp_send", line);
-        return std::make_shared<IntegerObject>(n);
+        return makeObj<IntegerObject>(n);
     });
     // udp_recv(sock, [maxbytes]) -> string
     def("udp_recv", [](const Args& a, int line, const CallFn&) -> ObjPtr {
@@ -2152,11 +2159,12 @@ inline ObjPtr makeNetModule() {
         long long n = ::recvfrom((int)netInt(a[0]), &buf[0], (int)maxb, 0, nullptr, nullptr);
         if (n < 0) return netErr("udp_recv", line);
         buf.resize((size_t)n);
-        return std::make_shared<StringObject>(buf);
+        return makeObj<StringObject>(buf);
     });
 
     mod->frozen = true;
     mod->moduleName = "net";
+    gcPermanentRoot(mod.get());
     cached = mod;
     return mod;
 }
