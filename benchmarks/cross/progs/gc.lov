@@ -1,0 +1,5 @@
+set sink = 0
+for i in range(300000):
+    set tmp = [i, i + 1, i + 2]
+    sink = sink + tmp[0]
+say sink

@@ -1,0 +1,7 @@
+set m = {}
+for i in range(200000):
+    m["k{i}"] = i
+set total = 0
+for i in range(200000):
+    total = total + m["k{i}"]
+say total
