@@ -9,7 +9,7 @@ the VM cannot honestly implement (`unsafe`, `async`, `class`) produces a languag
 that lies about what it does.
 
 This RFC records the **logic filter** applied to a large batch of suggested
-keywords: every rejection is justified, every acceptance fits Lume's architecture
+keywords: every rejection is justified, every acceptance fits Lovax's architecture
 (shared-pointer objects, single-threaded bytecode VM, composition over
 inheritance).
 
@@ -29,7 +29,7 @@ free of ceremony.
 
 ## Rejected (with reason)
 
-- `unsafe` / `fixed` / `stackalloc` / `ref` / `out` — Lume has no manual memory;
+- `unsafe` / `fixed` / `stackalloc` / `ref` / `out` — Lovax has no manual memory;
   a keyword that cannot do what its name promises is a broken keyword.
 - `class` / `base` / `virtual` / `override` / `abstract` / `sealed` / `interface`
   — inheritance was deliberately dropped (composition, RFC-003). `struct` covers

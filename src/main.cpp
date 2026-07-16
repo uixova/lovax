@@ -15,39 +15,39 @@ static const char* LUME_VERSION = "0.11.0";
 
 // Evaluate one REPL chunk on a persistent VM. A lone bare expression is echoed
 // (wrapped in 'say') so `2 + 3` or `player.hp` print their value like Python.
-static void replEval(Lume::VM& vm, const std::string& src) {
-    Lume::Lexer lexer(src);
-    Lume::Parser parser(lexer);
+static void replEval(Lovax::VM& vm, const std::string& src) {
+    Lovax::Lexer lexer(src);
+    Lovax::Parser parser(lexer);
     auto program = parser.parseProgram();
     if (!parser.errors().empty()) {
         for (const auto& err : parser.errors()) {
-            std::cerr << Lume::Color::errRed() << err.toString()
-                      << Lume::Color::errReset() << "\n";
+            std::cerr << Lovax::Color::errRed() << err.toString()
+                      << Lovax::Color::errReset() << "\n";
         }
         return;
     }
     if (program->statements.size() == 1 &&
-        program->statements[0]->nodeType() == Lume::NodeType::EXPRESSION_STATEMENT) {
-        auto* es = static_cast<Lume::ExpressionStatement*>(program->statements[0].get());
-        auto say = std::make_unique<Lume::SayStatement>();
+        program->statements[0]->nodeType() == Lovax::NodeType::EXPRESSION_STATEMENT) {
+        auto* es = static_cast<Lovax::ExpressionStatement*>(program->statements[0].get());
+        auto say = std::make_unique<Lovax::SayStatement>();
         say->token = es->token;
         say->values.push_back(std::move(es->expression));
         program->statements[0] = std::move(say);
     }
     vm.resetReplState();
     auto result = vm.interpret(program.get());
-    if (Lume::isError(result)) {
-        std::cerr << Lume::Color::errRed() << result->inspect()
-                  << Lume::Color::errReset() << std::endl;
+    if (Lovax::isError(result)) {
+        std::cerr << Lovax::Color::errRed() << result->inspect()
+                  << Lovax::Color::errReset() << std::endl;
     }
 }
 
-// Interactive read-eval-print loop (started when lume is launched with no script).
+// Interactive read-eval-print loop (started when lovax is launched with no script).
 // A header line ending in ':' opens a block that is collected until a blank line.
 static int runRepl() {
-    std::cout << "Lume " << LUME_VERSION << " REPL — type 'exit' to quit, blank line ends a block\n";
-    Lume::VM::setBaseDir(".");
-    Lume::VM vm;
+    std::cout << "Lovax " << LUME_VERSION << " REPL — type 'exit' to quit, blank line ends a block\n";
+    Lovax::VM::setBaseDir(".");
+    Lovax::VM vm;
     std::string line, block;
     bool inBlock = false;
     while (true) {
@@ -89,11 +89,11 @@ int main(int argc, char* argv[]) {
 
     std::string arg = argv[1];
     if (arg == "--version" || arg == "-v") {
-        std::cout << "Lume " << LUME_VERSION << std::endl;
+        std::cout << "Lovax " << LUME_VERSION << std::endl;
         return 0;
     }
 
-    // lume update [--channel stable|latest] — re-runs the install script, which
+    // lovax update [--channel stable|latest] — re-runs the install script, which
     // fetches the newest release binary for this platform and replaces this one.
     if (arg == "update") {
         std::string channel = "stable";
@@ -102,11 +102,11 @@ int main(int argc, char* argv[]) {
             if (a == "--channel" && i + 1 < argc) channel = argv[++i];
             else if (a.rfind("--channel=", 0) == 0) channel = a.substr(10);
         }
-        std::cout << "Lume " << LUME_VERSION << " — checking for updates (channel: "
+        std::cout << "Lovax " << LUME_VERSION << " — checking for updates (channel: "
                   << channel << ")..." << std::endl;
         // The install script is idempotent: it self-updates in place. Piping it
         // through the shell is the same path a first-time user takes.
-        std::string url = "https://raw.githubusercontent.com/uixova/lume/main/install.sh";
+        std::string url = "https://raw.githubusercontent.com/uixova/lovax/main/install.sh";
         std::string cmd = "curl -fsSL \"" + url + "\" | LUME_CHANNEL=" + channel + " sh";
         int rc = std::system(cmd.c_str());
         if (rc != 0) {
@@ -118,20 +118,20 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // lume install [user/repo@version] — version-pinned, reproducible installs
-    // (writes lume.json + lume.lock). No arg reinstalls everything in lume.json.
+    // lovax install [user/repo@version] — version-pinned, reproducible installs
+    // (writes lovax.json + lovax.lock). No arg reinstalls everything in lovax.json.
     if (arg == "install") {
-        return Lume::Pkg::install(argc, argv);
+        return Lovax::Pkg::install(argc, argv);
     }
 
-    // Capability flags precede the script path: `lume --sandbox --allow-net app.lm`.
+    // Capability flags precede the script path: `lovax --sandbox --allow-net app.lov`.
     // Mentioning any permission flag opts into the sandbox (deny-all baseline),
     // then --allow-* grants back exactly what's needed (Deno's model). With no
     // permission flag, everything is allowed (your own script, you trust it).
     int scriptIdx = 1;
     bool anyPerm = false;
     {
-        auto& p = Lume::StdLib::perms();
+        auto& p = Lovax::StdLib::perms();
         // First pass: does any permission flag appear before the script?
         for (int i = 1; i < argc; ++i) {
             std::string f = argv[i];
@@ -171,15 +171,15 @@ int main(int argc, char* argv[]) {
     std::string input = buffer.str();
 
     // Step 1: tokenize.  Step 2: parse into an AST.
-    Lume::Lexer lexer(input);
-    Lume::Parser parser(lexer);
+    Lovax::Lexer lexer(input);
+    Lovax::Parser parser(lexer);
     auto program = parser.parseProgram();
 
     // If there are syntax errors, DO NOT run: list them all and exit.
     if (!parser.errors().empty()) {
         for (const auto& err : parser.errors()) {
-            std::cerr << Lume::Color::errRed() << err.toString()
-                      << Lume::Color::errReset() << "\n";
+            std::cerr << Lovax::Color::errRed() << err.toString()
+                      << Lovax::Color::errReset() << "\n";
         }
         std::cerr << parser.errors().size() << " syntax error(s) found; the program was not run."
                   << std::endl;
@@ -187,20 +187,20 @@ int main(int argc, char* argv[]) {
     }
 
     // Relative module paths resolve from the entry script's directory.
-    Lume::VM::setBaseDir(std::filesystem::path(arg).parent_path().string());
+    Lovax::VM::setBaseDir(std::filesystem::path(arg).parent_path().string());
 
     // Extra CLI arguments after the script path are exposed via os.args()
     for (int i = scriptIdx + 1; i < argc; ++i) {
-        Lume::StdLib::scriptArgs().push_back(argv[i]);
+        Lovax::StdLib::scriptArgs().push_back(argv[i]);
     }
 
     // Step 3: compile to bytecode and run on the VM.
-    Lume::VM vm;
+    Lovax::VM vm;
     auto result = vm.interpret(program.get());
 
-    if (Lume::isError(result)) {
-        std::cerr << Lume::Color::errRed() << result->inspect()
-                  << Lume::Color::errReset() << std::endl;
+    if (Lovax::isError(result)) {
+        std::cerr << Lovax::Color::errRed() << result->inspect()
+                  << Lovax::Color::errReset() << std::endl;
         return 70; // EX_SOFTWARE
     }
 

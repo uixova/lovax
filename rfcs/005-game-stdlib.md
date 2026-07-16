@@ -5,7 +5,7 @@
 ## Motivation
 Every game project hand-writes the same tools: lerp/clamp, Penner easing, weighted
 random (loot tables), an event system, save/load. GDScript ships some of these;
-Unity C# relies on third-party packages. Lume ships them IN the language — zero setup.
+Unity C# relies on third-party packages. Lovax ships them IN the language — zero setup.
 
 ## Scope
 1. **math**: lerp, clamp, remap, sign, wrap, move_toward, dist, snap, trig (sin/cos/tan/
@@ -14,13 +14,13 @@ Unity C# relies on third-party packages. Lume ships them IN the language — zer
    out_back, out_elastic, out_bounce). Engine tweens will build on this.
 3. **Random**: pick(list), pick_weighted(map), shuffle(list) — all deterministic via seed(n).
 4. **Events**: signal() / connect / disconnect / emit — event-driven code before the engine
-   exists. Builtins may call Lume functions through the CallFn bridge.
+   exists. Builtins may call Lovax functions through the CallFn bridge.
 5. **Timers**: timer(seconds) / timer_done / timer_left / timer_reset — poll-based cooldowns.
 6. **Persistence**: save_data/load_data (JSON), text/lines/bytes/CSV file IO.
 7. **Higher-order**: each, filter, transform, sort_by.
 
 ## Naming principle
-Short, friendly, Lume-flavored, never confusing: the say/ask/text/num/kind line.
+Short, friendly, Lovax-flavored, never confusing: the say/ask/text/num/kind line.
 `transform`, not `map` (avoids clashing with the map type); `pick`, not `choice`.
 
 ## Deferred

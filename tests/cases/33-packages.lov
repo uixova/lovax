@@ -1,6 +1,6 @@
 use greeter
 say greeter.VERSION
-say greeter.greet("Lume")
+say greeter.greet("Lovax")
 use greeter as g
 say g.greet("again")
 use greeter: greet

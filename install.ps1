@@ -1,16 +1,16 @@
-# Lume installer for Windows (PowerShell).
+# Lovax installer for Windows (PowerShell).
 #
-#   irm https://raw.githubusercontent.com/uixova/lume/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/uixova/lovax/main/install.ps1 | iex
 #
 # Env: $env:LUME_CHANNEL = "stable" | "latest"
 $ErrorActionPreference = "Stop"
 
-$Repo    = "uixova/lume"
+$Repo    = "uixova/lovax"
 $Channel = if ($env:LUME_CHANNEL) { $env:LUME_CHANNEL } else { "stable" }
-$Dir     = Join-Path $env:LOCALAPPDATA "Lume\bin"
+$Dir     = Join-Path $env:LOCALAPPDATA "Lovax\bin"
 
 $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
-$asset = "lume-windows-$arch.exe"
+$asset = "lovax-windows-$arch.exe"
 
 $api = "https://api.github.com/repos/$Repo/releases"
 if ($Channel -eq "latest") {
@@ -21,10 +21,10 @@ if ($Channel -eq "latest") {
 if (-not $tag) { throw "No release found (channel: $Channel)." }
 
 $url = "https://github.com/$Repo/releases/download/$tag/$asset"
-Write-Host "Lume $tag - downloading $asset..."
+Write-Host "Lovax $tag - downloading $asset..."
 
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
-$out = Join-Path $Dir "lume.exe"
+$out = Join-Path $Dir "lovax.exe"
 Invoke-WebRequest -Uri $url -OutFile $out
 
 # Verify checksum if published
@@ -39,6 +39,6 @@ try {
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$Dir*") {
     [Environment]::SetEnvironmentVariable("Path", "$userPath;$Dir", "User")
-    Write-Host "Added $Dir to your PATH (restart the terminal to use 'lume')."
+    Write-Host "Added $Dir to your PATH (restart the terminal to use 'lovax')."
 }
-Write-Host "Installed lume $tag to $out"
+Write-Host "Installed lovax $tag to $out"

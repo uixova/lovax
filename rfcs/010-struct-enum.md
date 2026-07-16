@@ -2,7 +2,7 @@
 
 ## struct
 
-```lume
+```lovax
 struct Player:
     hp = 100          # field with a default
     name = "hero"
@@ -55,7 +55,7 @@ the compiler skips the usual named-function name-binding for methods.
 
 ## enum
 
-```lume
+```lovax
 enum State: IDLE, WALK, ATTACK      # inline form
 enum Dir:                           # block form, one member per line
     NORTH

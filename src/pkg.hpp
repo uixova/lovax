@@ -10,17 +10,17 @@
 #include <filesystem>
 #include <cstdlib>
 
-// Lume package manager (RFC-007 phase 2): version-pinned, reproducible installs.
+// Lovax package manager (RFC-007 phase 2): version-pinned, reproducible installs.
 //
-// The security story starts here. `lume install user/repo@v1.2.0` clones exactly
-// that git tag and records the resolved commit SHA in lume.lock — so a dependency
+// The security story starts here. `lovax install user/repo@v1.2.0` clones exactly
+// that git tag and records the resolved commit SHA in lovax.lock — so a dependency
 // can never silently change under you (the npm/pip supply-chain trap). A no-arg
-// `lume install` reads lume.json and reinstalls every dependency at its locked
+// `lovax install` reads lovax.json and reinstalls every dependency at its locked
 // version. (Runtime isolation — the sandbox that stops a package from touching
 // the network/filesystem without permission — is the second layer, see main.cpp
 // --allow-* flags.)
 
-namespace Lume {
+namespace Lovax {
 namespace Pkg {
 
 // Runs a shell command, returns its exit code.
@@ -66,7 +66,7 @@ inline std::string pkgName(const std::string& repo) {
     return name;
 }
 
-// Minimal, tolerant reader for lume.json's "dependencies" object:
+// Minimal, tolerant reader for lovax.json's "dependencies" object:
 //   "dependencies": { "name": "user/repo@tag", ... }
 // Returns (name, spec) pairs. Not a general JSON parser — our own controlled file.
 inline std::vector<std::pair<std::string, std::string>> readDeps(const std::string& path) {
@@ -105,7 +105,7 @@ inline std::vector<std::pair<std::string, std::string>> readDeps(const std::stri
     return deps;
 }
 
-// Installs one dependency into lume_libs/<name>, pinned to @version if given.
+// Installs one dependency into lovax_libs/<name>, pinned to @version if given.
 // Returns "" on success, else an error message. Fills sha with the resolved commit.
 inline std::string installOne(const std::string& target, std::string& outName, std::string& sha) {
     auto [repo, version] = splitVersion(target);
@@ -114,12 +114,12 @@ inline std::string installOne(const std::string& target, std::string& outName, s
     outName = name;
     if (name.empty()) return "cannot derive a package name from: " + target;
 
-    std::filesystem::path dest = std::filesystem::path("lume_libs") / name;
+    std::filesystem::path dest = std::filesystem::path("lovax_libs") / name;
     std::error_code ec;
     if (std::filesystem::exists(dest)) {
         std::filesystem::remove_all(dest, ec); // reinstall to honor the pinned version
     }
-    std::filesystem::create_directories("lume_libs", ec);
+    std::filesystem::create_directories("lovax_libs", ec);
 
     std::string branch = version.empty() ? "" : (" --branch \"" + version + "\"");
     std::string cmd = "git clone --depth 1" + branch + " \"" + url + "\" \"" + dest.string() + "\" 2>&1";
@@ -131,26 +131,26 @@ inline std::string installOne(const std::string& target, std::string& outName, s
     return "";
 }
 
-// Writes lume.lock: one "name version sha" line per resolved dependency.
+// Writes lovax.lock: one "name version sha" line per resolved dependency.
 inline void writeLock(const std::vector<std::string>& lines) {
-    std::ofstream f("lume.lock");
-    f << "# lume.lock — resolved dependency versions (auto-generated, commit this)\n";
+    std::ofstream f("lovax.lock");
+    f << "# lovax.lock — resolved dependency versions (auto-generated, commit this)\n";
     for (const auto& l : lines) f << l << "\n";
 }
 
-// Ensures a lume.json exists and records a dependency in it (idempotent, minimal).
+// Ensures a lovax.json exists and records a dependency in it (idempotent, minimal).
 inline void recordInManifest(const std::string& name, const std::string& spec) {
     std::string content;
-    if (std::filesystem::exists("lume.json")) {
-        std::ifstream f("lume.json"); std::stringstream ss; ss << f.rdbuf(); content = ss.str();
+    if (std::filesystem::exists("lovax.json")) {
+        std::ifstream f("lovax.json"); std::stringstream ss; ss << f.rdbuf(); content = ss.str();
     }
-    auto deps = readDeps("lume.json");
+    auto deps = readDeps("lovax.json");
     bool found = false;
     for (auto& d : deps) if (d.first == name) { d.second = spec; found = true; }
     if (!found) deps.push_back({name, spec});
 
-    std::ofstream f("lume.json");
-    f << "{\n  \"name\": \"my-lume-project\",\n  \"version\": \"0.1.0\",\n  \"dependencies\": {\n";
+    std::ofstream f("lovax.json");
+    f << "{\n  \"name\": \"my-lovax-project\",\n  \"version\": \"0.1.0\",\n  \"dependencies\": {\n";
     for (size_t i = 0; i < deps.size(); ++i) {
         f << "    \"" << deps[i].first << "\": \"" << deps[i].second << "\"";
         f << (i + 1 < deps.size() ? ",\n" : "\n");
@@ -158,19 +158,19 @@ inline void recordInManifest(const std::string& name, const std::string& spec) {
     f << "  }\n}\n";
 }
 
-// `lume install [target[@ver]]`. No target -> install everything in lume.json.
+// `lovax install [target[@ver]]`. No target -> install everything in lovax.json.
 inline int install(int argc, char* argv[]) {
     std::vector<std::string> lockLines;
 
     if (argc < 3) {
         // No-arg: reproducible install from the manifest.
-        auto deps = readDeps("lume.json");
+        auto deps = readDeps("lovax.json");
         if (deps.empty()) {
-            std::cerr << "[Install] no lume.json with dependencies found.\n"
-                         "  Install one:  lume install user/repo@v1.0.0\n";
+            std::cerr << "[Install] no lovax.json with dependencies found.\n"
+                         "  Install one:  lovax install user/repo@v1.0.0\n";
             return 64;
         }
-        std::cout << "Installing " << deps.size() << " dependencies from lume.json...\n";
+        std::cout << "Installing " << deps.size() << " dependencies from lovax.json...\n";
         for (const auto& [name, spec] : deps) {
             std::string outName, sha;
             std::string err = installOne(spec, outName, sha);
@@ -181,7 +181,7 @@ inline int install(int argc, char* argv[]) {
             lockLines.push_back(outName + " " + (ver.empty() ? "latest" : ver) + " " + sha);
         }
         writeLock(lockLines);
-        std::cout << "Locked to lume.lock.\n";
+        std::cout << "Locked to lovax.lock.\n";
         return 0;
     }
 
@@ -191,7 +191,7 @@ inline int install(int argc, char* argv[]) {
     if (ver.empty()) {
         std::cout << "Warning: installing '" << target << "' unpinned (latest). "
                      "Pin a version for reproducible, tamper-evident installs:\n"
-                     "  lume install " << target << "@v1.0.0\n";
+                     "  lovax install " << target << "@v1.0.0\n";
     }
     std::cout << "Installing " << target << " ...\n";
     std::string err = installOne(target, outName, sha);
@@ -201,7 +201,7 @@ inline int install(int argc, char* argv[]) {
     // merge into existing lock
     std::vector<std::string> lines;
     {
-        std::ifstream lf("lume.lock");
+        std::ifstream lf("lovax.lock");
         std::string l;
         while (std::getline(lf, l)) if (!l.empty() && l[0] != '#') {
             if (l.rfind(outName + " ", 0) != 0) lines.push_back(l);
@@ -210,12 +210,12 @@ inline int install(int argc, char* argv[]) {
     lines.push_back(outName + " " + (ver.empty() ? "latest" : ver) + " " + sha);
     writeLock(lines);
 
-    std::cout << "Installed: lume_libs/" << outName << " (" << sha.substr(0, 10) << ")\n"
-              << "Recorded in lume.json + lume.lock. Use it with:  use " << outName << "\n";
+    std::cout << "Installed: lovax_libs/" << outName << " (" << sha.substr(0, 10) << ")\n"
+              << "Recorded in lovax.json + lovax.lock. Use it with:  use " << outName << "\n";
     return 0;
 }
 
 } // namespace Pkg
-} // namespace Lume
+} // namespace Lovax
 
 #endif // PKG_HPP

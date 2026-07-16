@@ -5,14 +5,14 @@
 What should a closure created inside a `for` loop capture — the loop variable's
 *final* value (Python), or *that iteration's* value (most other languages)?
 
-```lume
+```lovax
 set fns = []
 for i in 0..3:
     push(fns, fn() -> i)
 say "{fns[0]()},{fns[1]()},{fns[2]()}"
 ```
 
-## Survey (Lume is a game language — look past Python)
+## Survey (Lovax is a game language — look past Python)
 
 | Language | Result | Model |
 |----------|--------|-------|
@@ -26,7 +26,7 @@ say "{fns[0]()},{fns[1]()},{fns[2]()}"
 Python is the outlier, and its late binding is a well-known footgun — it bites
 hardest in exactly the pattern game code writes constantly:
 
-```lume
+```lovax
 for enemy in enemies:
     connect(enemy.died, fn() -> drop_loot(enemy))   # each handler needs ITS enemy
 ```
@@ -35,11 +35,11 @@ Under Python semantics every handler would drop loot for the *last* enemy.
 
 ## Decision
 
-**Lume uses per-iteration capture (`0,1,2`).** The loop variable is a fresh
+**Lovax uses per-iteration capture (`0,1,2`).** The loop variable is a fresh
 binding each pass. Other variables captured from an *outer* scope stay shared
 references — only the loop variable is per-iteration:
 
-```lume
+```lovax
 set total = 0
 for n in 0..4:
     push(gs, fn() -> n)   # per-iteration: 0,1,2,3

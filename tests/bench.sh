@@ -3,8 +3,8 @@
 # reports the best wall-clock time. Not a correctness test (see run_tests.sh).
 set -u
 cd "$(dirname "$0")/.."
-LUME=./lume
-[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp"; exit 2; }
+LUME=./lovax
+[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
 
 run() {
     local name="$1" file="$2" best=99999
@@ -17,9 +17,9 @@ run() {
     printf "  %-16s %6s ms\n" "$name" "$best"
 }
 
-echo "Lume benchmark (best of 3):"
-run "heavy_loop"  examples/stress/heavy_loop.lm
-run "roguelike"   examples/stress/roguelike.lm
-run "pathfinding" examples/stress/pathfinding.lm
-run "particles"   examples/stress/particles.lm
-run "economy"     examples/stress/economy.lm
+echo "Lovax benchmark (best of 3):"
+run "heavy_loop"  examples/stress/heavy_loop.lov
+run "roguelike"   examples/stress/roguelike.lov
+run "pathfinding" examples/stress/pathfinding.lov
+run "particles"   examples/stress/particles.lov
+run "economy"     examples/stress/economy.lov

@@ -11,11 +11,11 @@
 #include "chunk.hpp"
 
 // AST -> bytecode compiler.
-// Locals are function-scoped (Lume blocks share their function's scope) and are
+// Locals are function-scoped (Lovax blocks share their function's scope) and are
 // pre-allocated in a collection pass, so mid-loop 'set' never unbalances the stack.
 // Closures use the classic open/closed upvalue model.
 
-namespace Lume {
+namespace Lovax {
 
 // Per-compilation-unit global registry (the script and each module get their own).
 struct GlobalTable {
@@ -1136,6 +1136,6 @@ private:
 
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // COMPILER_HPP

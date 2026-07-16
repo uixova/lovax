@@ -3,7 +3,7 @@
 **Status:** ACCEPTED (implemented)
 
 ## Motivation
-Lume is not a Python clone; its syntax should read as plain English. `elif` is a
+Lovax is not a Python clone; its syntax should read as plain English. `elif` is a
 Python-specific contraction; `else if` is shared by C/C#/JS/GDScript and reads naturally.
 GDScript's most-loved feature, `match`, flattens long if-chains.
 

@@ -1,6 +1,6 @@
-# Lume — Vision, Architecture, and the Road to Speed
+# Lovax — Vision, Architecture, and the Road to Speed
 
-> This document explains *where Lume is going*. For everyday usage and syntax, see
+> This document explains *where Lovax is going*. For everyday usage and syntax, see
 > [README.md](README.md). The goal here: pin down the long-term targets, the technical
 > decisions, and a deep answer to **"how will a scripting language get this fast?"**
 
@@ -8,7 +8,7 @@
 
 ## 1. Vision
 
-Lume in one sentence: **"A language as easy to write as Python, running close to C++
+Lovax in one sentence: **"A language as easy to write as Python, running close to C++
 speed, as the primary language of a 2/2.5D game engine."**
 
 Three pillars:
@@ -18,8 +18,8 @@ Three pillars:
 2. **Performance** — being a scripting language is no excuse. The end goal is to beat
    interpreted languages (CPython, classic Lua) by a wide margin in hot loops and to
    compete with JIT-class runtimes (LuaJIT).
-3. **Embeddability** — Lume is not a standalone app; it is a runtime that will be
-   embedded into an upcoming 2/2.5D game engine calling Lume code every frame.
+3. **Embeddability** — Lovax is not a standalone app; it is a runtime that will be
+   embedded into an upcoming 2/2.5D game engine calling Lovax code every frame.
 
 When these conflict, the priority order is: **ergonomics, then performance, then
 feature richness.** A fast language that hurts to write slows game development down.
@@ -28,10 +28,10 @@ feature richness.** A fast language that hurts to write slows game development d
 
 ## 2. Where We Are
 
-Lume compiles to **bytecode running on a stack VM** (the tree-walker is retired):
+Lovax compiles to **bytecode running on a stack VM** (the tree-walker is retired):
 
 ```
-.lm  →  Lexer  →  Parser (Pratt)  →  AST  →  Compiler  →  Bytecode  →  Stack VM
+.lov  →  Lexer  →  Parser (Pratt)  →  AST  →  Compiler  →  Bytecode  →  Stack VM
 ```
 
 The language surface is rich and frozen: conditionals (`if/else if`, `match`, ternary),
@@ -85,7 +85,7 @@ Python, Wren, and C# do.
   patterns. Twice the values per cache line; used by LuaJIT and JavaScriptCore.
 - **Computed-goto dispatch**: branch-predictor-friendly threaded code (CPython, YARV);
   +20-50% by itself.
-- **Slot-resolved variables, constant folding, own call frames** (deep Lume recursion
+- **Slot-resolved variables, constant folding, own call frames** (deep Lovax recursion
   can no longer overflow the C++ stack — and coroutines become "park the frame stack").
 - Expected: **10-100×** over the tree-walker; the golden test suite is the
   behavior-equivalence insurance for the migration.
@@ -101,7 +101,7 @@ and an **incremental mark-sweep GC** with write barriers (the Unity/Lua model) t
 
 - **JIT**: hotness counters per function; compile hot paths natively (LuaJIT's secret) —
   via LLVM ORC or a light custom backend (Luau's selective-JIT model).
-- **AOT**: transpile Lume to C++/LLVM-IR for shipped games — "release build" at native
+- **AOT**: transpile Lovax to C++/LLVM-IR for shipped games — "release build" at native
   speed while development keeps the interpreted hot-reload loop.
 
 | Stage | Model | Relative speed |
@@ -117,15 +117,15 @@ and an **incremental mark-sweep GC** with write barriers (the Unity/Lua model) t
 
 - Coroutines (`wait`/`yield`) once the VM owns call frames.
 - `struct` + optional type hints (RFC-003) — hints later feed JIT specialization.
-- Tooling: REPL, tree-sitter grammar, LSP, `lume fmt`.
+- Tooling: REPL, tree-sitter grammar, LSP, `lovax fmt`.
 - Distribution: one-command installer (`curl | sh`, Windows installer), GitHub-Releases
-  CI binaries, `lume update` self-update with stable/latest channels.
+  CI binaries, `lovax update` self-update with stable/latest channels.
 - Docs site: one page per language element with runnable examples (doc examples double
   as golden tests, so documentation can never go stale).
 
 ## 6. Engine Integration (v1.0)
 
-- Embedding API: the engine registers C++ functions as native Lume modules
+- Embedding API: the engine registers C++ functions as native Lovax modules
   (`draw`, `play_sound`, `collides`); binary formats (images/audio/PDF) live in this
   plugin layer, not the language core.
 - Lifecycle contract: optional `start()` / `update(dt)` per script, called by the engine.
@@ -134,12 +134,12 @@ and an **incremental mark-sweep GC** with write barriers (the Unity/Lua model) t
 
 ## 7. Positioning
 
-| Language | Strength | Why Lume differs |
+| Language | Strength | Why Lovax differs |
 |----------|----------|------------------|
-| Lua/LuaJIT | tiny, JIT-fast | C-flavored syntax; Lume aims for Python simplicity + UTF-8 identity |
-| GDScript | engine-integrated | tied to Godot; Lume targets its own engine with a C++ core |
-| Wren | elegant class-based VM | great architecture reference; Lume is game-API-first |
-| Python | easiest syntax | heavy to embed and slow; Lume wants "light Python feel + native speed" |
+| Lua/LuaJIT | tiny, JIT-fast | C-flavored syntax; Lovax aims for Python simplicity + UTF-8 identity |
+| GDScript | engine-integrated | tied to Godot; Lovax targets its own engine with a C++ core |
+| Wren | elegant class-based VM | great architecture reference; Lovax is game-API-first |
+| Python | easiest syntax | heavy to embed and slow; Lovax wants "light Python feel + native speed" |
 
 ---
 

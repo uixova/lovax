@@ -9,7 +9,7 @@ Implicit conversion produces surprises ("5" + 5 = ?) — but building text must 
 ## Decision
 1. **No implicit conversion**: `"a" + 5` is an error whose message suggests the fix
    (use `text()` or interpolation).
-2. **`text(x)`** converts any value to a string (Lume-flavored name).
+2. **`text(x)`** converts any value to a string (Lovax-flavored name).
 3. **Interpolation**: `"hp: {hp}, double: {hp * 2}"` — full expressions inside braces
    (inner strings, indexing, calls included: `"{m["k"]}"`). Literal braces: `\{` and `\}`.
 4. Escapes: `\n \t \r \\ \" \{ \}` — unknown escapes are syntax errors.

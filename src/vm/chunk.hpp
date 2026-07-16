@@ -10,7 +10,7 @@
 // Bytecode container and the runtime objects owned by the VM:
 // function prototypes, closures, upvalues, and internal loop iterators.
 
-namespace Lume {
+namespace Lovax {
 
 enum class Op : uint8_t {
     CONST,          // u16 const index -> push
@@ -202,6 +202,6 @@ public:
     std::string inspect() const override { return "<iterator>"; }
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // CHUNK_HPP

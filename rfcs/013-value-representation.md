@@ -2,13 +2,13 @@
 
 ## Where we stand (measured, same machine, best-of-5)
 
-| Benchmark | Lume v0.9 | CPython 3.14 | Lua 5.4 |
+| Benchmark | Lovax v0.9 | CPython 3.14 | Lua 5.4 |
 |-----------|----------:|-------------:|--------:|
 | string suite | **19 ms** | 240 ms | (concat 64 ms) |
 | member 1M | **68 ms** | 108 ms | — |
 | `fib(30)` (pure recursion) | 66 ms | 79 ms | **44 ms** |
 
-Lume beats CPython everywhere and beats Lua on string/data work. The **one**
+Lovax beats CPython everywhere and beats Lua on string/data work. The **one**
 place Lua still wins is pure recursion (`fib`). This RFC is about closing that.
 
 ## Diagnosis
@@ -47,16 +47,16 @@ value is the whole `fib` gap.
 
 Both are correct; (2) is the safer first move and de-risks (1).
 
-## Update (v0.11): NaN-boxing rejected for Lume — int64 conflict
+## Update (v0.11): NaN-boxing rejected for Lovax — int64 conflict
 
 Implementing the value model surfaced a hard constraint: **NaN-boxing an 8-byte
-value is incompatible with Lume's native `int64`.** A NaN-boxed value has only
+value is incompatible with Lovax's native `int64`.** A NaN-boxed value has only
 ~48–51 bits of payload, so a full 64-bit integer does not fit. LuaJIT gets away
 with NaN-boxing precisely because it has *no* int64 (numbers are doubles, 53-bit
 safe). Lua 5.4, which *does* have int64, therefore uses a **16-byte tagged union**
 — not NaN-boxing.
 
-So Lume follows Lua 5.4: a **16-byte tagged `Value`** (tag + `union{int64, double,
+So Lovax follows Lua 5.4: a **16-byte tagged `Value`** (tag + `union{int64, double,
 Object*}`), down from 24 (Ref era) / 32 (shared_ptr era). This keeps exact int64,
 is fully portable (no per-platform pointer-bit assumptions — a real NaN-box
 hazard on ARM / 5-level paging), and matches the value size of the int64 peer we
@@ -87,7 +87,7 @@ it in now.** Reasoning:
 2. Prototype **NaN-boxing** on a branch behind a compile flag; measure `fib`
    against Lua. Ship only if it clears the bar and stays sanitizer-clean.
 3. Target: `fib(30)` **≤ 44 ms** (Lua parity), then push past it — the last
-   benchmark where Lume isn't already #1 among dynamic interpreters.
+   benchmark where Lovax isn't already #1 among dynamic interpreters.
 
 This is a scheduling decision, not a capability gap: the path is understood and
 measured; it just deserves its own verification cycle rather than a rushed one.

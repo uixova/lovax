@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔆 Lume
+# 🔆 Lovax
 
 **A programming language that aims to be as simple as Python and as fast as C++ — built as the scripting language for an upcoming 2 / 2.5D game engine.**
 
@@ -12,7 +12,7 @@ Written from scratch in modern C++17, zero dependencies, single-command build.
 
 ---
 
-## Why Lume?
+## Why Lovax?
 
 - **Python-simple syntax** — indentation blocks, no semicolons, readable keywords.
 - **Game-first design** — weighted loot tables, signals/events, easing curves, timers, save files and deterministic RNG are *built into the language*, not third-party packages.
@@ -20,7 +20,7 @@ Written from scratch in modern C++17, zero dependencies, single-command build.
 - **Friendly errors** — located, human-readable, and they tell you the fix.
 - **Full UTF-8** — identifiers like `oyuncu_adı` are first-class; `len("şey")` is 3, not 6.
 
-```lume
+```lovax
 use game: pick_weighted, signal, connect, emit
 use file
 
@@ -39,7 +39,7 @@ file.save_data("save.json", player)
 
 ## New in v0.7 — a real core
 
-```lume
+```lovax
 struct Player:
     hp = 100
     name = "hero"
@@ -66,14 +66,14 @@ set weapon = p.weapon?.name ?? "bare hands"   # null-safe + coalesce
 set double = fn(x) -> x * 2                    # arrow lambda
 ```
 
-Run `lume` with no arguments for an interactive **REPL**. Full rationale for what
+Run `lovax` with no arguments for an interactive **REPL**. Full rationale for what
 earned a keyword (and what was rejected) is in
 [RFC-009](rfcs/009-rich-core.md); `struct`/`enum` in [RFC-010](rfcs/010-struct-enum.md),
 error handling in [RFC-008](rfcs/008-error-handling.md).
 
 ## New in v0.10 — general-purpose & safe
 
-```lume
+```lovax
 use net                                  # TCP/UDP sockets: servers, clients, LAN, VPS
 set server = net.tcp_listen(8080)
 set client = net.tcp_accept(server)
@@ -81,12 +81,12 @@ net.send(client, "pong")
 ```
 
 ```bash
-lume install someuser/inventory@v1.2.0   # version-pinned: locks the exact commit in lume.lock
-lume --sandbox --allow-net app.lm        # run untrusted code: net yes, filesystem/env no
+lovax install someuser/inventory@v1.2.0   # version-pinned: locks the exact commit in lovax.lock
+lovax --sandbox --allow-net app.lov        # run untrusted code: net yes, filesystem/env no
 ```
 
 Coroutines (`yield`/`spawn`/`resume`), a capability **sandbox** (Deno-style
-`--allow-*`), and version-pinned packages make Lume safe to run other people's
+`--allow-*`), and version-pinned packages make Lovax safe to run other people's
 code — see [RFC-014](rfcs/014-coroutines.md) and [RFC-015](rfcs/015-net-and-sandbox.md).
 
 ## Quick Start
@@ -94,33 +94,33 @@ code — see [RFC-014](rfcs/014-coroutines.md) and [RFC-015](rfcs/015-net-and-sa
 **Install (prebuilt binary — no compiler needed):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/uixova/lume/main/install.sh | sh   # Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh   # Linux / macOS
 ```
 ```powershell
-irm https://raw.githubusercontent.com/uixova/lume/main/install.ps1 | iex        # Windows
+irm https://raw.githubusercontent.com/uixova/lovax/main/install.ps1 | iex        # Windows
 ```
 
-Then `lume update` self-updates to the newest release. Prefer to build from source?
+Then `lovax update` self-updates to the newest release. Prefer to build from source?
 It's one command, zero dependencies:
 
 ```bash
-g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
+g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp
 ```
 
 **Run:**
 
 ```bash
-lume                            # interactive REPL
-lume examples/hello_world.lm
-lume examples/dungeon.lm        # loot table + signals + save system
-lume --version
+lovax                            # interactive REPL
+lovax examples/hello_world.lov
+lovax examples/dungeon.lov        # loot table + signals + save system
+lovax --version
 ```
 
 ## Language Tour
 
 ### Variables — `set` defines, bare assignment updates
 
-```lume
+```lovax
 set speed = 10      # DEFINES a new variable
 speed = 20          # UPDATES an existing one
 speed += 5          # compound: += -= *= /= %=
@@ -133,7 +133,7 @@ and closures update outer counters naturally — no `nonlocal` ceremony.
 
 ### Printing & strings
 
-```lume
+```lovax
 say "Hello", 100, true               # comma-separated values
 say "hp: {hp}, doubled: {hp * 2}"    # interpolation: any expression inside {}
 say "escaped: \n \t \" \{literal\}"
@@ -146,7 +146,7 @@ set dialogue = """Hello traveler!
 
 ### Control flow
 
-```lume
+```lovax
 if age > 65:
     say "retired"
 else if age >= 18 and has_license:
@@ -179,7 +179,7 @@ for key in some_map:
 
 ### Functions
 
-```lume
+```lovax
 fn heal(target, amount = 10):        # default parameters (evaluated at call time)
     return "{target} +{amount} hp"
 
@@ -225,12 +225,12 @@ Truthiness (Python model): `null`, `false`, `0`, `0.0`, `""`, `[]`, `{}` → fal
 
 Built-in libraries ship with the language but stay out of your way until invited:
 
-```lume
+```lovax
 use math                    # module object -> math.lerp(0, 10, 0.5)
 use math as m               # alias
 use game: pick_weighted     # selective: name comes into scope directly
-use "tools/weapons.lm"      # YOUR library -> weapons.compute_damage(...)
-use "tools/weapons.lm" as w
+use "tools/weapons.lov"      # YOUR library -> weapons.compute_damage(...)
+use "tools/weapons.lov" as w
 ```
 
 - File modules load once (cached); circular `use` is caught with a clear error;
@@ -239,22 +239,22 @@ use "tools/weapons.lm" as w
 - Modules are **frozen**: `math.lerp = 5` is an error — libraries can't break the language.
 - Discovery: `keys(math)` works; accessing a missing member lists what exists.
 
-### Packages — `lume install` (RFC-007)
+### Packages — `lovax install` (RFC-007)
 
 Install community libraries with one command and import them by name:
 
 ```bash
-lume install someuser/inventory      # GitHub shorthand -> lume_libs/inventory/
+lovax install someuser/inventory      # GitHub shorthand -> lovax_libs/inventory/
 ```
 
-```lume
+```lovax
 use inventory                        # imports like a built-in
 say inventory.restock("potion")
 ```
 
-`use <name>` resolves built-ins first, then `lume_libs/<name>/<name>.lm` (or `main.lm`).
-Publishing a package = pushing a repo with a `<name>.lm` at its root — nothing else.
-A manifest (`lume.json`) with version pinning and a registry are planned (see
+`use <name>` resolves built-ins first, then `lovax_libs/<name>/<name>.lov` (or `main.lov`).
+Publishing a package = pushing a repo with a `<name>.lov` at its root — nothing else.
+A manifest (`lovax.json`) with version pinning and a registry are planned (see
 [rfcs/007-packages.md](rfcs/007-packages.md)).
 
 ### Built-in functions
@@ -308,8 +308,8 @@ For your own projects any layout works; a simple convention:
 
 ```
 my_game/
-├── main.lm         # entry: ./lume main.lm
-└── libs/           # your libraries -> use "libs/inventory.lm"
+├── main.lov         # entry: ./lovax main.lov
+└── libs/           # your libraries -> use "libs/inventory.lov"
 ```
 
 Module caching is in-memory per run — no cache files are ever written to disk.
@@ -325,21 +325,21 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 
 ## Performance
 
-Lume compiles to bytecode and runs on a direct-threaded stack VM (computed-goto
+Lovax compiles to bytecode and runs on a direct-threaded stack VM (computed-goto
 dispatch), with immediate numeric values, in-place stack arithmetic, fused
 superinstructions ([RFC-012](rfcs/012-vm-performance.md)), an in-place string
 package, and a member-access inline cache. Same machine, recommended flags,
 best-of-5 against **CPython 3.14** and **Lua 5.4**:
 
-| Benchmark | **Lume 0.9** | CPython 3.14 | Lua 5.4 |
+| Benchmark | **Lovax 0.9** | CPython 3.14 | Lua 5.4 |
 |-----------|-------------:|-------------:|--------:|
 | string suite (concat/interp/keys/eq) | **19 ms** | 240 ms | — |
 | member access (1M struct r/w) | **68 ms** | 108 ms | — |
 | `fib(30)` (pure recursion) | 66 ms | 79 ms | **44 ms** |
 
-Lume beats CPython on every workload, and beats Lua 5.4 on string/data work.
+Lovax beats CPython on every workload, and beats Lua 5.4 on string/data work.
 The one benchmark Lua still leads is pure recursion — that gap is the value
-representation (Lume's value is 32 bytes incl. a refcounted pointer; Lua's is 8).
+representation (Lovax's value is 32 bytes incl. a refcounted pointer; Lua's is 8).
 Closing it is the v0.10 headline (intrusive refcount → NaN-boxing), scoped as its
 own effort in [RFC-013](rfcs/013-value-representation.md) rather than rushed.
 
@@ -355,7 +355,7 @@ including error messages). Next milestones:
 4. Optional type hints; LSP, formatter, VSCode extension.
 5. **v1.0**: engine embedding API, hot-reload, determinism guarantees.
 
-See [lume.md](lume.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
+See [lovax.md](lovax.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
 
 ## License
 
@@ -367,10 +367,10 @@ MIT — see [LICENSE](LICENSE).
 <details>
 <summary><h2>🇹🇷 Türkçe</h2></summary>
 
-**Lume**, Python kadar sade söz dizimine sahip, C++ ile sıfırdan yazılmış, ileride
+**Lovax**, Python kadar sade söz dizimine sahip, C++ ile sıfırdan yazılmış, ileride
 geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama dilidir.
 
-### Neden Lume?
+### Neden Lovax?
 
 - **Python sadeliği** — girinti tabanlı bloklar, noktalı virgül yok.
 - **Oyun-öncelikli** — loot tabloları (`pick_weighted`), sinyaller (`signal/connect/emit`),
@@ -384,9 +384,9 @@ geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama 
 ### Hızlı Başlangıç
 
 ```bash
-g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
-./lume examples/turkish_showcase.lm     # Türkçe tanımlayıcı vitrini
-./lume examples/dungeon.lm
+g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp
+./lovax examples/turkish_showcase.lov     # Türkçe tanımlayıcı vitrini
+./lovax examples/dungeon.lov
 ```
 
 ### Öne çıkan kurallar
@@ -395,13 +395,13 @@ g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
 - `"metin" + 5` bilerek hatadır; `text(5)` veya `"toplam: {x}"` interpolasyonu kullanılır.
 - `%` ve `/` taban (floor) kurallıdır: `(a / b) * b + a % b == a` her zaman doğrudur.
 - `match` ilk eşleşen dalı çalıştırır, düşme yoktur; `_` jokerdir.
-- Kendi kütüphaneni yaz: `use "libs/envanter.lm"` — bir kez yüklenir, döngüsel `use`
+- Kendi kütüphaneni yaz: `use "libs/envanter.lov"` — bir kez yüklenir, döngüsel `use`
   net hatayla yakalanır.
 
-Testler: `./tests/run_tests.sh` (66 golden test) + `./tests/fuzz.sh` (güvenlik kapısı). Paket kurma: `lume install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/).
+Testler: `./tests/run_tests.sh` (66 golden test) + `./tests/fuzz.sh` (güvenlik kapısı). Paket kurma: `lovax install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/).
 
 </details>
 
 <div align="center">
-<sub>Lume — write simply, run fast. 🔆</sub>
+<sub>Lovax — write simply, run fast. 🔆</sub>
 </div>

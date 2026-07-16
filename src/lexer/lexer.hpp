@@ -7,7 +7,7 @@
 #include <queue>
 #include "token.hpp"
 
-namespace Lume {
+namespace Lovax {
 
 class Lexer {
 private:
@@ -585,6 +585,6 @@ private:
     }
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // LEXER_HPP

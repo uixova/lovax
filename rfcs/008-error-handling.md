@@ -4,12 +4,12 @@
 
 Before v0.7 a runtime error was terminal: it unwound the whole program. Real
 programs (loading a save file, parsing user input, a failing network package)
-need to *recover*. Lume adds structured error handling that stays Python-simple
+need to *recover*. Lovax adds structured error handling that stays Python-simple
 and reads left-to-right.
 
 ## Surface syntax
 
-```lume
+```lovax
 try:
     set data = read_file("save.json")
     say data

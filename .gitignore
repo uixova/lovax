@@ -31,3 +31,7 @@ lume_gcstress
 lume_sw
 lume_leak
 err.log
+
+# Analysis & research files (generated, temporary)
+ANALYSIS_SUMMARY.json
+/memories/session/

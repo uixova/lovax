@@ -22,7 +22,7 @@
 //  - LUME_GC_STRESS collects on every allocation: a missed root frees a live object
 //    immediately, so ASan turns it into a use-after-free the test suite catches.
 
-namespace Lume {
+namespace Lovax {
 
 class Object; // complete at include point (object.hpp)
 
@@ -136,6 +136,6 @@ struct GcRoot {
     GcRoot& operator=(const GcRoot&) = delete;
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // GC_HPP

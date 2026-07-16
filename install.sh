@@ -1,15 +1,15 @@
 #!/bin/sh
-# Lume installer — downloads the prebuilt binary for this platform and puts it on
-# your PATH. Also used by `lume update` (it self-replaces in place).
+# Lovax installer — downloads the prebuilt binary for this platform and puts it on
+# your PATH. Also used by `lovax update` (it self-replaces in place).
 #
-#   curl -fsSL https://raw.githubusercontent.com/uixova/lume/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh
 #
 # Env:
 #   LUME_CHANNEL   stable (default) | latest    which release to fetch
 #   LUME_INSTALL   install dir (default: $HOME/.local/bin)
 set -eu
 
-REPO="uixova/lume"
+REPO="uixova/lovax"
 CHANNEL="${LUME_CHANNEL:-stable}"
 INSTALL_DIR="${LUME_INSTALL:-$HOME/.local/bin}"
 
@@ -33,7 +33,7 @@ case "$arch" in
     aarch64|arm64) cpu="arm64" ;;
     *) die "unsupported architecture: $arch" ;;
 esac
-asset="lume-${plat}-${cpu}"
+asset="lovax-${plat}-${cpu}"
 
 # --- resolve the release tag ---------------------------------------------------
 api="https://api.github.com/repos/${REPO}/releases"
@@ -48,7 +48,7 @@ fi
 url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
 sum_url="${url}.sha256"
 
-say "Lume ${tag} — downloading ${asset}..."
+say "Lovax ${tag} — downloading ${asset}..."
 tmp="$(mktemp)"
 curl -fsSL "$url" -o "$tmp" || die "download failed: $url"
 
@@ -67,14 +67,14 @@ fi
 # --- install -------------------------------------------------------------------
 mkdir -p "$INSTALL_DIR"
 chmod +x "$tmp"
-mv "$tmp" "$INSTALL_DIR/lume"
+mv "$tmp" "$INSTALL_DIR/lovax"
 rm -f "${tmp}.sha256" 2>/dev/null || true
 
-say "Installed lume ${tag} to ${INSTALL_DIR}/lume"
+say "Installed lovax ${tag} to ${INSTALL_DIR}/lovax"
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) : ;;
     *) say ""
        say "  Add it to your PATH — append this to ~/.bashrc or ~/.zshrc:"
        say "    export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
-say "Run 'lume --version' to check, or 'lume' for the REPL."
+say "Run 'lovax --version' to check, or 'lovax' for the REPL."

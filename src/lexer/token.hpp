@@ -3,7 +3,7 @@
 
 #include <string>
 
-namespace Lume {
+namespace Lovax {
 
 enum class TokenType {
     ILLEGAL,
@@ -76,7 +76,7 @@ enum class TokenType {
     IF,
     ELSE,
     MATCH,
-    USE,    // module import: use math / use "file.lm" (RFC-006)
+    USE,    // module import: use math / use "file.lov" (RFC-006)
     AS,     // alias: use math as m
     TRY,     // error handling: try / catch / throw (RFC-008)
     CATCH,
@@ -209,6 +209,6 @@ inline std::string tokenTypeName(TokenType t) {
     return "unknown";
 }
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // TOKEN_HPP

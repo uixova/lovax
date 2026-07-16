@@ -21,7 +21,7 @@
 #include "../evaluator/stdlib.hpp"
 #include "../utils/colors.hpp"
 
-// The Lume virtual machine: a stack-based bytecode interpreter with
+// The Lovax virtual machine: a stack-based bytecode interpreter with
 // computed-goto dispatch, closed upvalues, and immediate numeric values.
 // Object-typed operations reuse the exact runtime semantics (and error
 // messages) of the retired tree-walker via runtime.hpp.
@@ -34,7 +34,7 @@
 #define LUME_CG 1
 #endif
 
-namespace Lume {
+namespace Lovax {
 
 // A single call frame. Namespace-scoped (not VM-private) so coroutine state can
 // hold its own frame stack.
@@ -290,7 +290,7 @@ public:
         openUpvalues_.clear();
     }
 
-    // Native -> Lume call bridge (builtins calling closures: filter/emit/sort_by).
+    // Native -> Lovax call bridge (builtins calling closures: filter/emit/sort_by).
     Ref<Object> callFromNative(const Ref<Object>& fn,
                                            const std::vector<Ref<Object>>& args,
                                            int line) {
@@ -335,12 +335,12 @@ public:
             }
             auto builtin = StdLib::getBuiltinModule(spec.target);
             if (builtin != nullptr) return builtin;
-            // Installed package? lume_libs/<name>/<name>.lm or main.lm
+            // Installed package? lovax_libs/<name>/<name>.lov or main.lov
             namespace fs = std::filesystem;
             fs::path root(baseDirs().front());
             fs::path candidates[2] = {
-                root / "lume_libs" / spec.target / (spec.target + ".lm"),
-                root / "lume_libs" / spec.target / "main.lm"
+                root / "lovax_libs" / spec.target / (spec.target + ".lov"),
+                root / "lovax_libs" / spec.target / "main.lov"
             };
             for (const auto& cand : candidates) {
                 std::error_code ec;
@@ -350,8 +350,8 @@ public:
             }
             return makeError("unknown module '" + spec.target +
                              "' (built-ins: " + StdLib::builtinModuleList() +
-                             "; no package at lume_libs/" + spec.target + "/" +
-                             "; for a file module use quotes: use \"" + spec.target + ".lm\")",
+                             "; no package at lovax_libs/" + spec.target + "/" +
+                             "; for a file module use quotes: use \"" + spec.target + ".lov\")",
                              line);
         }
         return loadFileModule(spec.target, line);
@@ -671,7 +671,7 @@ private:
             for (int i = argc - 1; i >= 0; --i) args.push_back(toObject(peek(i)));
             // Root the args during the call: toObject boxes immediate args into
             // fresh objects that are NOT on the value stack, so a builtin that
-            // allocates (or calls back into Lume) would otherwise free them.
+            // allocates (or calls back into Lovax) would otherwise free them.
             Heap& h = Heap::get();
             size_t rootBase = h.tempRoots.size();
             for (auto& a : args) h.tempRoots.push_back(a.get());
@@ -749,7 +749,7 @@ private:
 
         for (;;) {
 #ifdef LUME_CG
-            static const void* lume_dispatch[] = {
+            static const void* lovax_dispatch[] = {
             &&L_CONST,
             &&L_NIL,
             &&L_TRUE_,
@@ -847,13 +847,13 @@ private:
         #define VM_CASE(name) L_##name:
         // Safe everywhere: a plain goto runs destructors of handler locals
         // before the (computed) dispatch at the loop head.
-        #define VM_NEXT       goto lume_dispatch_next
+        #define VM_NEXT       goto lovax_dispatch_next
         // Only in handlers with NO named non-trivial locals in scope: a computed
         // goto skips destructors (GCC cannot see the target), so 'Value'/string
         // locals alive here would leak.
-        #define VM_NEXT_FAST  { op = (Op)*ip++; goto *lume_dispatch[(uint8_t)op]; }
+        #define VM_NEXT_FAST  { op = (Op)*ip++; goto *lovax_dispatch[(uint8_t)op]; }
             Op op;
-        lume_dispatch_next:
+        lovax_dispatch_next:
             VM_NEXT_FAST;
 #else
         #define VM_CASE(name) case Op::name:
@@ -1963,6 +1963,6 @@ private:
     }
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // VM_HPP

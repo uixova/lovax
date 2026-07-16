@@ -21,7 +21,7 @@ budget. Same language, 67 golden tests bit-for-bit in both dispatch modes.
 ### 16-byte value (not NaN-box)
 - `Value` is now 16 bytes (was 32): tag + `union{int64, double, Object*}`. This
   matches **Lua 5.4**, the int64 peer. An 8-byte NaN-box was rejected: its ~48-bit
-  payload cannot hold Lume's native int64 (LuaJIT NaN-boxes only because it lacks
+  payload cannot hold Lovax's native int64 (LuaJIT NaN-boxes only because it lacks
   int64), and it carries per-platform pointer-bit hazards. Portable and exact.
 
 ### Safety (the whole point)
@@ -38,7 +38,7 @@ budget. Same language, 67 golden tests bit-for-bit in both dispatch modes.
 
 ## v0.10.0 — general-purpose + safe: net, packages, sandbox
 
-Lume stops being game-only. It can now open sockets, install version-pinned
+Lovax stops being game-only. It can now open sockets, install version-pinned
 packages, and run untrusted code behind a capability sandbox — the pieces a
 real general-purpose / server / scripting language needs. (The value-model
 perf work — NaN-boxing, GC — is scoped separately as v0.11, RFC-013, so it
@@ -51,15 +51,15 @@ gets its own verification cycle rather than being rushed.)
   socket is an int handle; misuse returns a catchable error, never a crash.
 
 ### Version-pinned packages (RFC-007 phase 2)
-- `lume install user/repo@v1.2.0` clones exactly that git tag and locks the
-  commit SHA in lume.lock; deps recorded in lume.json; no-arg install
+- `lovax install user/repo@v1.2.0` clones exactly that git tag and locks the
+  commit SHA in lovax.lock; deps recorded in lovax.json; no-arg install
   reproduces from the manifest. The supply-chain guarantee npm/pip don't give.
 - Fixed a pre-existing bug: file-module functions now resolve their module-level
   globals correctly (state persists across calls) even when called from another
   VM — packages with internal state finally work.
 
 ### Capability sandbox (RFC-015)
-- `lume --sandbox --allow-net app.lm`: dangerous ops (net, file read/write,
+- `lovax --sandbox --allow-net app.lov`: dangerous ops (net, file read/write,
   env) require explicit permission (Deno's model). Mentioning any permission
   flag opts into deny-all; no flag = your own trusted script, all allowed.
 - An installed package physically cannot touch the network or filesystem unless
@@ -80,10 +80,10 @@ gets its own verification cycle rather than being rushed.)
 ## v0.9.0 — coroutines, string speed, distribution
 
 Beats CPython everywhere and Lua 5.4 on string/data work; coroutines land for
-game scripting; and Lume now installs like any other language. Same-machine
+game scripting; and Lovax now installs like any other language. Same-machine
 best-of-5 vs CPython 3.14 / Lua 5.4:
 
-| Benchmark | Lume | CPython | Lua 5.4 |
+| Benchmark | Lovax | CPython | Lua 5.4 |
 |-----------|-----:|--------:|--------:|
 | string suite (concat/interp/keys/eq) | **19 ms** | 240 ms | — |
 | member access 1M | **68 ms** | 108 ms | — |
@@ -107,7 +107,7 @@ best-of-5 vs CPython 3.14 / Lua 5.4:
   verified against the live key. member 1M **108 → 68 ms** (past CPython).
 
 ### Distribution (v0.9 "download it like any language")
-- `curl … install.sh | sh` / `install.ps1`, `lume update` self-update.
+- `curl … install.sh | sh` / `install.ps1`, `lovax update` self-update.
 - GitHub Actions: release pipeline (Linux/macOS x64+arm64/Windows binaries +
   checksums) and CI (golden suite in both dispatch modes + sanitizer sweep).
 
@@ -193,7 +193,7 @@ bytecode (see [RFC-009](rfcs/009-rich-core.md) for the accept/reject rationale).
   `file`, `os`, plus new **`time`** and a terminal **`canvas`** renderer.
 
 ### Tooling
-- **REPL** — run `lume` with no arguments for an interactive session; a bare
+- **REPL** — run `lovax` with no arguments for an interactive session; a bare
   expression is echoed, a header line ending in `:` opens a multi-line block.
 
 ### Quality
@@ -205,7 +205,7 @@ bytecode (see [RFC-009](rfcs/009-rich-core.md) for the accept/reject rationale).
 
 ## v0.6.0 — bytecode VM
 
-The tree-walking interpreter is retired. Lume now compiles to bytecode and runs on
+The tree-walking interpreter is retired. Lovax now compiles to bytecode and runs on
 a stack-based VM:
 
 - Immediate numeric values (ints/floats/bools/null never touch the heap).
@@ -234,8 +234,8 @@ a stack-based VM:
 - `set` defines / bare assignment updates (typo protection, RFC-001).
 
 ### Module System (RFC-006)
-- `use math` / `use x as y` / `use x: a, b` / `use "file.lm"` — built-ins load only when invited.
-- Modules are frozen maps; user `.lm` files are modules too (cached, cycle-detected,
+- `use math` / `use x as y` / `use x: a, b` / `use "file.lov"` — built-ins load only when invited.
+- Modules are frozen maps; user `.lov` files are modules too (cached, cycle-detected,
   importer-relative paths).
 
 ### Built-in Modules
@@ -246,7 +246,7 @@ a stack-based VM:
 - `os`: env, set_env, platform, cwd, args, path_join.
 
 ### Packages (RFC-007)
-- `lume install user/repo` fetches libraries into `lume_libs/`; `use <name>` imports
+- `lovax install user/repo` fetches libraries into `lovax_libs/`; `use <name>` imports
   installed packages exactly like built-ins.
 
 ### Quality

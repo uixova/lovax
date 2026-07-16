@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Lume golden-file test runner.
+# Lovax golden-file test runner.
 # Usage:  ./tests/run_tests.sh            (from the repo root)
 #         ./tests/run_tests.sh --update   (regenerate expected outputs — verify diffs first!)
 #
-# Every tests/cases/*.lm file is executed; its combined stdout+stderr output is
+# Every tests/cases/*.lov file is executed; its combined stdout+stderr output is
 # compared byte-for-byte against the .expected file of the same name.
 # The exit code is also verified via the "# exit: N" line at the top of .expected.
 
 set -u
 cd "$(dirname "$0")/.."
 
-LUME=./lume
+LUME=./lovax
 CASES=tests/cases
 UPDATE=0
 [ "${1:-}" = "--update" ] && UPDATE=1
 
 if [ ! -x "$LUME" ]; then
-    echo "HATA: '$LUME' bulunamadı. Önce derle: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp"
+    echo "HATA: '$LUME' bulunamadı. Önce derle: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"
     exit 2
 fi
 
@@ -25,8 +25,8 @@ pass=0
 fail=0
 failed_names=()
 
-for lm in "$CASES"/*.lm; do
-    name=$(basename "$lm" .lm)
+for lm in "$CASES"/*.lov; do
+    name=$(basename "$lm" .lov)
     expected_file="$CASES/$name.expected"
 
     actual=$("$LUME" "$lm" 2>&1)

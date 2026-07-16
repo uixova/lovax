@@ -9,7 +9,7 @@ and Lua proved the model for games.
 
 ## Surface
 
-```lume
+```lovax
 fn counter(start):
     set n = start
     while true:

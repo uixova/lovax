@@ -34,7 +34,7 @@
   #include <sys/time.h>
 #endif
 
-// Lume built-in standard library (RFC-006).
+// Lovax built-in standard library (RFC-006).
 // Modules NEVER enter the global scope until invited with 'use':
 //   use math   -> math.lerp(0, 10, 0.5)
 //   use game: pick_weighted, signal
@@ -42,7 +42,7 @@
 //   use file as f -> f.save_data(...)
 // Every module is a FROZEN map: contents are immutable, the language cannot be broken.
 
-namespace Lume {
+namespace Lovax {
 namespace StdLib {
 
 using Args = Builtins::Args;
@@ -406,7 +406,7 @@ inline Ref<StringObject> strKey(const std::string& k) {
 }
 
 // ===== Capability permissions (RFC-015, sandbox / --allow-* flags) =====
-// Default: everything allowed (a script you wrote, you trust). `lume --sandbox`
+// Default: everything allowed (a script you wrote, you trust). `lovax --sandbox`
 // flips these to deny, and `--allow-net/read/write/env/run` grant back exactly
 // what a program needs. This is the runtime half of the malicious-package
 // defense (the other half is version pinning, RFC-007 phase 2): even an
@@ -1357,7 +1357,7 @@ inline ObjPtr makeFileModule() {
         return NULL_OBJ_;
     });
 
-    // load_data(path): parses a JSON file into a Lume value
+    // load_data(path): parses a JSON file into a Lovax value
     def("load_data", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
         LUME_GATE(perms().read, "file read", "--allow-read");
         if (args.size() != 1) return argCountError("load_data", "1", args.size(), line);
@@ -2186,6 +2186,6 @@ inline std::string builtinModuleList() {
 }
 
 } // namespace StdLib
-} // namespace Lume
+} // namespace Lovax
 
 #endif // STDLIB_HPP

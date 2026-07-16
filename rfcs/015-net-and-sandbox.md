@@ -1,8 +1,8 @@
 # RFC-015 — Networking and the capability sandbox
 
-## Two features, one goal: make Lume safe to run other people's code
+## Two features, one goal: make Lovax safe to run other people's code
 
-v0.10 opens Lume up beyond a single trusted script — packages, servers, tools.
+v0.10 opens Lovax up beyond a single trusted script — packages, servers, tools.
 That raises the question every general-purpose language must answer: **how do you
 run code you didn't write without it stealing your files or phoning home?**
 
@@ -11,7 +11,7 @@ run code you didn't write without it stealing your files or phoning home?**
 A `net` module of blocking TCP/UDP primitives, built on OS syscalls only (zero
 third-party deps, like `file`/`os`):
 
-```lume
+```lovax
 use net
 set server = net.tcp_listen(8080)
 net.set_timeout(server, 5.0)          # blocking calls can't hang forever
@@ -39,20 +39,20 @@ engine, v1.0 — `net` is the primitive layer.)
 | Deno | capability permissions | code can't touch net/fs/env without an explicit `--allow-*` flag |
 | Lua | host-defined sandbox | depends entirely on the embedder |
 
-Lume takes **two layers**:
+Lovax takes **two layers**:
 
 ### Layer 1 — version pinning (RFC-007 phase 2)
-`lume install user/repo@v1.2.0` clones exactly that tag and locks the resolved
-commit SHA in `lume.lock`. A dependency can't silently change under you — the
+`lovax install user/repo@v1.2.0` clones exactly that tag and locks the resolved
+commit SHA in `lovax.lock`. A dependency can't silently change under you — the
 thing npm/pip never gave you.
 
 ### Layer 2 — capability sandbox (this RFC)
 Dangerous operations are gated behind permissions:
 
 ```
-lume --sandbox --allow-net app.lm     # network yes, filesystem/env no
-lume --allow-read report.lm           # mentioning a permission opts into the sandbox
-lume app.lm                           # your own script: everything allowed
+lovax --sandbox --allow-net app.lov     # network yes, filesystem/env no
+lovax --allow-read report.lov           # mentioning a permission opts into the sandbox
+lovax app.lov                           # your own script: everything allowed
 ```
 
 - `--sandbox` denies everything; `--allow-net/read/write/env/run` grant back

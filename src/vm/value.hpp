@@ -10,13 +10,13 @@
 // loops fast. Everything else (strings, lists, maps, functions, modules)
 // stays a heap Object behind a shared_ptr until the GC arrives.
 
-namespace Lume {
+namespace Lovax {
 
 enum class VKind : uint8_t { NIL, BOOL, INT, FLOAT, OBJ };
 
 // 16-byte tagged value (matches Lua 5.4, which also keeps a native int64). A
 // NaN-boxed 8-byte value is a LuaJIT trick that only works WITHOUT a 64-bit int
-// (the NaN payload is ~48 bits); Lume keeps exact int64, so a clean tagged union
+// (the NaN payload is ~48 bits); Lovax keeps exact int64, so a clean tagged union
 // is both correct and portable — no per-platform pointer-bit assumptions.
 struct Value {
     VKind kind = VKind::NIL;
@@ -131,6 +131,6 @@ inline std::string valueTypeName(const Value& v) {
     return "?";
 }
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // VALUE_HPP

@@ -10,7 +10,7 @@
 // heap objects, index access, and member access. Extracted verbatim from the
 // retired tree-walking evaluator so every error message stays byte-identical.
 
-namespace Lume {
+namespace Lovax {
 namespace Runtime {
 
     inline bool isValidMapKey(const Ref<Object>& key) {
@@ -279,6 +279,6 @@ namespace Runtime {
     }
 
 } // namespace Runtime
-} // namespace Lume
+} // namespace Lovax
 
 #endif // VM_RUNTIME_HPP

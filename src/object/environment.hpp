@@ -6,7 +6,7 @@
 #include <memory>
 #include "object.hpp"
 
-namespace Lume {
+namespace Lovax {
 
 class Environment {
 private:
@@ -59,6 +59,6 @@ public:
     }
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // ENVIRONMENT_HPP

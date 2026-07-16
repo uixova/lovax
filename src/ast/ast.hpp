@@ -6,7 +6,7 @@
 #include <memory> // Smart memory management (unique_ptr)
 #include "../lexer/token.hpp"
 
-namespace Lume {
+namespace Lovax {
 
 // Node type tag: lets the evaluator dispatch
 // with a single switch (performance: no RTTI, branch-predictor friendly).
@@ -77,7 +77,7 @@ public:
     virtual void expressionNode() = 0;
 };
 
-// 4. Root node: represents the whole Lume program
+// 4. Root node: represents the whole Lovax program
 class Program : public ASTNode {
 public:
     std::vector<std::unique_ptr<Statement>> statements;
@@ -261,11 +261,11 @@ public:
     void expressionNode() override {}
 };
 
-// Module import -> use math / use "file.lm" as x / use math: lerp, clamp (RFC-006)
+// Module import -> use math / use "file.lov" as x / use math: lerp, clamp (RFC-006)
 class UseStatement : public Statement {
 public:
     Token token;                     // 'use' token
-    bool isFile = false;             // true: a "file.lm" path, false: a built-in module name
+    bool isFile = false;             // true: a "file.lov" path, false: a built-in module name
     std::string target;              // module name or file path
     std::string alias;               // 'as' alias (empty if none)
     std::vector<std::string> names;  // selective import names (if empty, the module object is bound)
@@ -564,6 +564,6 @@ public:
     std::string tokenLiteral() const override { return token.literal; }
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // AST_HPP

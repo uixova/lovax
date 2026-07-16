@@ -15,9 +15,9 @@ simplest proven design; Python's selective `from x import y` is added for ergono
 use math                  # binds the module object -> math.lerp(0, 10, 0.5)
 use math as m             # alias
 use math: lerp, clamp     # selective: names come into scope directly
-use "tools/inventory.lm"          # user file module -> inventory.<fn>
-use "tools/inventory.lm" as inv
-use "tools/inventory.lm": restock
+use "tools/inventory.lov"          # user file module -> inventory.<fn>
+use "tools/inventory.lov" as inv
+use "tools/inventory.lov": restock
 ```
 - `as` and `:` cannot be combined (ambiguous).
 - File modules load once (cache); circular `use` errors with the chain shown;
@@ -43,5 +43,5 @@ random, seed, clock, sleep, check, copy, clone.
 - JSON (save_data/load_data), CSV (quoted-field aware), plain text/lines, raw bytes
   (read_bytes/write_bytes for .bin-style assets).
 - PDF/binary media formats do NOT enter the language core — wrong layer. The v1.0 engine
-  embedding API will let C++ plugins expose native modules to Lume; images/audio/PDF live there.
+  embedding API will let C++ plugins expose native modules to Lovax; images/audio/PDF live there.
 - Process execution (exec/system) is deliberately excluded from the core.

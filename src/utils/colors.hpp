@@ -14,7 +14,7 @@
   #define LUME_FILENO fileno
 #endif
 
-namespace Lume {
+namespace Lovax {
 namespace Color {
 
 // No color codes when output is not a terminal (file, pipe, golden tests).
@@ -41,6 +41,6 @@ inline std::string errRed()   { return stderrIsTTY() ? "\033[1;31m" : ""; }
 inline std::string errReset() { return stderrIsTTY() ? "\033[0m"    : ""; }
 
 } // namespace Color
-} // namespace Lume
+} // namespace Lovax
 
 #endif // COLORS_HPP

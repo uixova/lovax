@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <sstream>
 
-namespace Lume {
+namespace Lovax {
 
 
 enum class ObjectType {
@@ -51,9 +51,9 @@ public:
     virtual void gcMark() {}
 };
 
-} // namespace Lume — reopened below; gc.hpp needs Object complete
+} // namespace Lovax — reopened below; gc.hpp needs Object complete
 #include "../vm/gc.hpp"
-namespace Lume {
+namespace Lovax {
 
 // Marks an object gray: sets the bit and queues it for child-scanning. Safe on
 // null and on already-marked objects (the graph may have cycles).
@@ -345,7 +345,7 @@ public:
 };
 
 // Builtin function object implemented in C++.
-// CallFn: lets a builtin invoke Lume functions (for each/filter/emit) — RFC-005
+// CallFn: lets a builtin invoke Lovax functions (for each/filter/emit) — RFC-005
 class BuiltinObject : public Object {
 public:
     using CallFn = std::function<Ref<Object>(
@@ -562,6 +562,6 @@ inline std::string utf8At(const std::string& s, long long idx) {
     return "";
 }
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // OBJECT_HPP

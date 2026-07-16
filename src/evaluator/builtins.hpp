@@ -14,15 +14,15 @@
 #include "../object/object.hpp"
 #include "../object/environment.hpp"
 
-// Lume core builtin functions.
-// Naming philosophy: short, friendly, Lume-flavored but never confusing.
+// Lovax core builtin functions.
+// Naming philosophy: short, friendly, Lovax-flavored but never confusing.
 //   say  -> print (statement)      ask  -> read a line from the user
 //   text -> convert to string      num  -> convert to number
 //   kind -> type name              len  -> length (UTF-8 aware)
 //   push/pop/remove -> list/map editing
 // Built-in modules (math/game/strings/file/os) live in stdlib.hpp — loaded with 'use'
 
-namespace Lume {
+namespace Lovax {
 namespace Builtins {
 
 using Args = std::vector<Ref<Object>>;
@@ -1017,6 +1017,6 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
 }
 
 } // namespace Builtins
-} // namespace Lume
+} // namespace Lovax
 
 #endif // BUILTINS_HPP

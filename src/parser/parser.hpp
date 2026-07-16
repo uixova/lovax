@@ -8,7 +8,7 @@
 #include "../lexer/lexer.hpp"
 #include "../ast/ast.hpp"
 
-namespace Lume {
+namespace Lovax {
 
 enum Precedence {
     LOWEST = 1,
@@ -494,7 +494,7 @@ private:
         return stmt;
     }
 
-    // use math / use math as m / use math: lerp, clamp / use "file.lm" [as x] [: names]
+    // use math / use math as m / use math: lerp, clamp / use "file.lov" [as x] [: names]
     std::unique_ptr<UseStatement> parseUseStatement() {
         auto stmt = std::make_unique<UseStatement>();
         stmt->token = curToken;
@@ -508,7 +508,7 @@ private:
             stmt->isFile = true;
             stmt->target = curToken.literal; // raw path (no escapes/interpolation)
         } else {
-            addError("use expects a module name or a \"path/to/file.lm\"", peekToken);
+            addError("use expects a module name or a \"path/to/file.lov\"", peekToken);
             return nullptr;
         }
 
@@ -1275,6 +1275,6 @@ private:
     }
 };
 
-} // namespace Lume
+} // namespace Lovax
 
 #endif // PARSER_HPP
