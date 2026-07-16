@@ -3,14 +3,14 @@
 # reports the best wall-clock time. Not a correctness test (see run_tests.sh).
 set -u
 cd "$(dirname "$0")/.."
-LUME=./lovax
-[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
+LOVAX=./lovax
+[ -x "$LOVAX" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
 
 run() {
     local name="$1" file="$2" best=99999
     for i in 1 2 3; do
         local s e ms
-        s=$(date +%s.%N); "$LUME" "$file" >/dev/null 2>&1; e=$(date +%s.%N)
+        s=$(date +%s.%N); "$LOVAX" "$file" >/dev/null 2>&1; e=$(date +%s.%N)
         ms=$(awk -v a="$s" -v b="$e" 'BEGIN{printf "%.0f",(b-a)*1000}')
         [ "$ms" -lt "$best" ] && best=$ms
     done

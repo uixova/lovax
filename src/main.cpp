@@ -11,7 +11,7 @@
 #include "utils/colors.hpp"
 #include "pkg.hpp"
 
-static const char* LUME_VERSION = "0.11.0";
+static const char* LOVAX_VERSION = "0.11.0";
 
 // Evaluate one REPL chunk on a persistent VM. A lone bare expression is echoed
 // (wrapped in 'say') so `2 + 3` or `player.hp` print their value like Python.
@@ -45,7 +45,7 @@ static void replEval(Lovax::VM& vm, const std::string& src) {
 // Interactive read-eval-print loop (started when lovax is launched with no script).
 // A header line ending in ':' opens a block that is collected until a blank line.
 static int runRepl() {
-    std::cout << "Lovax " << LUME_VERSION << " REPL — type 'exit' to quit, blank line ends a block\n";
+    std::cout << "Lovax " << LOVAX_VERSION << " REPL — type 'exit' to quit, blank line ends a block\n";
     Lovax::VM::setBaseDir(".");
     Lovax::VM vm;
     std::string line, block;
@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
 
     std::string arg = argv[1];
     if (arg == "--version" || arg == "-v") {
-        std::cout << "Lovax " << LUME_VERSION << std::endl;
+        std::cout << "Lovax " << LOVAX_VERSION << std::endl;
         return 0;
     }
 
@@ -102,12 +102,12 @@ int main(int argc, char* argv[]) {
             if (a == "--channel" && i + 1 < argc) channel = argv[++i];
             else if (a.rfind("--channel=", 0) == 0) channel = a.substr(10);
         }
-        std::cout << "Lovax " << LUME_VERSION << " — checking for updates (channel: "
+        std::cout << "Lovax " << LOVAX_VERSION << " — checking for updates (channel: "
                   << channel << ")..." << std::endl;
         // The install script is idempotent: it self-updates in place. Piping it
         // through the shell is the same path a first-time user takes.
         std::string url = "https://raw.githubusercontent.com/uixova/lovax/main/install.sh";
-        std::string cmd = "curl -fsSL \"" + url + "\" | LUME_CHANNEL=" + channel + " sh";
+        std::string cmd = "curl -fsSL \"" + url + "\" | LOVAX_CHANNEL=" + channel + " sh";
         int rc = std::system(cmd.c_str());
         if (rc != 0) {
             std::cerr << "[Update Error] could not run the installer "

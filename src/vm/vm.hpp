@@ -29,9 +29,9 @@
 // Direct-threaded dispatch (computed goto) on GCC/Clang: each opcode handler
 // jumps straight to the next handler, giving the branch predictor one indirect
 // jump per handler instead of a single shared one. ~15-25% on tight loops.
-// Define LUME_NO_COMPUTED_GOTO to force the portable switch dispatch.
-#if (defined(__GNUC__) || defined(__clang__)) && !defined(LUME_NO_COMPUTED_GOTO)
-#define LUME_CG 1
+// Define LOVAX_NO_COMPUTED_GOTO to force the portable switch dispatch.
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(LOVAX_NO_COMPUTED_GOTO)
+#define LOVAX_CG 1
 #endif
 
 namespace Lovax {
@@ -748,7 +748,7 @@ private:
         #define VM_THROW(E) { Ref<Object> _e = (E); if (tryHandle(_e)) continue; frames_.resize(exitFrameDepth); return _e; }
 
         for (;;) {
-#ifdef LUME_CG
+#ifdef LOVAX_CG
             static const void* lovax_dispatch[] = {
             &&L_CONST,
             &&L_NIL,
@@ -1862,7 +1862,7 @@ private:
                     frames_.pop_back();
                     sp_ = stackMem_.get();
                     return NULL_OBJ_;
-            #ifndef LUME_CG
+            #ifndef LOVAX_CG
             }
 #endif
         }
@@ -1944,9 +1944,8 @@ private:
         return makeError("slicing only works on list and string, got " + typeName(obj->type()), line);
     }
 
-    Ref<Object> memberSet(const Ref<Object>& obj,
-                                      const std::string& prop,
-                                      const Ref<Object>& val, int line) {
+    Ref<Object> memberSet(const Ref<Object>& obj, const std::string& prop,
+                          const Ref<Object>& val, int line) {
         if (obj->type() != ObjectType::MAP) {
             return makeError("member assignment (object.field = ...) only works on maps, got " +
                              typeName(obj->type()), line);

@@ -62,7 +62,7 @@ is fully portable (no per-platform pointer-bit assumptions — a real NaN-box
 hazard on ARM / 5-level paging), and matches the value size of the int64 peer we
 actually compete with (Lua 5.4). Boxing large ints to fake an 8-byte value, or
 adding a range check to every int op, would slow the exact hot path (`fib`) we
-mean to speed up. Decision recorded; `LUME_SAFE_VALUES` is unnecessary since the
+mean to speed up. Decision recorded; `LOVAX_SAFE_VALUES` is unnecessary since the
 16-byte encoding *is* the safe, portable one.
 
 ## Historical note: original defer decision (v0.9)

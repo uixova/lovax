@@ -4,8 +4,8 @@
 # granted. This asserts both directions for net / file-write / file-read / env.
 set -u
 cd "$(dirname "$0")/.."
-LUME=./lovax
-[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
+LOVAX=./lovax
+[ -x "$LOVAX" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
@@ -35,17 +35,17 @@ mk env 'use os
 say os.env("HOME")'
 
 echo "sandbox denials:"
-check deny "net (sandboxed)"        "$($LUME --sandbox "$tmp/net.lov" 2>&1)"
-check deny "file write (sandboxed)" "$($LUME --sandbox "$tmp/fw.lov" 2>&1)"
-check deny "env (sandboxed)"        "$($LUME --sandbox "$tmp/env.lov" 2>&1)"
-check deny "write when only --allow-read" "$($LUME --allow-read "$tmp/fw.lov" 2>&1)"
+check deny "net (sandboxed)"        "$($LOVAX --sandbox "$tmp/net.lov" 2>&1)"
+check deny "file write (sandboxed)" "$($LOVAX --sandbox "$tmp/fw.lov" 2>&1)"
+check deny "env (sandboxed)"        "$($LOVAX --sandbox "$tmp/env.lov" 2>&1)"
+check deny "write when only --allow-read" "$($LOVAX --allow-read "$tmp/fw.lov" 2>&1)"
 
 echo "grants:"
-check ok "net with --allow-net"     "$($LUME --sandbox --allow-net "$tmp/net.lov" 2>&1)"
-check ok "write with --allow-write" "$($LUME --sandbox --allow-write "$tmp/fw.lov" 2>&1)"
-check ok "env with --allow-env"     "$($LUME --sandbox --allow-env "$tmp/env.lov" 2>&1)"
-check ok "all with --allow-all"     "$($LUME --sandbox --allow-all "$tmp/net.lov" 2>&1)"
-check ok "default (no flags)"       "$($LUME "$tmp/net.lov" 2>&1)"
+check ok "net with --allow-net"     "$($LOVAX --sandbox --allow-net "$tmp/net.lov" 2>&1)"
+check ok "write with --allow-write" "$($LOVAX --sandbox --allow-write "$tmp/fw.lov" 2>&1)"
+check ok "env with --allow-env"     "$($LOVAX --sandbox --allow-env "$tmp/env.lov" 2>&1)"
+check ok "all with --allow-all"     "$($LOVAX --sandbox --allow-all "$tmp/net.lov" 2>&1)"
+check ok "default (no flags)"       "$($LOVAX "$tmp/net.lov" 2>&1)"
 
 echo "sandbox: $fails failure(s)"
 [ "$fails" -eq 0 ] && echo "SANDBOX GATE PASSED" || { echo "SANDBOX GATE FAILED"; exit 1; }

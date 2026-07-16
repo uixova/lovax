@@ -25,7 +25,7 @@ memory-unsafe machinery (NaN-boxed values, a GC, and eventually a JIT), so this
 gate is the contract that keeps the language crash-free and exploit-free:
 
 1. **Golden, both dispatch modes** — `./tests/run_tests.sh` bit-for-bit under
-   computed-goto **and** `-DLUME_NO_COMPUTED_GOTO`.
+   computed-goto **and** `-DLOVAX_NO_COMPUTED_GOTO`.
 2. **Sanitizers clean** — ASan + UBSan + LeakSanitizer over every `tests/cases/*.lov`
    and every `examples/stress/*.lov`, in both dispatch modes for anything touching
    the VM core.
@@ -35,7 +35,7 @@ gate is the contract that keeps the language crash-free and exploit-free:
 4. **Perf non-regression** — `./tests/bench.sh`; a step must not silently make the
    language slower.
 5. **A safety fallback exists** for any unsafe optimization — e.g. NaN-boxing ships
-   behind `LUME_SAFE_VALUES`, and CI builds/tests both representations, so a bug in
+   behind `LOVAX_SAFE_VALUES`, and CI builds/tests both representations, so a bug in
    the fast path can never brick the language.
 
 CI (`.github/workflows/ci.yml`) enforces 1–3 on every push and PR.

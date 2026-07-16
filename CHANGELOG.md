@@ -25,7 +25,7 @@ budget. Same language, 67 golden tests bit-for-bit in both dispatch modes.
   int64), and it carries per-platform pointer-bit hazards. Portable and exact.
 
 ### Safety (the whole point)
-- `LUME_GC_STRESS` collects on **every** allocation, turning any missed root into
+- `LOVAX_GC_STRESS` collects on **every** allocation, turning any missed root into
   an immediate use-after-free. Under GC-stress + ASan/UBSan, all 67 golden + the
   fuzz and sandbox gates are **clean**. Heavy allocation stays memory-bounded.
 
@@ -131,7 +131,7 @@ language, same error messages, 60 golden tests bit-for-bit — just fast:
 | `heavy_loop` | 727 ms | **371 ms** | 449 ms |
 
 - **Direct-threaded dispatch** (computed goto) on GCC/Clang, with a tested
-  portable switch fallback (`-DLUME_NO_COMPUTED_GOTO`).
+  portable switch fallback (`-DLOVAX_NO_COMPUTED_GOTO`).
 - **Fused superinstructions** from a compiler peephole: immediate arithmetic
   (`n - 1`, `% 13`, `& 255`), compare-and-branch (`if n < 2` is one op),
   two-local loads, local±immediate.

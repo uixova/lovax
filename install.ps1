@@ -2,11 +2,11 @@
 #
 #   irm https://raw.githubusercontent.com/uixova/lovax/main/install.ps1 | iex
 #
-# Env: $env:LUME_CHANNEL = "stable" | "latest"
+# Env: $env:LOVAX_CHANNEL = "stable" | "latest"
 $ErrorActionPreference = "Stop"
 
 $Repo    = "uixova/lovax"
-$Channel = if ($env:LUME_CHANNEL) { $env:LUME_CHANNEL } else { "stable" }
+$Channel = if ($env:LOVAX_CHANNEL) { $env:LOVAX_CHANNEL } else { "stable" }
 $Dir     = Join-Path $env:LOCALAPPDATA "Lovax\bin"
 
 $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
