@@ -1,6 +1,6 @@
-# turkish_showcase.lm — Lume is Turkish-friendly: full UTF-8 identifiers,
+# turkish_showcase.lov — Lovax is Turkish-friendly: full UTF-8 identifiers,
 # UTF-8-aware len/indexing, and Turkish-aware upper/lower (i → İ, ı → I).
-# Run with:  ./lume examples/turkish_showcase.lm
+# Run with:  ./lovax examples/turkish_showcase.lov
 
 use strings: upper, lower
 

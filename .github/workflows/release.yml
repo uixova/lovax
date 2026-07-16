@@ -2,7 +2,7 @@ name: release
 
 # Build prebuilt binaries for every platform and attach them to the GitHub
 # Release whenever a version tag (v*) is pushed. install.sh / install.ps1 and
-# `lume update` download these assets.
+# `lovax update` download these assets.
 on:
   push:
     tags: ["v*"]
@@ -18,16 +18,16 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: lume-linux-x64
+            asset: lovax-linux-x64
             flags: "-O3 -fno-gcse -fno-crossjumping -static"
           - os: macos-13          # Intel runner
-            asset: lume-macos-x64
+            asset: lovax-macos-x64
             flags: "-O3 -fno-gcse -fno-crossjumping"
           - os: macos-latest      # Apple Silicon runner
-            asset: lume-macos-arm64
+            asset: lovax-macos-arm64
             flags: "-O3 -fno-gcse -fno-crossjumping"
           - os: windows-latest
-            asset: lume-windows-x64.exe
+            asset: lovax-windows-x64.exe
             flags: "-O2"
     runs-on: ${{ matrix.os }}
     steps:
@@ -37,6 +37,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           g++ -std=c++17 ${{ matrix.flags }} -o "${{ matrix.asset }}" src/main.cpp
+          cp "${{ matrix.asset }}" lovax   # the test runner invokes ./lovax
           ./tests/run_tests.sh
           shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
 

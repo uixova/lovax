@@ -1,5 +1,5 @@
-# inventory.lm — a realistic game inventory built with lists, maps, for and dot access.
-# Run with:  ./lume examples/inventory.lm
+# inventory.lov — a realistic game inventory built with lists, maps, for and dot access.
+# Run with:  ./lovax examples/inventory.lov
 
 set items = {
     "sword":   {"value": 150, "weight": 5, "type": "weapon"},

@@ -1,8 +1,8 @@
-# dungeon.lm — a mini game loop in pure Lume (no engine needed):
+# dungeon.lov — a mini game loop in pure Lovax (no engine needed):
 #   1. Weighted loot table   (pick_weighted)
 #   2. Event system          (signal / connect / emit)
 #   3. Save system           (save_data / load_data)
-# Run with:  ./lume examples/dungeon.lm
+# Run with:  ./lovax examples/dungeon.lov
 
 use math: clamp
 use game: pick_weighted, signal, connect, emit
