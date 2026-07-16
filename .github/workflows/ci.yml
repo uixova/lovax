@@ -1,7 +1,8 @@
 name: ci
 
 # Build and run the golden test suite on every push / PR, in BOTH dispatch
-# modes (computed-goto and the portable switch fallback).
+# modes (computed-goto and the portable switch fallback), then the memory-safety
+# and security gates. The test scripts invoke ./lovax, so every build targets it.
 on:
   push:
     branches: [main]
@@ -16,27 +17,53 @@ jobs:
 
       - name: Build + golden (computed-goto)
         run: |
-          g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lume src/main.cpp
+          g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp
           ./tests/run_tests.sh
 
       - name: Build + golden (portable switch)
         run: |
-          g++ -std=c++17 -O2 -DLUME_NO_COMPUTED_GOTO -o lume src/main.cpp
+          g++ -std=c++17 -O2 -DLOVAX_NO_COMPUTED_GOTO -o lovax src/main.cpp
           ./tests/run_tests.sh
 
-      - name: Sanitizer sweep (ASan + UBSan)
+      - name: Sanitizer sweep (ASan + UBSan) — every case must stay clean
         run: |
-          g++ -std=c++17 -g -O1 -fsanitize=address,undefined -o lume src/main.cpp
-          for f in tests/cases/*.lm; do ./lume "$f" >/dev/null 2>&1 || true; done
-          echo "sanitizer sweep completed"
+          g++ -std=c++17 -g -O1 -fsanitize=address,undefined -o lovax src/main.cpp
+          export ASAN_OPTIONS=abort_on_error=0:detect_leaks=1
+          export UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1
+          fail=0
+          for f in tests/cases/*.lov examples/stress/*.lov; do
+            out=$(./lovax "$f" 2>&1) || true
+            if echo "$out" | grep -qE "AddressSanitizer|runtime error:|LeakSanitizer|SUMMARY:"; then
+              echo "SANITIZER FAILURE in $f"; echo "$out" | tail -25; fail=1
+            fi
+          done
+          [ "$fail" = 0 ] && echo "sanitizer sweep clean" || exit 1
+
+      - name: GC root-completeness gate (GC_STRESS + ASan)
+        run: |
+          # Collect on every allocation: a missed GC root frees a live object,
+          # which ASan then reports as a use-after-free. A clean run proves the
+          # root set is complete.
+          g++ -std=c++17 -g -O1 -DLOVAX_GC_STRESS -fsanitize=address,undefined -o lovax src/main.cpp
+          export ASAN_OPTIONS=abort_on_error=0:detect_leaks=1
+          export UBSAN_OPTIONS=halt_on_error=0
+          fail=0
+          for f in tests/cases/*.lov examples/stress/*.lov; do
+            out=$(./lovax "$f" 2>&1) || true
+            if echo "$out" | grep -qE "AddressSanitizer|runtime error:|LeakSanitizer|SUMMARY:"; then
+              echo "GC_STRESS FAILURE in $f"; echo "$out" | tail -25; fail=1
+            fi
+          done
+          [ "$fail" = 0 ] && echo "GC_STRESS clean" || exit 1
 
       - name: Security gate (fuzz — no crashes allowed)
         run: |
           # Run the adversarial/fuzz suite under the ASan build: a memory bug
           # aborts (exit >=128), which the gate treats as a crash → CI fails.
+          g++ -std=c++17 -g -O1 -fsanitize=address,undefined -o lovax src/main.cpp
           ./tests/fuzz.sh
 
       - name: Sandbox gate (capabilities actually deny)
         run: |
-          g++ -std=c++17 -O2 -o lume src/main.cpp
+          g++ -std=c++17 -O2 -o lovax src/main.cpp
           ./tests/sandbox.sh

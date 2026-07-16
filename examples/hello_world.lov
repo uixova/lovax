@@ -1,5 +1,5 @@
-# Your first Lume program
-# Run with:  ./lume examples/hello_world.lm
+# Your first Lovax program
+# Run with:  ./lovax examples/hello_world.lov
 
 set name = "World"
 say "Hello, {name}!"

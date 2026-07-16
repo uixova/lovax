@@ -1,6 +1,11 @@
 # Build outputs
-/lume
-/lume.exe
+/lovax
+/lovax.exe
+lovax-linux-x64
+lovax-macos-x64
+lovax-macos-arm64
+lovax-windows-x64.exe
+*.sha256
 *_asan
 *.o
 build/
@@ -27,9 +32,11 @@ terms.txt
 gemini.txt
 
 # GC/dispatch test binaries + scratch
-lume_gcstress
-lume_sw
-lume_leak
+lovax_gcstress
+lovax_stress
+lovax_sw
+lovax_nocg
+lovax_leak
 err.log
 
 # Analysis & research files (generated, temporary)

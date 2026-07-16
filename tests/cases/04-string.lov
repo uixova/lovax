@@ -3,7 +3,7 @@ say "tekrar" * 3
 say "satır1\nsatır2"
 say "tab\tsonu"
 say "tırnak: \" ve ters: \\"
-set ad = "Lume"
+set ad = "Lovax"
 say "merhaba {ad}!"
 say "işlem: {2 + 3}"
 set m = {"k": "v"}
