@@ -263,7 +263,17 @@ public:
         Heap::get().enabled = false;
 
         Compiler compiler(globalsTable_);
-        auto proto = compiler.compileProgram(program);
+        std::shared_ptr<Proto> proto;
+        try {
+            proto = compiler.compileProgram(program);
+        } catch (const CompileError& ce) {
+            // A bytecode operand limit was exceeded (e.g. >65535 constants). Surface
+            // it as a located compile-time error instead of running miscompiled code.
+            auto err = makeError(ce.message, ce.line);   // allocate while GC is still off
+            err->compileTime = true;
+            Heap::get().enabled = wasEnabled;
+            return err;
+        }
         syncGlobalSlots();
 
         auto closure = makeObj<ClosureObject>(proto);

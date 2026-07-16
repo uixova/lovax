@@ -17,6 +17,17 @@
 
 namespace Lovax {
 
+// Raised when a program exceeds a bytecode operand limit — e.g. more than 65535
+// constants in one function, or a branch too large to encode in a 16-bit offset.
+// Caught in VM::interpret and surfaced as a located error, so an over-large
+// program fails cleanly at compile time instead of silently miscompiling (a
+// truncated operand would otherwise load the wrong constant / jump to the wrong
+// place). line == 0 means "no single source line" (e.g. a whole-unit limit).
+struct CompileError {
+    std::string message;
+    int line;
+};
+
 // Per-compilation-unit global registry (the script and each module get their own).
 struct GlobalTable {
     std::unordered_map<std::string, uint16_t> index;
@@ -25,6 +36,9 @@ struct GlobalTable {
     uint16_t slot(const std::string& name) {
         auto it = index.find(name);
         if (it != index.end()) return it->second;
+        // Global slots are encoded as 16-bit operands (GET_GLOBAL/DEFINE_GLOBAL).
+        if (names.size() > 0xFFFF)
+            throw CompileError{"too many global names in one program (limit 65536)", 0};
         uint16_t s = (uint16_t)names.size();
         index[name] = s;
         names.push_back(name);
@@ -51,6 +65,7 @@ public:
         emitOp(Op::HALT, lastLine_);
         // Script-frame locals (for-loop variables) must be reserved on the stack
         // before the script runs; see VM::interpret.
+        checkLocalCount(script.locals.size());
         script.proto->localCount = (int)script.locals.size();
         return script.proto;
     }
@@ -86,7 +101,30 @@ private:
     void emitU16(uint16_t v, int line) { chunk().emitU16(v, line); }
     void emitU8(uint8_t v, int line) { chunk().emit(v, line); }
 
-    uint16_t addConst(Value v) { return (uint16_t)chunk().addConst(std::move(v)); }
+    // Aborts compilation with a located error. Used at every point where a count
+    // or offset would otherwise be truncated into a fixed-width bytecode operand.
+    [[noreturn]] void fail(const std::string& msg, int line) {
+        throw CompileError{msg, line};
+    }
+
+    // Local slots are 16-bit operands (GET_LOCAL/SET_LOCAL): at most 65536 slots.
+    void checkLocalCount(size_t n) {
+        if (n > 65536)
+            fail("too many local variables in one function (limit 65536)", lastLine_);
+    }
+    // 'say' / CALL / CALL_METHOD encode their argument count in a single byte.
+    void checkArgCount(size_t n, const char* what, int line) {
+        if (n > 255)
+            fail(std::string("too many arguments to ") + what + " (limit 255)", line);
+    }
+
+    uint16_t addConst(Value v) {
+        int idx = chunk().addConst(std::move(v));
+        // Constant indices are 16-bit operands (CONSTANT, GET_GLOBAL names, etc.).
+        if (idx > 0xFFFF)
+            fail("too many constants in one function (limit 65536)", lastLine_);
+        return (uint16_t)idx;
+    }
     uint16_t strConst(const std::string& s) {
         return addConst(Value::object(makeObj<StringObject>(s)));
     }
@@ -104,12 +142,18 @@ private:
     }
     void patchJump(int operandAt) {
         int distance = (int)chunk().code.size() - (operandAt + 2);
+        // Forward jumps use an unsigned 16-bit operand.
+        if (distance > 0xFFFF)
+            fail("too much code to jump over — split this block or function", lastLine_);
         chunk().code[operandAt]     = (uint8_t)(distance >> 8);
         chunk().code[operandAt + 1] = (uint8_t)(distance & 0xFF);
     }
     void emitLoop(int targetOffset, int line) {
         emitOp(Op::LOOP, line);
         int distance = (int)chunk().code.size() + 2 - targetOffset;
+        // Backward jumps use an unsigned 16-bit operand.
+        if (distance > 0xFFFF)
+            fail("loop body too large to encode — split this loop", line);
         emitU16((uint16_t)distance, line);
     }
 
@@ -258,6 +302,7 @@ private:
                 break;
             case NodeType::SAY_STATEMENT: {
                 const auto* s = static_cast<const SayStatement*>(stmt);
+                checkArgCount(s->values.size(), "'say'", s->token.line);
                 for (const auto& v : s->values) compileExpression(v.get());
                 emitOp(Op::SAY, s->token.line);
                 emitU8((uint8_t)s->values.size(), s->token.line);
@@ -728,6 +773,7 @@ private:
 
         std::vector<UpvalDesc> upvals = fnCtx.upvals;
         std::shared_ptr<Proto> proto = fnCtx.proto;
+        checkLocalCount(fnCtx.locals.size());
         proto->localCount = (int)fnCtx.locals.size();
 
         ctx_ = saved;
@@ -777,6 +823,7 @@ private:
             int slot = resolveLocal(ctx_, id->value);
             if (slot == -1) {
                 ctx_->locals.push_back({id->value});
+                checkLocalCount(ctx_->locals.size());
                 slot = (int)ctx_->locals.size() - 1;
                 if ((int)ctx_->locals.size() > ctx_->proto->localCount)
                     ctx_->proto->localCount = (int)ctx_->locals.size();
@@ -1015,12 +1062,14 @@ private:
                     emitU16(strConst(m->property), m->token.line);
                     emitU16(chunk().addIC(), m->token.line);
                     for (const auto& a : c->arguments) compileExpression(a.get());
+                    checkArgCount(c->arguments.size(), "a method call", c->token.line);
                     emitOp(Op::CALL_METHOD, c->token.line);
                     emitU8((uint8_t)c->arguments.size(), c->token.line);
                     break;
                 }
                 compileExpression(c->function.get());
                 for (const auto& a : c->arguments) compileExpression(a.get());
+                checkArgCount(c->arguments.size(), "a call", c->token.line);
                 emitOp(Op::CALL, c->token.line);
                 emitU8((uint8_t)c->arguments.size(), c->token.line);
                 break;
@@ -1111,6 +1160,7 @@ private:
 
         std::vector<UpvalDesc> upvals = fnCtx.upvals;
         std::shared_ptr<Proto> proto = fnCtx.proto;
+        checkLocalCount(fnCtx.locals.size());
         proto->localCount = (int)fnCtx.locals.size();
         proto->variadic = fn->variadic;
 

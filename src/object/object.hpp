@@ -404,13 +404,15 @@ class ErrorObject : public Object {
 public:
     std::string message;
     int srcLine;
+    bool compileTime = false;   // set for errors caught while compiling (operand limits)
     ErrorObject(const std::string& msg, int l = 0)
         : Object(ObjectType::ERROR), message(msg), srcLine(l) {}
     std::string inspect() const override {
+        const char* tag = compileTime ? "[Compile Error]" : "[Runtime Error]";
         if (srcLine > 0) {
-            return "[Runtime Error] line " + std::to_string(srcLine) + ": " + message;
+            return std::string(tag) + " line " + std::to_string(srcLine) + ": " + message;
         }
-        return "[Runtime Error] " + message;
+        return std::string(tag) + " " + message;
     }
 };
 
