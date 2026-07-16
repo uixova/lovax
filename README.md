@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.10.0 — general-purpose + safe: TCP/UDP `net`, version-pinned packages, capability sandbox (faster than CPython everywhere; past Lua 5.4 on string/data) · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v0.11.0 — value representation: tracing GC + 16-byte tagged value, on top of general-purpose + safe (TCP/UDP `net`, version-pinned packages, capability sandbox). Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -323,37 +323,45 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ./benchmarks/run_benchmarks.sh
 ```
 
-## Performance
+## Performance — honest baseline
 
 Lovax compiles to bytecode and runs on a direct-threaded stack VM (computed-goto
 dispatch), with immediate numeric values, in-place stack arithmetic, fused
 superinstructions ([RFC-012](rfcs/012-vm-performance.md)), an in-place string
-package, and a member-access inline cache. Same machine, recommended flags,
-best-of-5 against **CPython 3.14** and **Lua 5.4**:
+package, and a member-access inline cache.
 
-| Benchmark | **Lovax 0.9** | CPython 3.14 | Lua 5.4 |
-|-----------|-------------:|-------------:|--------:|
-| string suite (concat/interp/keys/eq) | **19 ms** | 240 ms | — |
-| member access (1M struct r/w) | **68 ms** | 108 ms | — |
-| `fib(30)` (pure recursion) | 66 ms | 79 ms | **44 ms** |
+Measured honestly — same machine, same workload (outputs verified identical),
+best-of-5, full harness in [benchmarks/cross/](benchmarks/cross/) — Lovax is
+**not yet fast**:
 
-Lovax beats CPython on every workload, and beats Lua 5.4 on string/data work.
-The one benchmark Lua still leads is pure recursion — that gap is the value
-representation (Lovax's value is 32 bytes incl. a refcounted pointer; Lua's is 8).
-Closing it is the v0.10 headline (intrusive refcount → NaN-boxing), scoped as its
-own effort in [RFC-013](rfcs/013-value-representation.md) rather than rushed.
+| Benchmark | Lovax | Lua 5.4 | LuaJIT | CPython 3.14 | Node |
+|-----------|------:|--------:|-------:|-------------:|-----:|
+| `fib(32)` (recursion) | 389 ms | 190 | 37 | 308 | 73 |
+| string-concat | 102 ms | 19 | 28 | 26 | 45 |
+| binary-tree (alloc) | 653 ms | 179 | 97 | 104 | 75 |
+| hashmap | 240 ms | 279 | 100 | 186 | 409 |
+| startup | **5 ms** | 4 | 3 | 24 | 47 |
+
+On compute Lovax currently trails Lua 5.4 (~2×), CPython (~1.3×), and LuaJIT
+(~10×); it is competitive on hashmap/gc and **wins startup** (small static
+binary). Earlier "beats CPython/Lua" claims predated the v0.11 tracing GC and no
+longer hold. **"As fast as C++" is the goal a future JIT must earn, not a claim
+we make today.** The current levers are a compact struct layout (structs are
+still map-backed — heavy) and a game-friendly incremental GC; the compute ceiling
+is a v1.x JIT (LuaJIT-inspired, zero-dependency). See
+[benchmarks/cross/RESULTS.md](benchmarks/cross/RESULTS.md) for the full read.
 
 ## Architecture & Roadmap
 
 `Lexer -> Parser (Pratt) -> AST -> Compiler -> Bytecode -> Stack VM`.
-The language surface is complete and frozen (66 golden tests pin every behavior,
-including error messages). Next milestones:
+The language surface is stable (68 golden tests pin every behavior, including
+error messages). Next milestones:
 
-1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done in v0.8: beats CPython**.
-2. ~~Coroutines, string speed, inline cache, one-line install~~ **done in v0.9** ([RFC-014](rfcs/014-coroutines.md)).
-3. **v0.10**: value representation (intrusive refcount → NaN-boxing) to pass Lua on recursion; game-friendly GC.
-4. Optional type hints; LSP, formatter, VSCode extension.
-5. **v1.0**: engine embedding API, hot-reload, determinism guarantees.
+1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done (v0.8)**.
+2. ~~Coroutines, string speed, inline cache, one-line install~~ **done (v0.9)** ([RFC-014](rfcs/014-coroutines.md)).
+3. ~~Tracing GC + 16-byte value~~ **done (v0.11)** ([RFC-013](rfcs/013-value-representation.md)).
+4. **Now**: compact struct layout (~10× less memory) + incremental GC (≤1 ms pauses); game-first stdlib gaps (set, bytes, random distributions).
+5. **v1.0**: engine embedding API, hot-reload, determinism guarantees. **v1.x**: JIT.
 
 See [lovax.md](lovax.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
 
