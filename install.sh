@@ -5,13 +5,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh
 #
 # Env:
-#   LUME_CHANNEL   stable (default) | latest    which release to fetch
-#   LUME_INSTALL   install dir (default: $HOME/.local/bin)
+#   LOVAX_CHANNEL   stable (default) | latest    which release to fetch
+#   LOVAX_INSTALL   install dir (default: $HOME/.local/bin)
 set -eu
 
 REPO="uixova/lovax"
-CHANNEL="${LUME_CHANNEL:-stable}"
-INSTALL_DIR="${LUME_INSTALL:-$HOME/.local/bin}"
+CHANNEL="${LOVAX_CHANNEL:-stable}"
+INSTALL_DIR="${LOVAX_INSTALL:-$HOME/.local/bin}"
 
 say()  { printf '%s\n' "$*"; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }

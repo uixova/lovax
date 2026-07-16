@@ -6,8 +6,8 @@
 # those mean "handled cleanly". A crash means an exploitable/unsafe hole.
 set -u
 cd "$(dirname "$0")/.."
-LUME=./lovax
-[ -x "$LUME" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
+LOVAX=./lovax
+[ -x "$LOVAX" ] || { echo "build first: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"; exit 2; }
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -16,7 +16,7 @@ runs=0
 
 check() { # name, file
     runs=$((runs+1))
-    "$LUME" "$2" >/dev/null 2>&1
+    "$LOVAX" "$2" >/dev/null 2>&1
     local code=$?
     if [ "$code" -ge 128 ]; then
         echo "CRASH ($code, signal $((code-128))): $1"

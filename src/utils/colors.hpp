@@ -6,12 +6,12 @@
 
 #if defined(_WIN32)
   #include <io.h>
-  #define LUME_ISATTY _isatty
-  #define LUME_FILENO _fileno
+  #define LOVAX_ISATTY _isatty
+  #define LOVAX_FILENO _fileno
 #else
   #include <unistd.h>
-  #define LUME_ISATTY isatty
-  #define LUME_FILENO fileno
+  #define LOVAX_ISATTY isatty
+  #define LOVAX_FILENO fileno
 #endif
 
 namespace Lovax {
@@ -20,12 +20,12 @@ namespace Color {
 // No color codes when output is not a terminal (file, pipe, golden tests).
 // Keeps test output clean while staying colorful in a terminal.
 inline bool stdoutIsTTY() {
-    static bool tty = LUME_ISATTY(LUME_FILENO(stdout)) != 0;
+    static bool tty = LOVAX_ISATTY(LOVAX_FILENO(stdout)) != 0;
     return tty;
 }
 
 inline bool stderrIsTTY() {
-    static bool tty = LUME_ISATTY(LUME_FILENO(stderr)) != 0;
+    static bool tty = LOVAX_ISATTY(LOVAX_FILENO(stderr)) != 0;
     return tty;
 }
 

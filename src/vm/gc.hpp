@@ -19,7 +19,7 @@
 //    worklist (gray set) avoids deep recursion.
 //  - GcRoot is an RAII temporary root for Objects held only in C++ locals across a
 //    re-entry into the VM (the ~8 callback builtins). Push before, auto-pop after.
-//  - LUME_GC_STRESS collects on every allocation: a missed root frees a live object
+//  - LOVAX_GC_STRESS collects on every allocation: a missed root frees a live object
 //    immediately, so ASan turns it into a use-after-free the test suite catches.
 
 namespace Lovax {
@@ -110,7 +110,7 @@ T* gcAlloc(A&&... args) {
     // the next VM safepoint (loop back-edge / call), where the value stack is the
     // complete root set and no unrooted C++ temporary is live.
     if (h.enabled) {
-#ifdef LUME_GC_STRESS
+#ifdef LOVAX_GC_STRESS
         gcPending = true;
 #else
         if (h.bytesAllocated > h.nextGC) gcPending = true;

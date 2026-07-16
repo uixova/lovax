@@ -1,4 +1,4 @@
-# LUME v0.11 ANALYSIS & ROADMAP - BAŞLANGIC KÜTÜPHANESI
+# LOVAX v0.11 ANALYSIS & ROADMAP - BAŞLANGIC KÜTÜPHANESI
 
 **Oluşturma Tarihi**: 16 Temmuz 2024  
 **Analiz Kapsamı**: Python 3.16 vs Lua 5.5.0 vs Lovax 0.10.x  

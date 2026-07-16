@@ -1,4 +1,4 @@
-# LUME LANGUAGE - KAPSAMLI ANALIZ VE YOL HARITASI
+# LOVAX LANGUAGE - KAPSAMLI ANALIZ VE YOL HARITASI
 
 **Yazılış tarihi**: 16 Temmuz 2024  
 **Analiz süresi**: ~15 saat araştırma  
@@ -297,9 +297,9 @@ src/
 
 ---
 
-## 🔄 KARŞILAŞTIRMA: PYTHON vs LUA vs LUME
+## 🔄 KARŞILAŞTIRMA: PYTHON vs LUA vs LOVAX
 
-### Python (vs LUME)
+### Python (vs LOVAX)
 ```
 AVANTAJ:
 ✓ Lovax daha küçük öğrenmesi kolay
@@ -313,7 +313,7 @@ DEZAVANTAJ:
 ✗ Lovax: No concurrency
 ```
 
-### Lua (vs LUME)
+### Lua (vs LOVAX)
 ```
 AVANTAJ:
 ✓ Lovax: Çok daha zengin stdlib

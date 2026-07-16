@@ -53,7 +53,7 @@ Values inside its own scope, keeping error messages identical.
 On GCC/Clang each opcode handler ends with its own indirect jump to the next
 handler (`VM_NEXT_FAST`), giving the branch predictor per-handler history
 instead of one mega-mispredicting switch. Portable fallback: define
-`LUME_NO_COMPUTED_GOTO` to get the plain `switch` (both modes are tested).
+`LOVAX_NO_COMPUTED_GOTO` to get the plain `switch` (both modes are tested).
 
 **The destructor trap:** `goto *label` is invisible to the compiler's scope
 analysis — jumping out of a scope with live non-trivial locals (`Value`,

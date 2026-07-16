@@ -10,13 +10,13 @@
 set -u
 cd "$(dirname "$0")/.."
 
-LUME=./lovax
+LOVAX=./lovax
 CASES=tests/cases
 UPDATE=0
 [ "${1:-}" = "--update" ] && UPDATE=1
 
-if [ ! -x "$LUME" ]; then
-    echo "HATA: '$LUME' bulunamadı. Önce derle: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"
+if [ ! -x "$LOVAX" ]; then
+    echo "HATA: '$LOVAX' bulunamadı. Önce derle: g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp"
     exit 2
 fi
 
@@ -29,7 +29,7 @@ for lm in "$CASES"/*.lov; do
     name=$(basename "$lm" .lov)
     expected_file="$CASES/$name.expected"
 
-    actual=$("$LUME" "$lm" 2>&1)
+    actual=$("$LOVAX" "$lm" 2>&1)
     code=$?
     actual_full="# exit: $code
 $actual"
