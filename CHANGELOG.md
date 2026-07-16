@@ -29,12 +29,28 @@ budget. Same language, 67 golden tests bit-for-bit in both dispatch modes.
   an immediate use-after-free. Under GC-stress + ASan/UBSan, all 67 golden + the
   fuzz and sandbox gates are **clean**. Heavy allocation stays memory-bounded.
 
-### Known follow-ups (v0.11.x)
-- Incremental GC (≤1 ms pauses, write barriers) — deliberately its own gated
-  effort: a missed write barrier reintroduces use-after-free, so it is not rushed.
-  The current stop-the-world collector is correct and sufficient pre-engine.
-- In-place string append is temporarily off (no cheap uniqueness check under a
-  tracing GC); the string suite is still ~5 ms.
+### Post-release hardening (pre-engine audit, 2026-07-17)
+- **Compile-time operand-overflow guards (correctness fix).** An audit found a
+  silent miscompile: fixed-width bytecode operands (constant index / jump distance
+  / global & local slot u16, argument count u8) were written from counts and
+  offsets with no bound check, so a program past a limit truncated the operand and
+  ran wrong code with no error (proven: >65535 constants loaded the wrong one).
+  Every truncation site now raises a located `[Compile Error]` (exit 70) instead.
+  New golden `e22` locks the argument-count limit.
+- **Rename completion.** The Lume→Lovax rename had left CI (built `lume`, stale
+  `LUME_*` macro, `*.lm` globs → CI fully broken), the release workflow (`lume-*`
+  asset names), `.gitignore` (tracked the `lovax` binary), and the examples'
+  run instructions inconsistent. All fixed; CI hardened (ASan sweep now fails on
+  any sanitizer report; a GC_STRESS root-completeness job was added).
+- **Honest benchmarks.** A cross-language harness (`benchmarks/cross/`, Lovax vs
+  Lua 5.4/5.5, LuaJIT, CPython, Node; outputs verified identical) replaces the
+  optimistic single-language claims. Current reality: Lovax trails on compute
+  (~2× Lua, ~1.3× CPython, ~10× LuaJIT), wins startup, and is memory-heavy
+  (binary-tree 270 MB vs Lua 24 MB — struct instances are map-backed). README and
+  ROADMAP corrected to match. Next levers: compact struct layout, incremental GC.
+- **Predictive audit result:** 3648 wrong-type/arity builtin calls, GC_STRESS +
+  ASan over all golden, fuzz, and sandbox — **0 crashes**. Type-guard discipline
+  is complete; the 16-byte value avoids NaN-box platform hazards.
 
 ## v0.10.0 — general-purpose + safe: net, packages, sandbox
 
