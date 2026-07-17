@@ -43,6 +43,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                 return makeObj<IntegerObject>((long long)static_cast<StructInstanceObject*>(a.get())->slots.size());
             case ObjectType::BYTES:
                 return makeObj<IntegerObject>((long long)static_cast<BytesObject*>(a.get())->data.size());
+            case ObjectType::DEQUE:
+                return makeObj<IntegerObject>((long long)static_cast<DequeObject*>(a.get())->items.size());
             case ObjectType::RANGE:
                 return makeObj<IntegerObject>(static_cast<RangeObject*>(a.get())->length());
             default:

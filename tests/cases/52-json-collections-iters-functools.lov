@@ -1,0 +1,48 @@
+use json
+set v = json.parse("\{\"ad\": \"Kai\", \"hp\": 100, \"env\": [1, 2.5, true, null]\}")
+say v["ad"], v["hp"], v["env"]
+say json.text({"x": 1, "l": [1, 2]})
+say json.parse(json.text([1, "iki", 3.0]))
+try:
+    json.parse("\{broken")
+catch e:
+    say "err: {e}"
+
+use collections
+say collections.counter(["a", "b", "a", "a"])
+set m = {}
+collections.setdefault(m, "k", [])
+push(m["k"], 1)
+say m
+set d = collections.deque([2, 3])
+collections.push_front(d, 1)
+collections.push_back(d, 4)
+say d, len(d)
+say collections.pop_front(d), collections.pop_back(d)
+say collections.to_list(d)
+
+use iters
+say iters.chain([1, 2], (3,), [4])
+say iters.product([1, 2], ["a", "b"])
+say iters.combinations([1, 2, 3], 2)
+say len(iters.permutations([1, 2, 3]))
+say iters.accumulate([1, 2, 3, 4])
+say iters.accumulate([1, 2, 3], fn(a, b) -> a * b)
+say iters.takewhile([1, 2, 9, 1], fn(x) -> x < 5)
+say iters.dropwhile([1, 2, 9, 1], fn(x) -> x < 5)
+say iters.groupby([1, 1, 2, 2, 2, 1], fn(x) -> x)
+say iters.repeat("x", 3)
+say iters.zip_longest([1, 2, 3], ["a"], null)
+
+use functools
+fn topla(a, b, c):
+    return a + b + c
+set t5 = functools.partial(topla, 5)
+say t5(10, 20)
+set cagri = {"n": 0}
+fn agir(x):
+    cagri["n"] += 1
+    return x * x
+set hizli = functools.memoize(agir)
+say hizli(9), hizli(9), hizli(9)
+say cagri["n"]

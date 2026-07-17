@@ -25,6 +25,10 @@
 #include "../modules/random.hpp"
 #include "../modules/datetime.hpp"
 #include "../modules/regex.hpp"
+#include "../modules/json.hpp"
+#include "../modules/collections.hpp"
+#include "../modules/iters.hpp"
+#include "../modules/functools.hpp"
 
 namespace Lovax {
 namespace StdLib {
@@ -42,11 +46,15 @@ inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "random") return makeRandomModule();
     if (name == "datetime") return makeDatetimeModule();
     if (name == "regex") return makeRegexModule();
+    if (name == "json") return makeJsonModule();
+    if (name == "collections") return makeCollectionsModule();
+    if (name == "iters") return makeItersModule();
+    if (name == "functools") return makeFunctoolsModule();
     return nullptr;
 }
 
 inline std::string builtinModuleList() {
-    return "math, game, strings, file, os, time, canvas, net, cmath, random, datetime, regex";
+    return "math, game, strings, file, os, time, canvas, net, cmath, random, datetime, regex, json, collections, iters, functools";
 }
 
 } // namespace StdLib

@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <sstream>
 #include <chrono>
+#include <deque>
 
 namespace Lovax {
 
@@ -24,6 +25,7 @@ enum class ObjectType {
     SET,
     BYTES,
     COMPLEX,
+    DEQUE,
     RANGE,
     FUNCTION,
     BUILTIN,
@@ -432,6 +434,24 @@ public:
     }
 };
 
+// Double-ended queue -> collections.deque(): O(1) push/pop at both ends
+// (a list pays O(n) for front operations). Module functions operate on it.
+class DequeObject : public Object {
+public:
+    std::deque<Ref<Object>> items;
+    DequeObject() : Object(ObjectType::DEQUE) {}
+    void gcMark() override { for (auto& e : items) gcMarkObject(e.get()); }
+    size_t gcBytes() const override { return sizeof(*this) + items.size() * 16; }
+    std::string inspect() const override {
+        std::string out = "deque[";
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (i > 0) out += ", ";
+            out += inspectQuoted(items[i]);
+        }
+        return out + "]";
+    }
+};
+
 // Shared per struct TYPE (RFC-017): field->slot mapping and the method table,
 // built once when the declaration executes. Instances point here instead of
 // carrying keys, hash indexes and method entries per object.
@@ -599,6 +619,7 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::SET:          return "set";
         case ObjectType::BYTES:        return "bytes";
         case ObjectType::COMPLEX:      return "complex";
+        case ObjectType::DEQUE:        return "deque";
         case ObjectType::RANGE:        return "range";
         case ObjectType::FUNCTION:     return "fn";
         case ObjectType::BUILTIN:      return "builtin";
