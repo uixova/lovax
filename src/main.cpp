@@ -130,6 +130,7 @@ int main(int argc, char* argv[]) {
     // permission flag, everything is allowed (your own script, you trust it).
     int scriptIdx = 1;
     bool anyPerm = false;
+    bool memStats = false;
     {
         auto& p = Lovax::StdLib::perms();
         // First pass: does any permission flag appear before the script?
@@ -138,6 +139,7 @@ int main(int argc, char* argv[]) {
             if (f == "--sandbox" || f == "--allow-all" || f == "--allow-net" ||
                 f == "--allow-read" || f == "--allow-write" || f == "--allow-env" ||
                 f == "--allow-run") { anyPerm = true; }
+            else if (f == "--mem-stats") { /* not a permission flag; keep scanning */ }
             else break;
         }
         if (anyPerm) { p.net = p.read = p.write = p.env = p.run = false; }
@@ -150,6 +152,7 @@ int main(int argc, char* argv[]) {
             else if (f == "--allow-write") p.write = true;
             else if (f == "--allow-env")   p.env = true;
             else if (f == "--allow-run")   p.run = true;
+            else if (f == "--mem-stats")   memStats = true;
             else break; // first non-flag argument is the script path
         }
     }
@@ -197,6 +200,16 @@ int main(int argc, char* argv[]) {
     // Step 3: compile to bytecode and run on the VM.
     Lovax::VM vm;
     auto result = vm.interpret(program.get());
+
+    // Allocation/GC report (foundation for the incremental-GC pause budget).
+    if (memStats) {
+        auto& h = Lovax::Heap::get();
+        std::fprintf(stderr,
+            "[mem] allocations: %zu | collections: %zu | peak: %.1f MB | "
+            "gc total: %.2f ms | max pause: %.3f ms\n",
+            h.allocCount, h.collections, h.peakBytes / (1024.0 * 1024.0),
+            h.gcNanos / 1e6, h.maxPauseNanos / 1e6);
+    }
 
     if (Lovax::isError(result)) {
         std::cerr << Lovax::Color::errRed() << result->inspect()

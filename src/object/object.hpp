@@ -7,6 +7,7 @@
 #include <functional>
 #include <unordered_map>
 #include <sstream>
+#include <chrono>
 
 namespace Lovax {
 
@@ -50,6 +51,11 @@ public:
     // Marks this object's outgoing references (children). Leaf objects (numbers,
     // strings, bools) have none. Container/closure types override this.
     virtual void gcMark() {}
+
+    // Approximate heap footprint (header + owned payload). Drives the GC
+    // threshold, so containers/strings override it — order-of-magnitude
+    // accuracy is enough, but it must scale with the real payload.
+    virtual size_t gcBytes() const { return 48; }
 };
 
 } // namespace Lovax — reopened below; gc.hpp needs Object complete
@@ -69,6 +75,7 @@ inline void gcCollect() {
     Heap& h = Heap::get();
     if (h.collecting) return;
     h.collecting = true;
+    auto t0 = std::chrono::steady_clock::now();
 
     // 1. Mark roots: permanent (singletons/modules), the runtime's VM roots, and
     //    any C++-held temporaries.
@@ -83,12 +90,17 @@ inline void gcCollect() {
         o->gcMark();
     }
 
-    // 3. Sweep: free the unmarked, clear the mark bit on survivors.
+    // 3. Sweep: free the unmarked, clear the mark bit on survivors — and
+    //    recompute live bytes while we're walking anyway, so the threshold
+    //    tracks the REAL live set (payload growth included) instead of a
+    //    forever-growing total of everything ever allocated.
+    size_t live = 0;
     Object** link = &h.first;
     while (*link) {
         Object* o = *link;
         if (o->gcMarked) {
             o->gcMarked = false;
+            live += o->gcBytes();
             link = &o->gcNext;
         } else {
             *link = o->gcNext;
@@ -96,8 +108,15 @@ inline void gcCollect() {
         }
     }
 
-    h.nextGC = h.bytesAllocated * 2;
-    if (h.nextGC < 1024 * 1024) h.nextGC = 1024 * 1024;
+    h.bytesAllocated = live;
+    h.nextGC = live + live / 2;   // grow 1.5×: tighter peak, measured no time cost
+    if (h.nextGC < 4 * 1024 * 1024) h.nextGC = 4 * 1024 * 1024;
+
+    auto dt = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now() - t0).count();
+    h.collections++;
+    h.gcNanos += dt;
+    if (dt > h.maxPauseNanos) h.maxPauseNanos = dt;
     h.collecting = false;
 }
 
@@ -139,6 +158,7 @@ public:
     mutable long long lenCache = -1;
     StringObject(const std::string& val) : Object(ObjectType::STRING), value(val) {}
     std::string inspect() const override { return value; } // Prints the raw text on the console
+    size_t gcBytes() const override { return sizeof(*this) + value.capacity(); }
 };
 
 class BooleanObject : public Object {
@@ -176,6 +196,9 @@ public:
     ListObject() : Object(ObjectType::LIST) {}
     std::vector<Ref<Object>> elements;
     void gcMark() override { for (auto& e : elements) gcMarkObject(e.get()); }
+    size_t gcBytes() const override {
+        return sizeof(*this) + elements.capacity() * sizeof(Ref<Object>);
+    }
     std::string inspect() const override {
         std::string out = "[";
         for (size_t i = 0; i < elements.size(); ++i) {
@@ -203,6 +226,12 @@ public:
 
     void gcMark() override {
         for (auto& e : entries) { gcMarkObject(e.first.get()); gcMarkObject(e.second.get()); }
+    }
+    size_t gcBytes() const override {
+        // entries storage + rough hash-table node cost per index entry
+        return sizeof(*this) +
+               entries.capacity() * sizeof(entries[0]) +
+               strIndex.size() * 64 + intIndex.size() * 48;
     }
 
     void copyIndexFrom(const MapObject& src) {
@@ -361,6 +390,9 @@ public:
     void gcMark() override {
         gcMarkObject(shape);
         for (auto& s : slots) gcMarkObject(s.get());
+    }
+    size_t gcBytes() const override {
+        return sizeof(*this) + slots.capacity() * sizeof(Ref<Object>);
     }
     std::string inspect() const override {
         std::string out = "{__type__: " + shape->name;
