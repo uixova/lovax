@@ -2,6 +2,9 @@
 #define LOVAX_MODULE_OS_HPP
 
 #include "common.hpp"
+#ifndef _WIN32
+  #include <sys/wait.h>
+#endif
 
 namespace Lovax {
 namespace StdLib {
@@ -120,6 +123,40 @@ inline ObjPtr makeOsModule() {
         const char* h = std::getenv("HOME");
         if (!h) h = std::getenv("USERPROFILE");
         return h ? (ObjPtr)makeObj<StringObject>(h) : NULL_OBJ_;
+    });
+
+    // run(cmd): executes a shell command, captures stdout -> {code, out}.
+    // Gated by --allow-run (the perms.run capability, until now unused).
+    def("run", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LOVAX_GATE(perms().run, "process execution", "--allow-run");
+        if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
+            return makeError("os.run(cmd) expects a string", line);
+        }
+        const std::string& cmd = static_cast<StringObject*>(args[0].get())->value;
+#ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+        FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+        if (!pipe) return makeError("os.run() could not start: " + cmd, line);
+        std::string out;
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), pipe)) > 0) {
+            out.append(buf, n);
+            if (out.size() > 16 * 1024 * 1024) break;   // 16 MB output cap
+        }
+#ifdef _WIN32
+        int rc = _pclose(pipe);
+#else
+        int rc = pclose(pipe);
+        if (rc != -1) rc = WEXITSTATUS(rc);
+#endif
+        auto res = makeObj<MapObject>();
+        GcRoot _gr(res.get());
+        res->set(makeObj<StringObject>("code"), makeObj<IntegerObject>(rc));
+        res->set(makeObj<StringObject>("out"), makeObj<StringObject>(out));
+        return res;
     });
 
     mod->frozen = true;

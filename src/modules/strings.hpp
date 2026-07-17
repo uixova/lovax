@@ -337,6 +337,66 @@ inline ObjPtr makeTextModule() {
         return makeObj<StringObject>(out);
     });
 
+    // partition(text, sep) -> (before, sep, after); sep absent -> (text, "", "")
+    def("partition", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || args[0]->type() != ObjectType::STRING ||
+            args[1]->type() != ObjectType::STRING) {
+            return makeError("partition(text, sep) expects two strings", line);
+        }
+        const std::string& t = static_cast<StringObject*>(args[0].get())->value;
+        const std::string& sep = static_cast<StringObject*>(args[1].get())->value;
+        auto out = makeObj<TupleObject>();
+        GcRoot _gr(out.get());
+        size_t pos = sep.empty() ? std::string::npos : t.find(sep);
+        if (pos == std::string::npos) {
+            out->elements.push_back(makeObj<StringObject>(t));
+            out->elements.push_back(makeObj<StringObject>(""));
+            out->elements.push_back(makeObj<StringObject>(""));
+        } else {
+            out->elements.push_back(makeObj<StringObject>(t.substr(0, pos)));
+            out->elements.push_back(makeObj<StringObject>(sep));
+            out->elements.push_back(makeObj<StringObject>(t.substr(pos + sep.size())));
+        }
+        return out;
+    });
+
+    // fmt(x, spec): ".2f" fixed decimals | "05d" zero-padded int | "x" hex
+    def("fmt", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || !isNumeric(args[0]) || args[1]->type() != ObjectType::STRING) {
+            return makeError("fmt(x, spec) expects a number and a spec string (\".2f\", \"05d\", \"x\")", line);
+        }
+        const std::string& spec = static_cast<StringObject*>(args[1].get())->value;
+        char buf[64];
+        if (spec.size() >= 2 && spec[0] == '.' && spec.back() == 'f') {
+            int prec = 0;
+            for (size_t k = 1; k + 1 < spec.size(); ++k) {
+                if (spec[k] < '0' || spec[k] > '9') return makeError("fmt() bad spec: " + spec, line);
+                prec = prec * 10 + (spec[k] - '0');
+            }
+            if (prec > 30) return makeError("fmt() precision too large", line);
+            std::snprintf(buf, sizeof(buf), "%.*f", prec, asDouble(args[0]));
+            return makeObj<StringObject>(buf);
+        }
+        if (spec.size() >= 2 && spec[0] == '0' && spec.back() == 'd' &&
+            args[0]->type() == ObjectType::INTEGER) {
+            int width = 0;
+            for (size_t k = 1; k + 1 < spec.size(); ++k) {
+                if (spec[k] < '0' || spec[k] > '9') return makeError("fmt() bad spec: " + spec, line);
+                width = width * 10 + (spec[k] - '0');
+            }
+            if (width > 60) return makeError("fmt() width too large", line);
+            std::snprintf(buf, sizeof(buf), "%0*lld", width,
+                          static_cast<IntegerObject*>(args[0].get())->value);
+            return makeObj<StringObject>(buf);
+        }
+        if (spec == "x" && args[0]->type() == ObjectType::INTEGER) {
+            std::snprintf(buf, sizeof(buf), "%llx",
+                          (unsigned long long)static_cast<IntegerObject*>(args[0].get())->value);
+            return makeObj<StringObject>(buf);
+        }
+        return makeError("fmt() bad spec: " + spec + " (\".Nf\", \"0Nd\", \"x\")", line);
+    });
+
     mod->frozen = true;
     mod->moduleName = "strings";
     gcPermanentRoot(mod.get());

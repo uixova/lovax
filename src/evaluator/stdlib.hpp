@@ -29,6 +29,7 @@
 #include "../modules/collections.hpp"
 #include "../modules/iters.hpp"
 #include "../modules/functools.hpp"
+#include "../modules/log.hpp"
 
 namespace Lovax {
 namespace StdLib {
@@ -50,11 +51,12 @@ inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "collections") return makeCollectionsModule();
     if (name == "iters") return makeItersModule();
     if (name == "functools") return makeFunctoolsModule();
+    if (name == "log") return makeLogModule();
     return nullptr;
 }
 
 inline std::string builtinModuleList() {
-    return "math, game, strings, file, os, time, canvas, net, cmath, random, datetime, regex, json, collections, iters, functools";
+    return "math, game, strings, file, os, time, canvas, net, cmath, random, datetime, regex, json, collections, iters, functools, log";
 }
 
 } // namespace StdLib

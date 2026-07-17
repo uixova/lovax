@@ -33,17 +33,21 @@ file.write_text(\"$tmp/r.txt\", \"x\")
 say file.read_text(\"$tmp/r.txt\")"
 mk env 'use os
 say os.env("HOME")'
+mk run 'use os
+say os.run("echo x")'
 
 echo "sandbox denials:"
 check deny "net (sandboxed)"        "$($LOVAX --sandbox "$tmp/net.lov" 2>&1)"
 check deny "file write (sandboxed)" "$($LOVAX --sandbox "$tmp/fw.lov" 2>&1)"
 check deny "env (sandboxed)"        "$($LOVAX --sandbox "$tmp/env.lov" 2>&1)"
 check deny "write when only --allow-read" "$($LOVAX --allow-read "$tmp/fw.lov" 2>&1)"
+check deny "run (sandboxed)"        "$($LOVAX --sandbox "$tmp/run.lov" 2>&1)"
 
 echo "grants:"
 check ok "net with --allow-net"     "$($LOVAX --sandbox --allow-net "$tmp/net.lov" 2>&1)"
 check ok "write with --allow-write" "$($LOVAX --sandbox --allow-write "$tmp/fw.lov" 2>&1)"
 check ok "env with --allow-env"     "$($LOVAX --sandbox --allow-env "$tmp/env.lov" 2>&1)"
+check ok "run with --allow-run"     "$($LOVAX --sandbox --allow-run "$tmp/run.lov" 2>&1)"
 check ok "all with --allow-all"     "$($LOVAX --sandbox --allow-all "$tmp/net.lov" 2>&1)"
 check ok "default (no flags)"       "$($LOVAX "$tmp/net.lov" 2>&1)"
 
