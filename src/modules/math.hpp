@@ -246,6 +246,57 @@ inline ObjPtr makeMathModule() {
         return makeObj<IntegerObject>(r);
     });
 
+    // Constants (Python-parity: math.pi, tau, e, inf, nan)
+    mod->set(strKey("pi"),  makeObj<FloatObject>(3.14159265358979323846));
+    mod->set(strKey("tau"), makeObj<FloatObject>(6.28318530717958647692));
+    mod->set(strKey("e"),   makeObj<FloatObject>(2.71828182845904523536));
+    mod->set(strKey("inf"), makeObj<FloatObject>(std::numeric_limits<double>::infinity()));
+    mod->set(strKey("nan"), makeObj<FloatObject>(std::numeric_limits<double>::quiet_NaN()));
+
+    // log10 / log2 / hypot / copysign / isfinite / prod
+    def("log10", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || !isNumeric(args[0])) return makeError("log10(x) expects a number", line);
+        double v = asDouble(args[0]);
+        if (v <= 0) return makeError("log10() expects x > 0", line);
+        return makeObj<FloatObject>(std::log10(v));
+    });
+    def("log2", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || !isNumeric(args[0])) return makeError("log2(x) expects a number", line);
+        double v = asDouble(args[0]);
+        if (v <= 0) return makeError("log2() expects x > 0", line);
+        return makeObj<FloatObject>(std::log2(v));
+    });
+    def("hypot", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || !isNumeric(args[0]) || !isNumeric(args[1]))
+            return makeError("hypot(a, b) expects two numbers", line);
+        return makeObj<FloatObject>(std::hypot(asDouble(args[0]), asDouble(args[1])));
+    });
+    def("copysign", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || !isNumeric(args[0]) || !isNumeric(args[1]))
+            return makeError("copysign(a, b) expects two numbers", line);
+        return makeObj<FloatObject>(std::copysign(asDouble(args[0]), asDouble(args[1])));
+    });
+    def("is_finite", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || !isNumeric(args[0])) return makeError("is_finite(x) expects a number", line);
+        return boolObj(std::isfinite(asDouble(args[0])));
+    });
+    def("prod", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 ||
+            (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE))
+            return makeError("prod(list) expects a list", line);
+        bool allInt = true;
+        double total = 1;
+        long long totalInt = 1;
+        for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+            if (!isNumeric(e)) return makeError("prod() only works with numbers", line);
+            if (e->type() == ObjectType::FLOAT) allInt = false;
+            total *= asDouble(e);
+            if (e->type() == ObjectType::INTEGER) totalInt *= static_cast<IntegerObject*>(e.get())->value;
+        }
+        if (allInt) return makeObj<IntegerObject>(totalInt);
+        return makeObj<FloatObject>(total);
+    });
+
     mod->frozen = true;
     mod->moduleName = "math";
     gcPermanentRoot(mod.get());

@@ -1,0 +1,26 @@
+use math
+say math.pi > 3.14 and math.pi < 3.15
+say math.log10(1000)
+say math.log2(8)
+say math.hypot(3, 4)
+say math.prod([2, 3, 4])
+say math.is_finite(math.inf)
+use strings
+say strings.partition("anahtar=deger", "=")
+set b, s2, a = strings.partition("x:y", ":")
+say b, a
+say strings.fmt(3.14159, ".2f")
+say strings.fmt(7, "04d")
+say strings.fmt(255, "x")
+use file
+file.write_text("tests/tmp/g1.txt", "a")
+file.write_text("tests/tmp/g2.txt", "b")
+set gs = file.glob("tests/tmp/g?.txt")
+say len(gs) >= 2
+say len(file.walk("src/modules")) > 10
+use os
+set r = os.run("echo merhaba")
+say r["code"], r["out"]
+use log
+log.set_level("warn")
+log.info("gizli mesaj bastirilir")

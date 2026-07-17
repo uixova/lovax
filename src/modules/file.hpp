@@ -387,6 +387,75 @@ inline ObjPtr makeFileModule() {
         return boolObj(!ec);
     });
 
+    // glob(pattern): files matching a single-directory wildcard ("saves/*.lov").
+    // '*' spans any run, '?' one character — our own matcher, no libc fnmatch.
+    def("glob", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LOVAX_GATE(perms().read, "directory listing", "--allow-read");
+        if (args.size() != 1 || args[0]->type() != ObjectType::STRING) {
+            return makeError("file.glob(pattern) expects a string", line);
+        }
+        const std::string& pattern = static_cast<StringObject*>(args[0].get())->value;
+        auto slash = pattern.find_last_of("/\\");
+        std::string dir = slash == std::string::npos ? "." : pattern.substr(0, slash);
+        std::string pat = slash == std::string::npos ? pattern : pattern.substr(slash + 1);
+        std::function<bool(const char*, const char*)> wild =
+            [&wild](const char* p2, const char* t) -> bool {
+                for (; *p2; ++p2, ++t) {
+                    if (*p2 == '*') {
+                        while (*p2 == '*') ++p2;
+                        if (!*p2) return true;
+                        for (; *t; ++t) if (wild(p2, t)) return true;
+                        return false;
+                    }
+                    if (!*t || (*p2 != '?' && *p2 != *t)) return false;
+                }
+                return !*t;
+            };
+        auto out = makeObj<ListObject>();
+        GcRoot _gr(out.get());
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            std::string name = entry.path().filename().string();
+            if (wild(pat.c_str(), name.c_str())) {
+                out->elements.push_back(makeObj<StringObject>(entry.path().string()));
+            }
+        }
+        if (ec) return makeError("file.glob() cannot read directory: " + dir, line);
+        std::sort(out->elements.begin(), out->elements.end(),
+                  [](const ObjPtr& a, const ObjPtr& b) {
+                      return static_cast<StringObject*>(a.get())->value <
+                             static_cast<StringObject*>(b.get())->value;
+                  });
+        return out;
+    });
+
+    // walk(dir): every file under dir, recursively (sorted, files only)
+    def("walk", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
+        LOVAX_GATE(perms().read, "directory listing", "--allow-read");
+        if (args.size() != 1) return argCountError("walk", "1", args.size(), line);
+        std::string dir;
+        if (auto err = pathArg(args, "walk", line, dir)) return err;
+        auto out = makeObj<ListObject>();
+        GcRoot _gr(out.get());
+        std::error_code ec;
+        size_t count = 0;
+        for (auto it = std::filesystem::recursive_directory_iterator(
+                 dir, std::filesystem::directory_options::skip_permission_denied, ec);
+             it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec) break;
+            if (it->is_regular_file(ec)) {
+                out->elements.push_back(makeObj<StringObject>(it->path().string()));
+                if (++count > 100000) return makeError("file.walk() too many files (limit 100k)", line);
+            }
+        }
+        std::sort(out->elements.begin(), out->elements.end(),
+                  [](const ObjPtr& a, const ObjPtr& b) {
+                      return static_cast<StringObject*>(a.get())->value <
+                             static_cast<StringObject*>(b.get())->value;
+                  });
+        return out;
+    });
+
     mod->frozen = true;
     mod->moduleName = "file";
     gcPermanentRoot(mod.get());
