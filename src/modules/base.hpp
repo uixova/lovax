@@ -152,6 +152,20 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                          typeName(args[0]->type()) + "", line);
     });
 
+    // --- error(kind, msg): builds the {kind, msg} map the throw/catch kind
+    //     convention uses: throw error("io", "disk full") ... catch e: e.kind ---
+    def("error", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || args[0]->type() != ObjectType::STRING ||
+            args[1]->type() != ObjectType::STRING) {
+            return makeError("error(kind, msg) expects two strings", line);
+        }
+        auto out = makeObj<MapObject>();
+        GcRoot _gre(out.get());
+        out->set(makeObj<StringObject>("kind"), args[0]);
+        out->set(makeObj<StringObject>("msg"), args[1]);
+        return out;
+    });
+
     // --- kind(x): returns the type name: "int", "float", "string", "list"... ---
     def("kind", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("kind", "1", args.size(), line);

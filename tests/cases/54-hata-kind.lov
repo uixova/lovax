@@ -1,0 +1,33 @@
+# structured errors (RFC-022)
+fn oku(yol):
+    if yol == "":
+        throw error("io", "empty path")
+    if yol == "yok.txt":
+        throw error("not_found", "file missing: " + yol)
+    return "içerik"
+fn dene(yol):
+    try:
+        say oku(yol)
+    catch e:
+        if kind(e) == "map":
+            say "yapili hata -> kind: {e.kind}, msg: {e.msg}"
+        else:
+            say "duz hata -> {e}"
+dene("veri.txt")
+dene("")
+dene("yok.txt")
+# string throw hala string baglar (geriye uyum)
+try:
+    throw "eski usul"
+catch s:
+    say kind(s), s
+# runtime hatasi hala string
+try:
+    set x = 1 / 0
+catch r:
+    say kind(r), r
+# tuple/list de tasinir
+try:
+    throw (404, "bulunamadi")
+catch t:
+    say kind(t), t[0], t[1]

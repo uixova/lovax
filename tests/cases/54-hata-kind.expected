@@ -1,0 +1,7 @@
+# exit: 0
+içerik
+yapili hata -> kind: io, msg: empty path
+yapili hata -> kind: not_found, msg: file missing: yok.txt
+string eski usul
+string division by zero
+tuple 404 bulunamadi

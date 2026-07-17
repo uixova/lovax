@@ -752,9 +752,14 @@ private:
                 frames_.pop_back();
             }
             sp_ = stackMem_.get() + h.stackTop;
-            std::string msg = isError(err) ? static_cast<ErrorObject*>(err.get())->message
-                                           : valueInspect(fromObject(err));
-            push(Value::object(makeObj<StringObject>(msg)));
+            if (isError(err) && static_cast<ErrorObject*>(err.get())->payload != nullptr) {
+                // Structured throw: the handler receives the original value.
+                push(fromObject(static_cast<ErrorObject*>(err.get())->payload));
+            } else {
+                std::string msg = isError(err) ? static_cast<ErrorObject*>(err.get())->message
+                                               : valueInspect(fromObject(err));
+                push(Value::object(makeObj<StringObject>(msg)));
+            }
             frame = &frames_.back();
             ip = h.catchIp;
             consts = frame->consts;
@@ -1760,7 +1765,15 @@ private:
                 VM_CASE(THROW_) {
                     Value v = pop();
                     std::string msg = valueInspect(v);
-                    VM_THROW(makeError(msg, currentLine()));
+                    auto err = makeError(msg, currentLine());
+                    // Structured throw (RFC-022): maps/structs/lists/tuples are
+                    // carried intact so catch can inspect e.kind etc.
+                    if (v.kind == VKind::OBJ &&
+                        (v.isObjType(ObjectType::MAP) || v.isObjType(ObjectType::STRUCT) ||
+                         v.isObjType(ObjectType::LIST) || v.isObjType(ObjectType::TUPLE))) {
+                        err->payload = toObject(v);
+                    }
+                    VM_THROW(err);
                 }
                 VM_CASE(COALESCE) {
                     uint16_t off = readU16();

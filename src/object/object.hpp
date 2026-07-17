@@ -586,8 +586,13 @@ public:
     std::string message;
     int srcLine;
     bool compileTime = false;   // set for errors caught while compiling (operand limits)
+    // RFC-022: when a STRUCTURED value is thrown (throw {"kind": ..}), the
+    // original value rides along and catch binds IT, not the stringified
+    // message — e.kind / e["kind"] then work naturally in the handler.
+    Ref<Object> payload;
     ErrorObject(const std::string& msg, int l = 0)
         : Object(ObjectType::ERROR), message(msg), srcLine(l) {}
+    void gcMark() override { gcMarkObject(payload.get()); }
     std::string inspect() const override {
         const char* tag = compileTime ? "[Compile Error]" : "[Runtime Error]";
         if (srcLine > 0) {

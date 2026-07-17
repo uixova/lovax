@@ -1,0 +1,6 @@
+# exit: 0
+tests: 4 passed, 3 failed
+  FAIL line 8: bilerek yanlis — got 2, expected 3
+  FAIL line 9: bilerek false — got false
+  FAIL line 10: hata yok ki — no error was raised
+fail sayisi: 3

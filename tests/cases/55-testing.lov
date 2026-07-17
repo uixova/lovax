@@ -1,0 +1,12 @@
+use testing
+fn topla(a, b):
+    return a + b
+testing.assert_eq(topla(2, 2), 4, "toplama")
+testing.assert_eq((1, 2), (1, 2), "tuple esitligi")
+testing.assert_true(3 > 1)
+testing.assert_error(fn() -> 1 / 0, "sifira bolme")
+testing.assert_eq(topla(1, 1), 3, "bilerek yanlis")
+testing.assert_true(false, "bilerek false")
+testing.assert_error(fn() -> 42, "hata yok ki")
+set kalan = testing.summary()
+say "fail sayisi: {kalan}"

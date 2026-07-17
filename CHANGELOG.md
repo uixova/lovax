@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.15.0 — robustness: structured errors, testing, quality gates
+
+- **Structured errors (RFC-022).** `throw` carries maps/structs/lists/tuples
+  intact — `catch e` binds the ORIGINAL value, so `e.kind` / `e.msg` work in
+  the handler. New `error(kind, msg)` builtin builds the convention's map.
+  Strings and builtin runtime errors still bind the message string: all
+  pre-existing golden outputs stayed byte-identical.
+- **testing module.** `assert_eq / assert_true / assert_error` + `summary()`
+  (prints the report, returns the fail count — exit-code friendly). Lovax
+  code can now test Lovax code.
+- **Quality backlog closed** (tracked since v0.10):
+  - C++ unit tests (`tests/unit.sh`): value size, cross-type equality, map
+    typed indexes, payload-aware gcBytes, civil-date round-trips incl. leap
+    days and pre-epoch, the regex compiler's error paths, deterministic RNG
+    replay. Zero framework, exit code = failures.
+  - Coverage measurement (`tests/coverage.sh`, gcov): **76.1% of src/ lines**
+    exercised by the 81-script golden suite — the number is now tracked.
+  - Real multi-client network test (`tests/net_multi.sh`): one Lovax TCP
+    server serves three separate client processes; both sides asserted.
+
+Gates: 81/81 golden both dispatch modes, GC_STRESS+ASan clean, fuzz +
+sandbox + unit + net-multi green, bench flat.
+
 ## v0.14.0 — stdlib completion: "fark kalmasın" (the no-gap release)
 
 Every Tier 1+2 row of the Python-3.16/Lua-5.5 gap analysis is now closed or
