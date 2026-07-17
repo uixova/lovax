@@ -82,7 +82,7 @@ inline void gcSafepoint() { if (gcPending) { gcPending = false; gcCollect(); } }
 
 struct Heap {
     Object* first = nullptr;            // head of the all-objects list
-    size_t bytesAllocated = 0;
+    size_t bytesAllocated = 0;          // LIVE bytes estimate (recomputed at sweep)
     size_t nextGC = 8 * 1024 * 1024;    // first collection after ~8 MB
     bool enabled = false;               // Phase 0.4: off until roots are wired (Phase 1)
     bool collecting = false;
@@ -90,6 +90,14 @@ struct Heap {
     std::vector<Object*> tempRoots;     // GcRoot stack (C++-held temporaries)
     std::vector<Object*> permanentRoots;// immortal: singletons, builtin modules
     std::function<void()> markRoots;    // installed by the runtime
+
+    // --mem-stats counters (always maintained — they're a few adds; printed
+    // by main only when the flag is given).
+    size_t allocCount = 0;
+    size_t collections = 0;
+    size_t peakBytes = 0;
+    long long gcNanos = 0;              // total time spent collecting
+    long long maxPauseNanos = 0;        // worst single collection
 
     static Heap& get() { static Heap h; return h; }
 };
@@ -119,7 +127,12 @@ T* gcAlloc(A&&... args) {
     T* obj = new T(std::forward<A>(args)...);
     obj->gcNext = h.first;
     h.first = obj;
-    h.bytesAllocated += sizeof(T);
+    // Count the payload the constructor produced (string bytes, vector storage),
+    // not just the header — the threshold must see the real heap. Post-construction
+    // growth is folded back in when the sweep recomputes live bytes.
+    h.bytesAllocated += obj->gcBytes();
+    h.allocCount++;
+    if (h.bytesAllocated > h.peakBytes) h.peakBytes = h.bytesAllocated;
     return obj;
 }
 

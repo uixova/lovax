@@ -94,6 +94,13 @@ public:
                       : status == Status::RUNNING   ? "running" : "dead";
         return std::string("<coroutine ") + s + ">";
     }
+    size_t gcBytes() const override {
+        // A suspended coroutine owns a full value stack (STACK_LIMIT slots).
+        size_t n = sizeof(*this);
+        if (state.stack) n += (size_t(1) << 16) * sizeof(Value);
+        n += state.frames.capacity() * 64;
+        return n;
+    }
 };
 
 class VM {

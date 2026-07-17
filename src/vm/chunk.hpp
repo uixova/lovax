@@ -192,6 +192,10 @@ public:
         for (auto& u : upvalues) if (u) gcMarkValue(u->value);
         gcMarkObject(structShape.get());
     }
+    size_t gcBytes() const override {
+        // shared_ptr control block + cell per captured upvalue, roughly
+        return sizeof(*this) + upvalues.capacity() * 72;
+    }
     std::string inspect() const override {
         return "fn " + (proto->name.empty() ? "?" : proto->name) + "(...)";
     }
