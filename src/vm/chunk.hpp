@@ -88,6 +88,13 @@ enum class Op : uint8_t {
     EQ_I_JF, NE_I_JF,
     YIELD_,                       // pop a value, suspend the coroutine, hand it to resume()
 
+    // Compact structs (RFC-017):
+    STRUCT_SHAPE,   // u16 name const, u16 nFields, nFields×u16 name consts,
+                    // u16 nMethods, nMethods×u16 name consts; pops nMethods
+                    // closures, pushes the built StructShapeObject
+    STRUCT_BIND,    // pops factory closure and shape, attaches shape, pushes factory
+    STRUCT_MAKE,    // u16 nFields: builds an instance from locals[0..n), pushes it
+
     HALT            // end of the top-level script
 };
 
@@ -172,6 +179,9 @@ public:
     // its own module-level state no matter which VM invokes it. Borrowed pointer
     // (the module VM is kept alive), so no ownership cycle / leak.
     std::vector<Value>* moduleGlobals = nullptr;
+    // Non-null only for struct factory closures: the shared shape that
+    // STRUCT_MAKE attaches to every instance this factory builds (RFC-017).
+    Ref<Object> structShape;
 
     ClosureObject(std::shared_ptr<Proto> p)
         : Object(ObjectType::FUNCTION), proto(std::move(p)) {}
@@ -180,6 +190,7 @@ public:
         // Closed upvalues own their Value; open ones live on the stack (a root),
         // and their cell->value is a harmless default until closed.
         for (auto& u : upvalues) if (u) gcMarkValue(u->value);
+        gcMarkObject(structShape.get());
     }
     std::string inspect() const override {
         return "fn " + (proto->name.empty() ? "?" : proto->name) + "(...)";

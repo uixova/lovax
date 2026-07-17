@@ -1,0 +1,12 @@
+# exit: 0
+7
+3
+40
+["x", "y"]
+2
+Vec
+3 100
+false
+true
+caught: struct 'Vec' has no field 'nope' (fields: x, y)
+{__type__: Vec, x: 3, y: 40}

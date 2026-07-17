@@ -852,6 +852,9 @@ private:
             &&L_EQ_I_JF,
             &&L_NE_I_JF,
             &&L_YIELD_,
+            &&L_STRUCT_SHAPE,
+            &&L_STRUCT_BIND,
+            &&L_STRUCT_MAKE,
             &&L_HALT
             };
         #define VM_CASE(name) L_##name:
@@ -1164,8 +1167,9 @@ private:
                     // plainly (module/plain-map field call keeps its original arity).
                     static const std::string typeKey = "__type__";
                     Value& recv = peek(argc + 1);
-                    bool isStruct = recv.isObjType(ObjectType::MAP) &&
-                        static_cast<MapObject*>(recv.obj)->getStr(typeKey) != nullptr;
+                    bool isStruct = recv.isObjType(ObjectType::STRUCT) ||
+                        (recv.isObjType(ObjectType::MAP) &&
+                         static_cast<MapObject*>(recv.obj)->getStr(typeKey) != nullptr);
                     syncOut();
                     {
                         Ref<Object> err;
@@ -1209,6 +1213,58 @@ private:
                     uint16_t paramSlot = readU16();
                     uint16_t skip = readU16();
                     if (frame->nargs > (int)paramSlot) ip += skip;
+                    VM_NEXT;
+                }
+                VM_CASE(STRUCT_SHAPE) {
+                    // Builds the per-type shape at declaration time. Method
+                    // closures sit on the stack (rooted); the shape is GcRoot'd
+                    // while its tables fill up.
+                    uint16_t nameC = readU16();
+                    uint16_t nf = readU16();
+                    auto shape = makeObj<StructShapeObject>();
+                    GcRoot sr(shape.get());
+                    shape->name = static_cast<StringObject*>(constant(nameC).obj)->value;
+                    shape->fieldNames.reserve(nf);
+                    for (uint16_t i = 0; i < nf; ++i) {
+                        uint16_t fc = readU16();
+                        auto key = refCast<StringObject>(constant(fc).obj);
+                        shape->fieldIndex[key->value] = (int)i;
+                        shape->fieldNames.push_back(key);
+                    }
+                    uint16_t nm = readU16();
+                    shape->methods.reserve(nm);
+                    for (uint16_t i = 0; i < nm; ++i) {
+                        uint16_t mc = readU16();
+                        auto key = refCast<StringObject>(constant(mc).obj);
+                        // Methods were pushed in declaration order: oldest deepest.
+                        shape->methodIndex[key->value] = shape->methods.size();
+                        shape->methods.push_back({key, toObject(peek(nm - 1 - i))});
+                    }
+                    sp_ -= nm;
+                    push(Value::object(shape));
+                    VM_NEXT;
+                }
+                VM_CASE(STRUCT_BIND) {
+                    // Stack: [shape, factory] -> attach and keep the factory.
+                    Value fac = pop();
+                    Value shp = pop();
+                    static_cast<ClosureObject*>(fac.obj)->structShape = toObject(shp);
+                    push(fac);
+                    VM_NEXT;
+                }
+                VM_CASE(STRUCT_MAKE) {
+                    uint16_t nf = readU16();
+                    auto* factory = frame->closure;
+                    auto inst = makeObj<StructInstanceObject>();
+                    GcRoot ir(inst.get());
+                    inst->shape = static_cast<StructShapeObject*>(factory->structShape.get());
+                    inst->slots.reserve(nf);
+                    // Field locals live at base+1..base+nf; boxing may allocate,
+                    // but the locals are stack roots and inst is temp-rooted.
+                    for (uint16_t i = 0; i < nf; ++i) {
+                        inst->slots.push_back(toObject(*stackAt(frame->base + 1 + i)));
+                    }
+                    push(Value::object(inst));
                     VM_NEXT;
                 }
                 VM_CASE(RETURN) {
@@ -1332,11 +1388,35 @@ private:
                         }                                                               \
                     }
 
+                // Struct fast path: the inline-cache slot stores the field's slot
+                // index, verified against the shape's field name (like the map IC,
+                // a stale index can only miss). Methods/__type__/missing-field all
+                // resolve in the shared fallback (evalMemberAccess).
+                #define STRUCT_IC_GET(top, icsIdx, ACT)                                  \
+                    if ((top)->isObjType(ObjectType::STRUCT)) {                          \
+                        auto* si = static_cast<StructInstanceObject*>((top)->obj);       \
+                        uint32_t& ic = frame->chunk->icache[icsIdx];                     \
+                        if (ic < si->slots.size() &&                                     \
+                            si->shape->fieldNames[ic]->value == prop) {                  \
+                            ACT(si->slots[ic]);                                          \
+                            VM_NEXT_FAST;                                                \
+                        }                                                                \
+                        auto it = si->shape->fieldIndex.find(prop);                      \
+                        if (it != si->shape->fieldIndex.end()) {                         \
+                            ic = (uint32_t)it->second;                                   \
+                            ACT(si->slots[it->second]);                                  \
+                            VM_NEXT_FAST;                                                \
+                        }                                                                \
+                    }
+
                 VM_CASE(MEMBER_GET) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj)->value;
                     Value* top = sp_ - 1;
+                    #define STRUCT_ACT_REPLACE(slotRef) *top = fromObject(slotRef)
+                    STRUCT_IC_GET(top, ics, STRUCT_ACT_REPLACE)
+                    #undef STRUCT_ACT_REPLACE
                     if (top->isObjType(ObjectType::MAP)) {
                         IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
                         if (ent != nullptr) {
@@ -1358,6 +1438,9 @@ private:
                     if (top->isNil()) VM_NEXT_FAST;            // a?.b -> null (in place)
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj)->value;
+                    #define STRUCT_ACT_REPLACE(slotRef) *top = fromObject(slotRef)
+                    STRUCT_IC_GET(top, ics, STRUCT_ACT_REPLACE)
+                    #undef STRUCT_ACT_REPLACE
                     if (top->isObjType(ObjectType::MAP)) {
                         IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
                         if (ent != nullptr) {
@@ -1378,6 +1461,9 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj)->value;
                     Value* top = sp_ - 1;
+                    #define STRUCT_ACT_PUSH(slotRef) push(fromObject(slotRef))
+                    STRUCT_IC_GET(top, ics, STRUCT_ACT_PUSH)
+                    #undef STRUCT_ACT_PUSH
                     if (top->isObjType(ObjectType::MAP)) {
                         IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
                         if (ent != nullptr) {
@@ -1397,6 +1483,32 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).obj)->value;
                     Value* pobj = sp_ - 2; Value* pval = sp_ - 1;
+                    if (pobj->isObjType(ObjectType::STRUCT)) {
+                        auto* si = static_cast<StructInstanceObject*>(pobj->obj);
+                        uint32_t& ic = frame->chunk->icache[ics];
+                        size_t slot = MapObject::NPOS;
+                        if (ic < si->slots.size() &&
+                            si->shape->fieldNames[ic]->value == prop) {
+                            slot = ic;
+                        } else {
+                            auto it = si->shape->fieldIndex.find(prop);
+                            if (it != si->shape->fieldIndex.end()) {
+                                ic = (uint32_t)it->second;
+                                slot = (size_t)it->second;
+                            }
+                        }
+                        if (slot != MapObject::NPOS) {
+                            si->slots[slot] = toObject(*pval);
+                            pval->obj = nullptr; pobj->obj = nullptr; sp_ -= 2;
+                            VM_NEXT_FAST;
+                        }
+                        // Struct fields are fixed at declaration: no new fields.
+                        sp_ -= 2;
+                        VM_THROW(makeError("struct '" + si->shape->name +
+                                           "' has no field '" + prop +
+                                           "' (fields are fixed at declaration)",
+                                           currentLine()));
+                    }
                     if (pobj->isObjType(ObjectType::MAP) &&
                         !static_cast<MapObject*>(pobj->obj)->frozen) {
                         auto* m = static_cast<MapObject*>(pobj->obj);
@@ -1914,6 +2026,21 @@ private:
             map->set(idx, val);
             return nullptr;
         }
+        if (obj->type() == ObjectType::STRUCT) {
+            auto* si = static_cast<StructInstanceObject*>(obj.get());
+            if (idx->type() != ObjectType::STRING) {
+                return makeError("struct fields are accessed by name (a string), got " +
+                                 typeName(idx->type()), line);
+            }
+            const std::string& prop = static_cast<StringObject*>(idx.get())->value;
+            auto it = si->shape->fieldIndex.find(prop);
+            if (it == si->shape->fieldIndex.end()) {
+                return makeError("struct '" + si->shape->name + "' has no field '" +
+                                 prop + "' (fields are fixed at declaration)", line);
+            }
+            si->slots[it->second] = val;
+            return nullptr;
+        }
         return makeError("indexed assignment only works on list and map, got " +
                          typeName(obj->type()), line);
     }
@@ -1956,6 +2083,16 @@ private:
 
     Ref<Object> memberSet(const Ref<Object>& obj, const std::string& prop,
                           const Ref<Object>& val, int line) {
+        if (obj->type() == ObjectType::STRUCT) {
+            auto* si = static_cast<StructInstanceObject*>(obj.get());
+            auto it = si->shape->fieldIndex.find(prop);
+            if (it == si->shape->fieldIndex.end()) {
+                return makeError("struct '" + si->shape->name + "' has no field '" +
+                                 prop + "' (fields are fixed at declaration)", line);
+            }
+            si->slots[it->second] = val;
+            return nullptr;
+        }
         if (obj->type() != ObjectType::MAP) {
             return makeError("member assignment (object.field = ...) only works on maps, got " +
                              typeName(obj->type()), line);

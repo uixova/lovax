@@ -719,12 +719,14 @@ private:
         markConst(e->name);
     }
 
-    // struct Player: -> a factory closure that builds a tagged map instance.
-    // Fields become factory parameters (defaults preserved); methods are stored
-    // as closures whose implicit first parameter is 'this' (see CALL_METHOD).
+    // struct Player: -> a shared shape (field->slot map + method table, built once
+    // at the declaration) plus a factory closure whose body evaluates field
+    // defaults and emits STRUCT_MAKE — a compact slot-array instance (RFC-017).
+    // Methods are closures whose implicit first parameter is 'this' (CALL_METHOD).
     void compileStruct(const StructStatement* st) {
         int line = st->token.line;
 
+        // ---- Factory: params = fields, defaults evaluated per instantiation ----
         FnCtx fnCtx;
         fnCtx.proto = std::make_shared<Proto>();
         fnCtx.proto->name = st->name;
@@ -754,21 +756,8 @@ private:
             patchJump(skip);
         }
 
-        // Build the instance map: __type__, then fields, then methods.
-        int pairCount = 1 + (int)st->fields.size() + (int)st->methods.size();
-        emitConst(Value::object(makeObj<StringObject>("__type__")), line);
-        emitConst(Value::object(makeObj<StringObject>(st->name)), line);
-        for (size_t i = 0; i < st->fields.size(); ++i) {
-            emitConst(Value::object(makeObj<StringObject>(st->fields[i])), line);
-            emitOp(Op::GET_LOCAL, line);
-            emitU16((uint16_t)i, line);
-        }
-        for (const auto& m : st->methods) {
-            emitConst(Value::object(makeObj<StringObject>(m->name->value)), line);
-            compileFunction(m.get(), /*asMethod=*/true);
-        }
-        emitOp(Op::MAP, line);
-        emitU16((uint16_t)pairCount, line);
+        emitOp(Op::STRUCT_MAKE, line);
+        emitU16((uint16_t)st->fields.size(), line);
         emitOp(Op::RETURN, line);
 
         std::vector<UpvalDesc> upvals = fnCtx.upvals;
@@ -778,6 +767,18 @@ private:
 
         ctx_ = saved;
 
+        // ---- Shape: method closures compile once, in the declaration scope ----
+        for (const auto& m : st->methods) {
+            compileFunction(m.get(), /*asMethod=*/true);
+        }
+        emitOp(Op::STRUCT_SHAPE, line);
+        emitU16(strConst(st->name), line);
+        emitU16((uint16_t)st->fields.size(), line);
+        for (const auto& f : st->fields) emitU16(strConst(f), line);
+        emitU16((uint16_t)st->methods.size(), line);
+        for (const auto& m : st->methods) emitU16(strConst(m->name->value), line);
+
+        // ---- Factory closure, then bind the shape to it ----
         emitOp(Op::CLOSURE, line);
         emitU16(addConst(Value::object(makeObj<ProtoObject>(proto))), line);
         emitU16((uint16_t)upvals.size(), line);
@@ -785,6 +786,7 @@ private:
             emitU8(u.isLocal ? 1 : 0, line);
             emitU16(u.index, line);
         }
+        emitOp(Op::STRUCT_BIND, line);
         defineName(st->name, line);
         markConst(st->name);
     }

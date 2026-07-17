@@ -1,0 +1,5 @@
+# struct fields are fixed at declaration (RFC-017): writing an undeclared field is an error
+struct P:
+    x = 1
+set p = P(5)
+p.y = 99

@@ -1,0 +1,2 @@
+# exit: 70
+[Runtime Error] line 5: struct 'P' has no field 'y' (fields are fixed at declaration)

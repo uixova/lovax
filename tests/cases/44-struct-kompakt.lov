@@ -1,0 +1,24 @@
+# compact struct semantics (RFC-017): slots, index access, keys/len, equality, clone
+struct Vec:
+    x = 0
+    y = 0
+    fn total():
+        return this.x + this.y
+set v = Vec(3, 4)
+say v.total()
+say v["x"]
+v["y"] = 40
+say v.y
+say keys(v)
+say len(v)
+say v.__type__
+set w = clone(v)
+w.x = 100
+say v.x, w.x
+say v == w
+say v == Vec(3, 40)
+try:
+    say v.nope
+catch e:
+    say "caught: {e}"
+say v

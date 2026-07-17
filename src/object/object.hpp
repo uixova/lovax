@@ -24,6 +24,7 @@ enum class ObjectType {
     BUILTIN,
     SIGNAL,
     COROUTINE,
+    STRUCT,
     RETURN_VALUE,
     BREAK_SIGNAL,
     CONTINUE_SIGNAL,
@@ -322,6 +323,54 @@ public:
     }
 };
 
+// Shared per struct TYPE (RFC-017): field->slot mapping and the method table,
+// built once when the declaration executes. Instances point here instead of
+// carrying keys, hash indexes and method entries per object.
+class StructShapeObject : public Object {
+public:
+    std::string name;                                    // struct type name
+    std::vector<Ref<StringObject>> fieldNames;           // slot -> key (keys()/inspect)
+    std::unordered_map<std::string, int> fieldIndex;     // field name -> slot
+    std::vector<std::pair<Ref<StringObject>, Ref<Object>>> methods; // declaration order
+    std::unordered_map<std::string, size_t> methodIndex;
+
+    StructShapeObject() : Object(ObjectType::RETURN_VALUE) {} // internal, never user-visible
+    Ref<Object> getMethod(const std::string& n) const {
+        auto it = methodIndex.find(n);
+        return it == methodIndex.end() ? nullptr : methods[it->second].second;
+    }
+    void gcMark() override {
+        for (auto& f : fieldNames) gcMarkObject(f.get());
+        for (auto& m : methods) { gcMarkObject(m.first.get()); gcMarkObject(m.second.get()); }
+    }
+    std::string inspect() const override { return "<struct " + name + ">"; }
+};
+
+// A struct instance: shape pointer + flat slot array. Field names resolve to
+// slot indexes through the shared shape, so per-instance cost is just the values.
+class StructInstanceObject : public Object {
+public:
+    StructShapeObject* shape = nullptr;   // kept alive by gcMark below
+    std::vector<Ref<Object>> slots;
+
+    StructInstanceObject() : Object(ObjectType::STRUCT) {}
+    Ref<Object> getField(const std::string& n) const {
+        auto it = shape->fieldIndex.find(n);
+        return it == shape->fieldIndex.end() ? nullptr : slots[it->second];
+    }
+    void gcMark() override {
+        gcMarkObject(shape);
+        for (auto& s : slots) gcMarkObject(s.get());
+    }
+    std::string inspect() const override {
+        std::string out = "{__type__: " + shape->name;
+        for (size_t i = 0; i < slots.size(); ++i) {
+            out += ", " + shape->fieldNames[i]->value + ": " + inspectQuoted(slots[i]);
+        }
+        return out + "}";
+    }
+};
+
 // Lazy range object -> range(0, 10): never allocates a million-element list
 class RangeObject : public Object {
 public:
@@ -439,6 +488,7 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::BUILTIN:      return "builtin";
         case ObjectType::SIGNAL:       return "signal";
         case ObjectType::COROUTINE:    return "coroutine";
+        case ObjectType::STRUCT:       return "struct";
         case ObjectType::RETURN_VALUE: return "return";
         case ObjectType::BREAK_SIGNAL: return "break";
         case ObjectType::CONTINUE_SIGNAL: return "continue";
@@ -497,6 +547,15 @@ inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
             auto* ra = static_cast<RangeObject*>(a.get());
             auto* rb = static_cast<RangeObject*>(b.get());
             return ra->start == rb->start && ra->end == rb->end && ra->step == rb->step;
+        }
+        case ObjectType::STRUCT: {
+            auto* sa = static_cast<StructInstanceObject*>(a.get());
+            auto* sb = static_cast<StructInstanceObject*>(b.get());
+            if (sa->shape != sb->shape) return false;   // different struct types
+            for (size_t i = 0; i < sa->slots.size(); ++i) {
+                if (!objectEquals(sa->slots[i], sb->slots[i])) return false;
+            }
+            return true;
         }
         default:
             return a.get() == b.get(); // functions/signals: identity comparison

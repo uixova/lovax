@@ -37,6 +37,8 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                 return makeObj<IntegerObject>((long long)static_cast<ListObject*>(a.get())->elements.size());
             case ObjectType::MAP:
                 return makeObj<IntegerObject>((long long)static_cast<MapObject*>(a.get())->entries.size());
+            case ObjectType::STRUCT:
+                return makeObj<IntegerObject>((long long)static_cast<StructInstanceObject*>(a.get())->slots.size());
             case ObjectType::RANGE:
                 return makeObj<IntegerObject>(static_cast<RangeObject*>(a.get())->length());
             default:
@@ -137,6 +139,13 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- keys(map): returns keys as a list in insertion order ---
     def("keys", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("keys", "1", args.size(), line);
+        if (args[0]->type() == ObjectType::STRUCT) {
+            auto* si = static_cast<StructInstanceObject*>(args[0].get());
+            auto list = makeObj<ListObject>();
+            GcRoot _grsk(list.get());
+            for (const auto& f : si->shape->fieldNames) list->elements.push_back(f);
+            return list;
+        }
         if (args[0]->type() != ObjectType::MAP) {
             return makeError("keys() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
@@ -151,6 +160,13 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- values(map): returns values as a list in insertion order ---
     def("values", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("values", "1", args.size(), line);
+        if (args[0]->type() == ObjectType::STRUCT) {
+            auto* si = static_cast<StructInstanceObject*>(args[0].get());
+            auto list = makeObj<ListObject>();
+            GcRoot _grsv(list.get());
+            for (const auto& s : si->slots) list->elements.push_back(s);
+            return list;
+        }
         if (args[0]->type() != ObjectType::MAP) {
             return makeError("values() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
@@ -165,6 +181,11 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- has(map, key): does the key exist? ---
     def("has", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2) return argCountError("has", "2", args.size(), line);
+        if (args[0]->type() == ObjectType::STRUCT) {
+            if (args[1]->type() != ObjectType::STRING) return FALSE_OBJ;
+            auto* si = static_cast<StructInstanceObject*>(args[0].get());
+            return boolObj(si->getField(static_cast<StringObject*>(args[1].get())->value) != nullptr);
+        }
         if (args[0]->type() != ObjectType::MAP) {
             return makeError("has() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
@@ -609,6 +630,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             out->copyIndexFrom(*src);
             return out;
         }
+        if (args[0]->type() == ObjectType::STRUCT) {
+            auto* src = static_cast<StructInstanceObject*>(args[0].get());
+            auto out = makeObj<StructInstanceObject>();
+            GcRoot _grsc(out.get());
+            out->shape = src->shape;
+            out->slots = src->slots;
+            return out;
+        }
         return args[0]; // immutable types: no copy needed
     });
 
@@ -827,6 +856,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
 
     // get(map, key[, default]): safe map read (null or default if the key is absent)
     def("get", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() >= 2 && args.size() <= 3 &&
+            args[0]->type() == ObjectType::STRUCT &&
+            args[1]->type() == ObjectType::STRING) {
+            auto* si = static_cast<StructInstanceObject*>(args[0].get());
+            auto v = si->getField(static_cast<StringObject*>(args[1].get())->value);
+            if (v != nullptr) return v;
+            return args.size() == 3 ? args[2] : NULL_OBJ_;
+        }
         if (args.size() < 2 || args.size() > 3 || args[0]->type() != ObjectType::MAP) {
             return makeError("get(map, key[, default]) expects a map", line);
         }

@@ -21,6 +21,19 @@ namespace Runtime {
 
     inline Ref<Object> evalMemberAccess(const Ref<Object>& obj,
                                                     const std::string& prop, int line) {
+        if (obj->type() == ObjectType::STRUCT) {
+            auto* si = static_cast<StructInstanceObject*>(obj.get());
+            if (auto f = si->getField(prop)) return f;
+            if (auto m = si->shape->getMethod(prop)) return m;
+            if (prop == "__type__") return makeObj<StringObject>(si->shape->name);
+            std::string avail;
+            for (size_t i = 0; i < si->shape->fieldNames.size(); ++i) {
+                if (i > 0) avail += ", ";
+                avail += si->shape->fieldNames[i]->value;
+            }
+            return makeError("struct '" + si->shape->name + "' has no field '" +
+                             prop + "' (fields: " + avail + ")", line);
+        }
         if (obj->type() != ObjectType::MAP) {
             return makeError("'.' access expects a map or module, got " +
                              typeName(obj->type()) + "", line);
@@ -90,6 +103,14 @@ namespace Runtime {
                                  " (length " + std::to_string(n) + ")", line);
             }
             return makeObj<StringObject>(utf8At(s, i));
+        }
+
+        if (obj->type() == ObjectType::STRUCT) {
+            if (idx->type() != ObjectType::STRING) {
+                return makeError("struct fields are accessed by name (a string), got " +
+                                 typeName(idx->type()) + "", line);
+            }
+            return evalMemberAccess(obj, static_cast<StringObject*>(idx.get())->value, line);
         }
 
         return makeError("indexing only works on list, map and string; got " +
