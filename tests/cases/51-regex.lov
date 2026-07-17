@@ -1,0 +1,33 @@
+use regex
+say regex.match("hello world", "h[a-z]+")
+say regex.match("world", "h[a-z]+") == null
+say regex.search("say hello there", "h[a-z]+")
+say regex.find_all("a1b22c333", "\d+")
+say regex.find_all("a1b22c333", "[a-z]")
+say regex.replace("hello world", "l+", "L")
+say regex.replace("2026-07-17", "(\d+)-(\d+)-(\d+)", "$3/$2/$1")
+say regex.split("a,b;c d", "[,; ]")
+say regex.groups("kai@lovax.dev", "(\w+)@(\w+)\.(\w+)")
+say regex.match("abc123", "[a-z]+\d+$")
+say regex.match("aaa", "a\{2\}")
+say regex.match("aaa", "a\{2,\}")
+say regex.match("ab", "a(?:b|c)")
+say regex.match("ac", "a(b|c)")
+say regex.search("xxabcyy", "^abc") == null
+say regex.match("abc", "^abc$")
+say regex.match("", "a*")
+say regex.find_all("boş  çok  test", "\S+")
+say regex.match("aab", "a*?b")
+try:
+    say regex.match("x", "a\{5000\}")
+catch e:
+    say "err: {e}"
+try:
+    say regex.match("x", "(a")
+catch e2:
+    say "err2: {e2}"
+# ReDoS guard: catastrophic pattern must fail cleanly, fast
+try:
+    say regex.match("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaX", "(a+)+$")
+catch e3:
+    say "err3: {e3}"

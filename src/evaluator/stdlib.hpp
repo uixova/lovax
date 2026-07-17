@@ -24,6 +24,7 @@
 #include "../modules/cmath.hpp"
 #include "../modules/random.hpp"
 #include "../modules/datetime.hpp"
+#include "../modules/regex.hpp"
 
 namespace Lovax {
 namespace StdLib {
@@ -40,11 +41,12 @@ inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "cmath") return makeCmathModule();
     if (name == "random") return makeRandomModule();
     if (name == "datetime") return makeDatetimeModule();
+    if (name == "regex") return makeRegexModule();
     return nullptr;
 }
 
 inline std::string builtinModuleList() {
-    return "math, game, strings, file, os, time, canvas, net, cmath, random, datetime";
+    return "math, game, strings, file, os, time, canvas, net, cmath, random, datetime, regex";
 }
 
 } // namespace StdLib

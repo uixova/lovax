@@ -1067,8 +1067,11 @@ private:
                     case '{':  current += '{';  break;
                     case '}':  current += '}';  break;
                     default:
-                        addError(std::string("unknown escape sequence: \\") + next, strToken);
-                        return nullptr;
+                        // Unknown escape: keep the backslash literally, so
+                        // regex patterns read naturally ("\d+" == "\\d+").
+                        current += '\\';
+                        current += next;
+                        break;
                 }
                 i += 2;
                 continue;
@@ -1222,7 +1225,19 @@ private:
         expr->object = std::move(object);
         expr->safe = safe;
 
-        if (!expectPeek(TokenType::IDENTIFIER)) return nullptr;
+        // Keywords are fine as member names: regex.match, m.set ... — after a
+        // '.' there is no statement ambiguity, so any word-shaped token works.
+        if (peekToken.type != TokenType::IDENTIFIER) {
+            bool wordy = !peekToken.literal.empty();
+            for (unsigned char ch : peekToken.literal) {
+                if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                      ch == '_' || ch >= 0x80)) { wordy = false; break; }
+            }
+            if (!wordy) { expectPeek(TokenType::IDENTIFIER); return nullptr; }
+            nextParserToken();
+        } else {
+            nextParserToken();
+        }
         expr->property = curToken.literal;
         return expr;
     }
