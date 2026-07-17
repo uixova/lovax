@@ -19,6 +19,7 @@ enum class ObjectType {
     NULL_OBJ,
     STRING,
     LIST,
+    TUPLE,
     MAP,
     RANGE,
     FUNCTION,
@@ -195,6 +196,9 @@ class ListObject : public Object {
 public:
     ListObject() : Object(ObjectType::LIST) {}
     std::vector<Ref<Object>> elements;
+protected:
+    explicit ListObject(ObjectType t) : Object(t) {}   // for TupleObject
+public:
     void gcMark() override { for (auto& e : elements) gcMarkObject(e.get()); }
     size_t gcBytes() const override {
         return sizeof(*this) + elements.capacity() * sizeof(Ref<Object>);
@@ -206,6 +210,23 @@ public:
             out += inspectQuoted(elements[i]);
         }
         return out + "]";
+    }
+};
+
+// Tuple -> (1, 2): an immutable list. Shares ListObject's layout so every
+// element-walking path (iteration, unpack, len) reuses the list code; the
+// TUPLE tag is what blocks mutation (push/insert/index-set reject it).
+class TupleObject : public ListObject {
+public:
+    TupleObject() : ListObject(ObjectType::TUPLE) {}
+    std::string inspect() const override {
+        std::string out = "(";
+        for (size_t i = 0; i < elements.size(); ++i) {
+            if (i > 0) out += ", ";
+            out += inspectQuoted(elements[i]);
+        }
+        if (elements.size() == 1) out += ",";   // (5,) — Python's one-tuple mark
+        return out + ")";
     }
 };
 
@@ -514,6 +535,7 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::NULL_OBJ:     return "null";
         case ObjectType::STRING:       return "string";
         case ObjectType::LIST:         return "list";
+        case ObjectType::TUPLE:        return "tuple";
         case ObjectType::MAP:          return "map";
         case ObjectType::RANGE:        return "range";
         case ObjectType::FUNCTION:     return "fn";
@@ -556,7 +578,8 @@ inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
         case ObjectType::STRING:
             return static_cast<StringObject*>(a.get())->value ==
                    static_cast<StringObject*>(b.get())->value;
-        case ObjectType::LIST: {
+        case ObjectType::LIST:
+        case ObjectType::TUPLE: {
             auto* la = static_cast<ListObject*>(a.get());
             auto* lb = static_cast<ListObject*>(b.get());
             if (la->elements.size() != lb->elements.size()) return false;

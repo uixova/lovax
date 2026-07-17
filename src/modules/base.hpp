@@ -34,6 +34,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
                 return makeObj<IntegerObject>(so->lenCache);
             }
             case ObjectType::LIST:
+            case ObjectType::TUPLE:
                 return makeObj<IntegerObject>((long long)static_cast<ListObject*>(a.get())->elements.size());
             case ObjectType::MAP:
                 return makeObj<IntegerObject>((long long)static_cast<MapObject*>(a.get())->entries.size());
@@ -354,7 +355,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             const std::string& sub = static_cast<StringObject*>(args[1].get())->value;
             return boolObj(s.find(sub) != std::string::npos);
         }
-        if (args[0]->type() == ObjectType::LIST) {
+        if (args[0]->type() == ObjectType::LIST || args[0]->type() == ObjectType::TUPLE) {
             for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
                 if (objectEquals(e, args[1])) return TRUE_OBJ;
             }
@@ -379,7 +380,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             if (byteIdx == std::string::npos) return makeObj<IntegerObject>(-1);
             return makeObj<IntegerObject>(utf8Length(s.substr(0, byteIdx)));
         }
-        if (args[0]->type() == ObjectType::LIST) {
+        if (args[0]->type() == ObjectType::LIST || args[0]->type() == ObjectType::TUPLE) {
             const auto& els = static_cast<ListObject*>(args[0].get())->elements;
             for (size_t i = 0; i < els.size(); ++i) {
                 if (objectEquals(els[i], args[1])) return makeObj<IntegerObject>((long long)i);
@@ -520,7 +521,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // sum(list): sum of numbers (int if all ints)
     def("sum", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("sum", "1", args.size(), line);
-        if (args[0]->type() != ObjectType::LIST) {
+        if (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE) {
             return makeError("sum() expects a list, got " + typeName(args[0]->type()) + "", line);
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
@@ -809,13 +810,13 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
 
     // first(list) / last(list): the ends (error on empty)
     def("first", [](const Args& args, int line, const CallFn&) -> ObjPtr {
-        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("first() expects a list", line);
+        if (args.size() != 1 || (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE)) return makeError("first() expects a list", line);
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError("first() of an empty list", line);
         return els.front();
     });
     def("last", [](const Args& args, int line, const CallFn&) -> ObjPtr {
-        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) return makeError("last() expects a list", line);
+        if (args.size() != 1 || (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE)) return makeError("last() expects a list", line);
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError("last() of an empty list", line);
         return els.back();

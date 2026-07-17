@@ -1,0 +1,20 @@
+# exit: 0
+(1, 2, 3)
+3
+1 3
+tuple
+(5,)
+()
+3 2
+(3, 2)
+1
+2
+3
+true
+true
+false
+true 1
+1 3 6
+err: tuples are immutable — convert to a list to modify
+err2: push() expects a list as its first argument, got tuple
+3

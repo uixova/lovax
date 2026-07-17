@@ -862,6 +862,7 @@ private:
             &&L_STRUCT_SHAPE,
             &&L_STRUCT_BIND,
             &&L_STRUCT_MAKE,
+            &&L_TUPLE,
             &&L_HALT
             };
         #define VM_CASE(name) L_##name:
@@ -1296,6 +1297,16 @@ private:
                     push(Value::object(list));
                     VM_NEXT;
                 }
+                VM_CASE(TUPLE) {
+                    uint16_t n = readU16();
+                    auto tup = makeObj<TupleObject>();
+                    GcRoot tr(tup.get());    // boxing int elements allocates -> GC
+                    tup->elements.reserve(n);
+                    for (int i = n - 1; i >= 0; --i) tup->elements.push_back(toObject(peek(i)));
+                    sp_ -= n;
+                    push(Value::object(tup));
+                    VM_NEXT;
+                }
                 VM_CASE(MAP) {
                     uint16_t n = readU16();
                     auto map = makeObj<MapObject>();
@@ -1580,6 +1591,7 @@ private:
                     auto obj = toObject(iterable);
                     switch (obj->type()) {
                         case ObjectType::LIST:
+                        case ObjectType::TUPLE:   // same layout; iteration is read-only
                             iter->kind = IterObject::Kind::LIST;
                             iter->source = obj;
                             break;
@@ -1771,14 +1783,14 @@ private:
                 VM_CASE(UNPACK) {
                     uint16_t n = readU16();
                     Value v = pop();
-                    if (!v.isObjType(ObjectType::LIST)) {
-                        VM_THROW(makeError("unpacking assignment expects a list, got " +
+                    if (!v.isObjType(ObjectType::LIST) && !v.isObjType(ObjectType::TUPLE)) {
+                        VM_THROW(makeError("unpacking assignment expects a list or tuple, got " +
                                            valueTypeName(v), currentLine()));
                     }
                     auto* list = static_cast<ListObject*>(v.obj);
                     if (list->elements.size() != n) {
                         VM_THROW(makeError("unpacking mismatch: " + std::to_string(n) +
-                                           " target(s) but list has " +
+                                           " target(s) but value has " +
                                            std::to_string(list->elements.size()), currentLine()));
                     }
                     for (uint16_t i = 0; i < n; ++i) push(fromObject(list->elements[i]));
@@ -2032,6 +2044,9 @@ private:
             }
             map->set(idx, val);
             return nullptr;
+        }
+        if (obj->type() == ObjectType::TUPLE) {
+            return makeError("tuples are immutable — convert to a list to modify", line);
         }
         if (obj->type() == ObjectType::STRUCT) {
             auto* si = static_cast<StructInstanceObject*>(obj.get());

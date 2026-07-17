@@ -923,6 +923,13 @@ private:
                 emitU16((uint16_t)l->elements.size(), l->token.line);
                 break;
             }
+            case NodeType::TUPLE_LITERAL: {
+                const auto* t = static_cast<const TupleLiteral*>(expr);
+                for (const auto& e : t->elements) compileExpression(e.get());
+                emitOp(Op::TUPLE, t->token.line);
+                emitU16((uint16_t)t->elements.size(), t->token.line);
+                break;
+            }
             case NodeType::MAP_LITERAL: {
                 const auto* m = static_cast<const MapLiteral*>(expr);
                 for (const auto& p : m->pairs) {

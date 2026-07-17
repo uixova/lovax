@@ -113,6 +113,21 @@ namespace Runtime {
             return evalMemberAccess(obj, static_cast<StringObject*>(idx.get())->value, line);
         }
 
+        if (obj->type() == ObjectType::TUPLE) {
+            if (idx->type() != ObjectType::INTEGER) {
+                return makeError("tuple index must be an integer, got " + typeName(idx->type()) + "", line);
+            }
+            auto* tup = static_cast<ListObject*>(obj.get());
+            long long i = static_cast<IntegerObject*>(idx.get())->value;
+            long long n = (long long)tup->elements.size();
+            if (i < 0) i += n;
+            if (i < 0 || i >= n) {
+                return makeError("tuple index out of range: " + idx->inspect() +
+                                 " (length " + std::to_string(n) + ")", line);
+            }
+            return tup->elements[i];
+        }
+
         return makeError("indexing only works on list, map and string; got " +
                          typeName(obj->type()) + "", line);
     }
@@ -133,7 +148,8 @@ namespace Runtime {
         // Membership: element in list / substring in string / key in map / number in range
         if (op == "in") {
             switch (right->type()) {
-                case ObjectType::LIST: {
+                case ObjectType::LIST:
+                case ObjectType::TUPLE: {
                     for (const auto& e : static_cast<ListObject*>(right.get())->elements) {
                         if (objectEquals(e, left)) return TRUE_OBJ;
                     }
