@@ -26,7 +26,7 @@ declare -A CMD=(
 declare -A EXT=(
   [lovax]="lov" [lua54]="lua" [lua55]="lua" [luajit]="lua" [python]="py" [node]="js"
 )
-BENCHES=(fib strcat hashmap btree gc)
+BENCHES=(fib strcat hashmap btree gc regex jsonb)
 
 have() { command -v "$1" >/dev/null 2>&1; }
 # best-of-REPS wall-clock in ms for: runner file
@@ -96,6 +96,3 @@ for b in gc btree hashmap; do
 done
 
 echo
-echo "# Not measured for Lovax (missing feature — see roadmap):"
-echo "#   regex  : Lovax has no regex engine"
-echo "#   json   : Lovax parses JSON from files only (load_data), no in-memory parse"

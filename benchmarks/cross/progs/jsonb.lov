@@ -1,0 +1,10 @@
+use json
+set veri = []
+for i in range(500):
+    push(veri, {"id": i, "ad": "oge", "puan": i * 2, "aktif": true})
+set toplam = 0
+repeat 100:
+    set s = json.text(veri)
+    set geri = json.parse(s)
+    toplam += len(geri)
+say toplam

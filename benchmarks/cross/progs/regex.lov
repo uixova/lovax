@@ -1,0 +1,6 @@
+use regex
+set toplam = 0
+repeat 3000:
+    set bulunan = regex.find_all("user1 kai@lovax.dev x99 mail: eda@oyun.io ve son: a1b2c3 v12", "[a-z]+\d+")
+    toplam += len(bulunan)
+say toplam
