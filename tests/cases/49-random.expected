@@ -1,0 +1,14 @@
+# exit: 0
+true true
+200 true
+true
+true
+true
+true
+true
+true
+[1, 2, 3, 4, 5]
+3
+100 true
+true
+err: random.poisson() lambda must be > 0

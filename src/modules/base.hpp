@@ -385,16 +385,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- random(): float in 0..1 | random(a, b): int in a..b (both INCLUSIVE) ---
     def("random", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.empty()) {
-            std::uniform_real_distribution<double> dist(0.0, 1.0);
-            return makeObj<FloatObject>(dist(rng()));
+            return makeObj<FloatObject>(rngU53());
         }
         if (args.size() == 2 &&
             args[0]->type() == ObjectType::INTEGER && args[1]->type() == ObjectType::INTEGER) {
             long long a = static_cast<IntegerObject*>(args[0].get())->value;
             long long b = static_cast<IntegerObject*>(args[1].get())->value;
             if (a > b) std::swap(a, b);
-            std::uniform_int_distribution<long long> dist(a, b);
-            return makeObj<IntegerObject>(dist(rng()));
+            return makeObj<IntegerObject>(a + rngBounded((unsigned long long)(b - a) + 1));
         }
         return makeError("random() takes no arguments or two integers: random(1, 6)", line);
     });

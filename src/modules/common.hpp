@@ -52,6 +52,18 @@ inline std::mt19937_64& rng() {
     return gen;
 }
 
+// Deterministic uniform sampling built directly on the mt19937_64 stream.
+// std::uniform_*_distribution results differ across standard-library
+// implementations — that would break the cross-platform replay promise.
+// These are the only two primitives every random feature builds on.
+inline double rngU53() {           // float in [0, 1), 53-bit precision
+    return (double)(rng()() >> 11) * (1.0 / 9007199254740992.0);
+}
+inline long long rngBounded(unsigned long long n) {   // int in [0, n)
+    // Lemire multiply-shift: deterministic, bias < n / 2^64 (negligible)
+    return (long long)(((unsigned __int128)rng()() * n) >> 64);
+}
+
 // Deep copy for clone(): nested lists/maps become fully independent
 inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
     if (depth > 100) return makeError("clone() structure too deep (nesting limit 100)", line);
@@ -109,6 +121,8 @@ using Builtins::argCountError;
 using Builtins::isNumeric;
 using Builtins::asDouble;
 using Builtins::rng;
+using Builtins::rngU53;
+using Builtins::rngBounded;
 
 // ===== JSON writer (save_data) =====
 

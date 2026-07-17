@@ -82,8 +82,7 @@ inline ObjPtr makeGameModule() {
         }
         auto* l = static_cast<ListObject*>(args[0].get());
         if (l->elements.empty()) return makeError("pick() cannot pick from an empty list", line);
-        std::uniform_int_distribution<size_t> dist(0, l->elements.size() - 1);
-        return l->elements[dist(rng())];
+        return l->elements[(size_t)rngBounded(l->elements.size())];
     });
 
     // pick_weighted({"sword": 5, "gem": 1}): picks a key by weight (loot tables!)
@@ -104,8 +103,7 @@ inline ObjPtr makeGameModule() {
             total += w;
         }
         if (total <= 0) return makeError("pick_weighted() total weight must be greater than 0", line);
-        std::uniform_real_distribution<double> dist(0.0, total);
-        double r = dist(rng());
+        double r = rngU53() * total;
         double acc = 0;
         for (const auto& e : m->entries) {
             acc += asDouble(e.second);
@@ -122,8 +120,7 @@ inline ObjPtr makeGameModule() {
         }
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         for (size_t i = els.size(); i > 1; --i) {
-            std::uniform_int_distribution<size_t> dist(0, i - 1);
-            std::swap(els[i - 1], els[dist(rng())]);
+            std::swap(els[i - 1], els[(size_t)rngBounded(i)]);
         }
         return args[0];
     });
@@ -248,8 +245,7 @@ inline ObjPtr makeGameModule() {
     def("chance", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || !isNumeric(args[0])) return makeError("chance(p) expects a number in 0..1", line);
         double p = asDouble(args[0]);
-        std::uniform_real_distribution<double> dist(0.0, 1.0);
-        return boolObj(dist(rng()) < p);
+        return boolObj(rngU53() < p);
     });
     // noise(x[, y]): deterministic value noise in 0..1 (seeded; terrain/jitter)
     def("noise", [](const Args& args, int line, const CallFn&) -> ObjPtr {

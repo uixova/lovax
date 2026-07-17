@@ -1,0 +1,42 @@
+use random
+seed(42)
+# determinism: same seed, same sequence
+set a1 = random.uniform(0, 10)
+set n1 = random.normal(100, 15)
+seed(42)
+set a2 = random.uniform(0, 10)
+set n2 = random.normal(100, 15)
+say a1 == a2, n1 == n2
+# distributions in sane ranges
+seed(7)
+set vals = []
+repeat 200:
+    push(vals, random.normal(0, 1))
+say len(vals), abs(sum(vals) / 200) < 0.3
+seed(7)
+say random.poisson(3) >= 0
+say random.exponential(1.0) > 0
+say random.gamma(2, 1) > 0
+set bv = random.beta(2, 5)
+say bv > 0 and bv < 1
+set tv = random.triangular(0, 10, 3)
+say tv >= 0 and tv <= 10
+# sequences
+seed(1)
+set L = [1, 2, 3, 4, 5]
+say random.choice(L) in L
+random.shuffle(L)
+say sorted(L)
+say len(random.sample(L, 3))
+set loot = random.choices(["c", "r", "l"], [80, 19, 1], 100)
+say len(loot), contains(loot, "c")
+# state save/restore
+set st = random.getstate()
+set x1 = random.uniform(0, 1)
+random.setstate(st)
+set x2 = random.uniform(0, 1)
+say x1 == x2
+try:
+    random.poisson(-1)
+catch e:
+    say "err: {e}"

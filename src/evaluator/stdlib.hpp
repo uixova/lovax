@@ -22,6 +22,7 @@
 #include "../modules/canvas.hpp"
 #include "../modules/net.hpp"
 #include "../modules/cmath.hpp"
+#include "../modules/random.hpp"
 
 namespace Lovax {
 namespace StdLib {
@@ -36,11 +37,12 @@ inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "time") return makeTimeModule();
     if (name == "canvas") return makeCanvasModule();
     if (name == "cmath") return makeCmathModule();
+    if (name == "random") return makeRandomModule();
     return nullptr;
 }
 
 inline std::string builtinModuleList() {
-    return "math, game, strings, file, os, time, canvas, net, cmath";
+    return "math, game, strings, file, os, time, canvas, net, cmath, random";
 }
 
 } // namespace StdLib
