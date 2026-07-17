@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.14.0 — stdlib completion: "fark kalmasın" (the no-gap release)
+
+Every Tier 1+2 row of the Python-3.16/Lua-5.5 gap analysis is now closed or
+deliberately deferred — the full accounting lives in docs/feature-matrix.md.
+Eight new modules, all zero-dependency, all our own implementations.
+
+- **random** (RFC-020) — uniform/normal/exponential/poisson/gamma/beta/
+  triangular + choice/shuffle/sample/choices (weighted) + getstate/setstate.
+  All OWN algorithms over two deterministic primitives on the raw mt19937_64
+  stream; std::random's distributions vary per platform and would break the
+  replay promise. The global random()/seed and game.pick/shuffle/chance now
+  ride the same core: `seed(42)` reproduces bit-identically everywhere.
+- **datetime** (RFC-019) — now/make/add/diff/format/parse/weekday over our own
+  civil-calendar math (no libc tz tables). A datetime is a plain map.
+- **regex** (RFC-021) — our own backtracking-VM engine: match/search/find_all/
+  replace ($0-$9)/split/groups; greedy+lazy quantifiers, classes, groups,
+  anchors. A 1M-step budget turns ReDoS into a clean error, a 10k-instruction
+  cap kills expansion bombs. **Benchmark: 3× faster than CPython's re and
+  Node's regex** on the cross-harness workload.
+- **json** — parse/text in memory (shares the save_data core). Beats CPython
+  on the cross-bench (80 vs 101 ms).
+- **collections** — counter, setdefault, deque (new DequeObject, O(1) ends).
+- **iters** — chain/product/combinations/permutations/accumulate/takewhile/
+  dropwhile/groupby/repeat/zip_longest (eager, 1M result cap).
+- **functools** — partial, memoize (captures permanent-rooted for the GC).
+- **log** — debug/info/warn/error + set_level + to_file (write-gated),
+  timestamped.
+- **math** grew pi/tau/e/inf/nan, log10/log2, hypot, copysign, is_finite,
+  prod; **strings** grew partition (returns a tuple) and fmt(x, ".2f"/"0Nd"/
+  "x"); **file** grew glob (own wildcard matcher) and walk — read-gated;
+  **os.run(cmd)** is the first consumer of the --allow-run capability
+  (sandbox.sh asserts deny and grant).
+- Language: keywords are valid member names after '.' (regex.match), unknown
+  string escapes pass through literally ("\d+" reads naturally).
+
+Gates: 79/79 golden bit-for-bit both dispatch modes, GC_STRESS+ASan clean,
+fuzz + sandbox green (now incl. --allow-run), bench flat, 1273-call module
+type-fuzz under ASan: 0 crashes. Cross-bench regex+json rows added.
+
 ## v0.13.0 — core types: tuple, Set, bytes, complex (RFC-018)
 
 Four missing fundamentals from the Python/Lua gap analysis, each a new GC

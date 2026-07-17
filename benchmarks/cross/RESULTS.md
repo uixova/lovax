@@ -1,29 +1,37 @@
-# Cross-language benchmark — v0.12 (2026-07-17)
+# Cross-language benchmark — v0.14 (2026-07-17)
 
 Same machine, same workload (outputs verified identical across all languages),
 external wall-clock best-of-5. Reproduce with `benchmarks/cross/run.sh`.
 
-Host: Linux x86_64, g++ 16. Interpreters: Lovax 0.12.0, Lua 5.4, Lua 5.5,
+Host: Linux x86_64, g++ 16. Interpreters: Lovax 0.14.0, Lua 5.4, Lua 5.5,
 LuaJIT, CPython 3.14.6, Node 26.4.
 
 ## Time (ms, lower = better)
 
 | bench   | Lovax | Lua 5.4 | Lua 5.5 | LuaJIT | Python | Node |
 |---------|------:|--------:|--------:|-------:|-------:|-----:|
-| fib(32) | **411** | 204 | 205 | 37 | 332 | 73 |
-| strcat  | **107** | 21  | 23  | 28 | 27  | 46 |
-| hashmap | 258 | 351 | 314 | 100 | 193 | 382 |
-| btree   | 216 | 183 | 163 | 87 | 107 | 68 |
-| gc      | 80  | 41  | 37  | 4  | 89  | 49 |
-| startup | 5   | 4   | 3   | 4  | 20  | 37 |
+| fib(32) | **416** | 202 | 206 | 41 | 346 | 78 |
+| strcat  | **111** | 23  | 30  | 31 | 28  | 43 |
+| hashmap | 278 | 296 | 286 | 104 | 196 | 388 |
+| btree   | 216 | 199 | 175 | 85 | 106 | 80 |
+| gc      | 79  | 41  | 38  | 4  | 90  | 59 |
+| regex   | **14** | n/a | n/a | n/a | 44 | 49 |
+| json    | 80  | n/a | n/a | n/a | 101 | 72 |
+| startup | 6   | 4   | 4   | 4  | 21  | 46 |
+
+**New in v0.14: the regex and json rows exist at all** — both were "missing
+feature" gaps in v0.11. And they arrive winning: Lovax's own step-limited
+regex engine is **3× faster than CPython's `re` and Node's regex** on this
+workload (compiled+cached bytecode, no PCRE machinery), and `json`
+parse+stringify beats CPython (80 vs 101 ms; Node 72).
 
 ## Peak memory (MB, lower = better)
 
 | bench   | Lovax | Lua 5.4 | Lua 5.5 | LuaJIT | Python | Node |
 |---------|------:|--------:|--------:|-------:|-------:|-----:|
 | gc      | **15**  | 15  | 15 | 15 | 15 | 59 |
-| btree   | 37  | 24  | 26 | 32 | 16 | 70 |
-| hashmap | 66  | 31  | 31 | 18 | 37 | 113 |
+| btree   | 37  | 24  | 26 | 35 | 15 | 71 |
+| hashmap | 66  | 31  | 31 | 19 | 37 | 113 |
 
 ## v0.11 → v0.12 (compact structs RFC-017 + honest GC accounting)
 
