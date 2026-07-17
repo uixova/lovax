@@ -1,0 +1,23 @@
+# exit: 0
+hello
+true
+hello
+["1", "22", "333"]
+["a", "b", "c"]
+heLo worLd
+17/07/2026
+["a", "b", "c", "d"]
+["kai@lovax.dev", "kai", "lovax", "dev"]
+abc123
+aa
+aaa
+ab
+ac
+true
+abc
+
+["boş", "çok", "test"]
+aab
+err: regex: repetition count out of range (limit 1000)
+err2: regex: missing ')'
+err3: regex step limit exceeded (pattern too complex for this input)

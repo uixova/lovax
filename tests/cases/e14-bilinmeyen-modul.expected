@@ -1,2 +1,2 @@
 # exit: 70
-[Runtime Error] line 1: unknown module 'fizik' (built-ins: math, game, strings, file, os, time, canvas, net, cmath, random, datetime; no package at lovax_libs/fizik/; for a file module use quotes: use "fizik.lov")
+[Runtime Error] line 1: unknown module 'fizik' (built-ins: math, game, strings, file, os, time, canvas, net, cmath, random, datetime, regex; no package at lovax_libs/fizik/; for a file module use quotes: use "fizik.lov")
