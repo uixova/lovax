@@ -1,0 +1,26 @@
+use datetime
+set dt = datetime.make(2026, 7, 17, 15, 30, 45)
+say dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+say dt.weekday
+say datetime.format(dt, "%Y-%m-%d %H:%M:%S")
+say datetime.format(dt, "gün: %d/%m/%Y")
+set p = datetime.parse("2026-07-17 15:30:45", "%Y-%m-%d %H:%M:%S")
+say p.timestamp == dt.timestamp
+set yarin = datetime.add(dt, 1, 0, 0, 0)
+say datetime.format(yarin, "%Y-%m-%d")
+say datetime.diff(yarin, dt)
+set epoch = datetime.from_timestamp(0)
+say datetime.format(epoch, "%Y-%m-%d %H:%M:%S"), epoch.weekday
+say datetime.weekday(dt)
+set artik = datetime.make(2024, 2, 29)
+say datetime.format(artik, "%Y-%m-%d")
+try:
+    datetime.make(2023, 2, 29)
+catch e:
+    say "err: {e}"
+try:
+    datetime.format(dt, "%Q")
+catch e2:
+    say "err2: {e2}"
+set simdi = datetime.now()
+say simdi.year >= 2026
