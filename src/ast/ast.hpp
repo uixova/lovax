@@ -44,6 +44,7 @@ enum class NodeType {
     BOOLEAN_LITERAL,
     NULL_LITERAL,
     LIST_LITERAL,
+    TUPLE_LITERAL,
     MAP_LITERAL,
     INDEX_EXPRESSION,
     MEMBER_EXPRESSION,
@@ -215,6 +216,18 @@ public:
     std::vector<std::unique_ptr<Expression>> elements;
 
     NodeType nodeType() const override { return NodeType::LIST_LITERAL; }
+    int line() const override { return token.line; }
+    std::string tokenLiteral() const override { return token.literal; }
+    void expressionNode() override {}
+};
+
+// Tuple literal -> (1, 2) or (5,) — also produced by `return a, b`
+class TupleLiteral : public Expression {
+public:
+    Token token; // '(' token (or the first value's token for bare returns)
+    std::vector<std::unique_ptr<Expression>> elements;
+
+    NodeType nodeType() const override { return NodeType::TUPLE_LITERAL; }
     int line() const override { return token.line; }
     std::string tokenLiteral() const override { return token.literal; }
     void expressionNode() override {}

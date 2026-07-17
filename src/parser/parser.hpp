@@ -489,6 +489,20 @@ private:
             curToken.type != TokenType::END_OF_FILE &&
             curToken.type != TokenType::DEDENT) {
             stmt->returnValue = parseExpression(Precedence::LOWEST);
+            // Multiple return values build a tuple: return a, b
+            if (peekToken.type == TokenType::COMMA) {
+                auto tup = std::make_unique<TupleLiteral>();
+                tup->token = stmt->token;
+                tup->elements.push_back(std::move(stmt->returnValue));
+                while (peekToken.type == TokenType::COMMA) {
+                    nextParserToken();   // onto the comma
+                    nextParserToken();   // onto the next value
+                    auto v = parseExpression(Precedence::LOWEST);
+                    if (v == nullptr) return stmt;
+                    tup->elements.push_back(std::move(v));
+                }
+                stmt->returnValue = std::move(tup);
+            }
         }
 
         return stmt;
@@ -936,9 +950,33 @@ private:
     }
 
     std::unique_ptr<Expression> parseGroupedExpression() {
+        Token lparen = curToken;
+        // Empty tuple: ()
+        if (peekToken.type == TokenType::RPAREN) {
+            nextParserToken();
+            auto tup = std::make_unique<TupleLiteral>();
+            tup->token = lparen;
+            return tup;
+        }
         nextParserToken(); // skip the '(' token
         auto expr = parseExpression(Precedence::LOWEST);
         if (expr == nullptr) return nullptr;
+        // A comma inside parens makes it a tuple: (a, b) / (a,)
+        if (peekToken.type == TokenType::COMMA) {
+            auto tup = std::make_unique<TupleLiteral>();
+            tup->token = lparen;
+            tup->elements.push_back(std::move(expr));
+            while (peekToken.type == TokenType::COMMA) {
+                nextParserToken();                    // onto the comma
+                if (peekToken.type == TokenType::RPAREN) break;  // trailing: (a,)
+                nextParserToken();                    // onto the next element
+                auto elem = parseExpression(Precedence::LOWEST);
+                if (elem == nullptr) return nullptr;
+                tup->elements.push_back(std::move(elem));
+            }
+            if (!expectPeek(TokenType::RPAREN)) return nullptr;
+            return tup;
+        }
         if (!expectPeek(TokenType::RPAREN)) return nullptr;
         return expr;
     }

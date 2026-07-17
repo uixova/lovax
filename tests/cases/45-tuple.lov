@@ -1,0 +1,30 @@
+set t = (1, 2, 3)
+say t
+say len(t)
+say t[0], t[-1]
+say kind(t)
+set one = (5,)
+say one
+say ()
+fn divmod(a, b):
+    return a / b, a % b
+set q, r = divmod(17, 5)
+say q, r
+say divmod(17, 5)
+for x in t:
+    say x
+say 2 in t
+say (1, 2) == (1, 2)
+say (1, 2) == [1, 2]
+say contains(t, 3), find(t, 2)
+say first(t), last(t), sum(t)
+try:
+    t[0] = 9
+catch e:
+    say "err: {e}"
+try:
+    push(t, 4)
+catch e2:
+    say "err2: {e2}"
+set nested = ((1, 2), (3, 4))
+say nested[1][0]

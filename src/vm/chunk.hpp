@@ -94,6 +94,7 @@ enum class Op : uint8_t {
                     // closures, pushes the built StructShapeObject
     STRUCT_BIND,    // pops factory closure and shape, attaches shape, pushes factory
     STRUCT_MAKE,    // u16 nFields: builds an instance from locals[0..n), pushes it
+    TUPLE,          // u16 element count -> builds an immutable tuple
 
     HALT            // end of the top-level script
 };
