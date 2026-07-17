@@ -1,0 +1,22 @@
+# exit: 0
+Set{1, 2, 3}
+3
+set
+true
+false
+Set{1, 2, 3, 4}
+Set{2, 3, 4}
+true true
+Set{1, 2, 3, 4}
+Set{3}
+Set{1, 2}
+true
+false
+k
+l
+[5, 6]
+Set{} 0
+Set{1, 2, 3} Set{1, 2, 3, 99}
+Set{"a", "b"}
+err: Set elements must be string, int or bool; got list
+err2: Set() expects a list or tuple of elements, got int

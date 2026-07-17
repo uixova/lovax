@@ -1,0 +1,28 @@
+set b = bytes([72, 101, 108, 108, 111])
+say b
+say kind(b), len(b)
+say b[0], b[-1]
+say text(b)
+set b2 = bytes("selam")
+say b2, len(b2)
+say b[1:4]
+say sum(b)
+say bytes("ab") == bytes([97, 98])
+say bytes("ab") == bytes("ac")
+set utf = bytes("şey")
+say len(utf), len("şey")
+say text(utf)
+try:
+    b[0] = 9
+catch e:
+    say "err: {e}"
+try:
+    say bytes([300])
+catch e2:
+    say "err2: {e2}"
+use file
+file.write_bytes("tests/tmp/probe.bin", b)
+set rb = file.read_bytes("tests/tmp/probe.bin")
+say rb, text(rb)
+file.write_bytes("tests/tmp/probe2.bin", [1, 2, 255])
+say file.read_bytes("tests/tmp/probe2.bin")

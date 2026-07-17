@@ -1,0 +1,16 @@
+# exit: 0
+b"Hello"
+bytes 5
+72 111
+Hello
+b"selam" 5
+b"ell"
+500
+true
+false
+4 3
+şey
+err: bytes are immutable — build a new bytes value instead
+err2: bytes() values must be 0-255, got 300
+b"Hello" Hello
+b"\x01\x02\xff"

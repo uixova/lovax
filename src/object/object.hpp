@@ -21,6 +21,9 @@ enum class ObjectType {
     LIST,
     TUPLE,
     MAP,
+    SET,
+    BYTES,
+    COMPLEX,
     RANGE,
     FUNCTION,
     BUILTIN,
@@ -235,6 +238,9 @@ public:
 class MapObject : public Object {
 public:
     MapObject() : Object(ObjectType::MAP) {}
+protected:
+    explicit MapObject(ObjectType t) : Object(t) {}   // for SetObject
+public:
     std::vector<std::pair<Ref<Object>, Ref<Object>>> entries;
     // Typed indexes: no key-tag string is ever built for a lookup. String keys
     // hash the raw bytes, int/bool keys never touch a string at all.
@@ -370,6 +376,59 @@ public:
             out += inspectQuoted(entries[i].first) + ": " + inspectQuoted(entries[i].second);
         }
         return out + "}";
+    }
+};
+
+// Set -> Set{1, 2, "a"}: unique elements (string/int/bool), insertion-ordered.
+// Inherits MapObject so the typed indexes, lookup, removal and key-snapshot
+// iteration are all reused — a set is a value-less map (values are TRUE).
+class SetObject : public MapObject {
+public:
+    SetObject() : MapObject(ObjectType::SET) {}
+    std::string inspect() const override {
+        std::string out = "Set{";
+        for (size_t i = 0; i < entries.size(); ++i) {
+            if (i > 0) out += ", ";
+            out += inspectQuoted(entries[i].first);
+        }
+        return out + "}";
+    }
+};
+
+// Immutable byte string -> b"\x01ab": binary data (files, sockets, future
+// hash/compress modules). Raw std::string storage; index -> int, text() decodes.
+class BytesObject : public Object {
+public:
+    std::string data;
+    BytesObject() : Object(ObjectType::BYTES) {}
+    explicit BytesObject(std::string d) : Object(ObjectType::BYTES), data(std::move(d)) {}
+    size_t gcBytes() const override { return sizeof(*this) + data.capacity(); }
+    std::string inspect() const override {
+        std::string out = "b\"";
+        char buf[8];
+        for (unsigned char c : data) {
+            if (c == '"' || c == '\\') { out += '\\'; out += (char)c; }
+            else if (c >= 0x20 && c < 0x7f) out += (char)c;
+            else { std::snprintf(buf, sizeof(buf), "\\x%02x", c); out += buf; }
+        }
+        return out + "\"";
+    }
+};
+
+// Complex number -> 3 + 4j (heap object: two doubles cannot fit the 16-byte
+// tagged Value). Arithmetic lives in Runtime::evalInfixExpression.
+class ComplexObject : public Object {
+public:
+    double re = 0.0, im = 0.0;
+    ComplexObject(double r, double i) : Object(ObjectType::COMPLEX), re(r), im(i) {}
+    // Python-style: integral parts print without the trailing .0 -> (3+4j)
+    static std::string fmtPart(double d) {
+        if (d == (long long)d && d > -1e15 && d < 1e15) return std::to_string((long long)d);
+        return formatFloat(d);
+    }
+    std::string inspect() const override {
+        if (re == 0.0) return fmtPart(im) + "j";
+        return "(" + fmtPart(re) + (im < 0 ? "-" : "+") + fmtPart(im < 0 ? -im : im) + "j)";
     }
 };
 
@@ -537,6 +596,9 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::LIST:         return "list";
         case ObjectType::TUPLE:        return "tuple";
         case ObjectType::MAP:          return "map";
+        case ObjectType::SET:          return "set";
+        case ObjectType::BYTES:        return "bytes";
+        case ObjectType::COMPLEX:      return "complex";
         case ObjectType::RANGE:        return "range";
         case ObjectType::FUNCTION:     return "fn";
         case ObjectType::BUILTIN:      return "builtin";
@@ -558,6 +620,27 @@ inline std::string typeName(ObjectType t) {
 inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
     bool aNum = (a->type() == ObjectType::INTEGER || a->type() == ObjectType::FLOAT);
     bool bNum = (b->type() == ObjectType::INTEGER || b->type() == ObjectType::FLOAT);
+    // complex == complex, and 3+0j == 3 (Python rule)
+    if (a->type() == ObjectType::COMPLEX || b->type() == ObjectType::COMPLEX) {
+        double ar, ai, br, bi;
+        if (a->type() == ObjectType::COMPLEX) {
+            auto* ca = static_cast<ComplexObject*>(a.get()); ar = ca->re; ai = ca->im;
+        } else if (aNum) {
+            ar = (a->type() == ObjectType::INTEGER)
+                 ? (double)static_cast<IntegerObject*>(a.get())->value
+                 : static_cast<FloatObject*>(a.get())->value;
+            ai = 0.0;
+        } else return false;
+        if (b->type() == ObjectType::COMPLEX) {
+            auto* cb = static_cast<ComplexObject*>(b.get()); br = cb->re; bi = cb->im;
+        } else if (bNum) {
+            br = (b->type() == ObjectType::INTEGER)
+                 ? (double)static_cast<IntegerObject*>(b.get())->value
+                 : static_cast<FloatObject*>(b.get())->value;
+            bi = 0.0;
+        } else return false;
+        return ar == br && ai == bi;
+    }
     if (aNum && bNum) {
         double av = (a->type() == ObjectType::INTEGER)
                     ? (double)static_cast<IntegerObject*>(a.get())->value
@@ -595,6 +678,19 @@ inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
             for (const auto& e : ma->entries) {
                 auto bv = mb->get(e.first);
                 if (bv == nullptr || !objectEquals(e.second, bv)) return false;
+            }
+            return true;
+        }
+        case ObjectType::BYTES:
+            return static_cast<BytesObject*>(a.get())->data ==
+                   static_cast<BytesObject*>(b.get())->data;
+        case ObjectType::SET: {
+            // Order-insensitive: same size and every element present in the other.
+            auto* sa = static_cast<SetObject*>(a.get());
+            auto* sb = static_cast<SetObject*>(b.get());
+            if (sa->entries.size() != sb->entries.size()) return false;
+            for (const auto& e : sa->entries) {
+                if (sb->get(e.first) == nullptr) return false;
             }
             return true;
         }

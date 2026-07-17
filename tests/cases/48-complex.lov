@@ -1,0 +1,28 @@
+# complex numbers (RFC-018): 4j literal, arithmetic, cmath module
+set z = 3 + 4j
+say z
+say kind(z)
+say z.real, z.imag
+say abs(z)
+say z + (1 + 2j)
+say z * 2j
+say z - 1
+say z / 2
+say (1 + 2j) * (1 - 2j)
+say -z
+say z == 3 + 4j
+say (3 + 0j) == 3
+say 4j, 2.5j
+use cmath
+say cmath.sqrt(-1 + 0j)
+say cmath.conj(z)
+say cmath.abs(z)
+say cmath.make(1, -1)
+try:
+    say z + "x"
+catch e:
+    say "err: {e}"
+try:
+    say z / 0j
+catch e2:
+    say "err2: {e2}"

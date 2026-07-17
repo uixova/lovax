@@ -1096,6 +1096,11 @@ private:
                     Value* pa = sp_ - 1;
                     if (pa->kind == VKind::INT)   { pa->i = -pa->i; VM_NEXT_FAST; }
                     if (pa->kind == VKind::FLOAT) { pa->d = -pa->d; VM_NEXT_FAST; }
+                    if (pa->isObjType(ObjectType::COMPLEX)) {
+                        auto* c = static_cast<ComplexObject*>(pa->obj);
+                        *pa = Value::object(makeObj<ComplexObject>(-c->re, -c->im));
+                        VM_NEXT;
+                    }
                     VM_THROW(makeError(
                         "unary '-' only works on numbers, got " + valueTypeName(*pa),
                         currentLine()));
@@ -1605,7 +1610,8 @@ private:
                             iter->kind = IterObject::Kind::STRING;
                             iter->source = obj;
                             break;
-                        case ObjectType::MAP: {
+                        case ObjectType::MAP:
+                        case ObjectType::SET: {   // a set is a value-less map
                             iter->kind = IterObject::Kind::MAP_KEYS;
                             iter->source = obj; // for the pair form's value lookup
                             for (const auto& e : static_cast<MapObject*>(obj.get())->entries) {
@@ -2048,6 +2054,9 @@ private:
         if (obj->type() == ObjectType::TUPLE) {
             return makeError("tuples are immutable — convert to a list to modify", line);
         }
+        if (obj->type() == ObjectType::BYTES) {
+            return makeError("bytes are immutable — build a new bytes value instead", line);
+        }
         if (obj->type() == ObjectType::STRUCT) {
             auto* si = static_cast<StructInstanceObject*>(obj.get());
             if (idx->type() != ObjectType::STRING) {
@@ -2099,6 +2108,14 @@ private:
             long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
             if (a >= b) return makeObj<StringObject>("");
             return makeObj<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
+        }
+        if (obj->type() == ObjectType::BYTES) {
+            const std::string& d = static_cast<BytesObject*>(obj.get())->data;
+            long long n = (long long)d.size();
+            long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
+            long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
+            if (a >= b) return makeObj<BytesObject>(std::string());
+            return makeObj<BytesObject>(d.substr((size_t)a, (size_t)(b - a)));
         }
         return makeError("slicing only works on list and string, got " + typeName(obj->type()), line);
     }

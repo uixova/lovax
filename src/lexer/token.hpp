@@ -13,6 +13,7 @@ enum class TokenType {
     IDENTIFIER,
     INT,
     FLOAT,
+    IMAGINARY,
     STRING,
 
     // Operators
@@ -123,6 +124,7 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::IDENTIFIER:      return "identifier";
         case TokenType::INT:             return "integer";
         case TokenType::FLOAT:           return "float";
+        case TokenType::IMAGINARY:       return "imaginary";
         case TokenType::STRING:          return "string";
         case TokenType::ASSIGN:          return "'='";
         case TokenType::PLUS:            return "'+'";

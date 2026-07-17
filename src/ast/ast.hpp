@@ -45,6 +45,7 @@ enum class NodeType {
     NULL_LITERAL,
     LIST_LITERAL,
     TUPLE_LITERAL,
+    COMPLEX_LITERAL,
     MAP_LITERAL,
     INDEX_EXPRESSION,
     MEMBER_EXPRESSION,
@@ -216,6 +217,18 @@ public:
     std::vector<std::unique_ptr<Expression>> elements;
 
     NodeType nodeType() const override { return NodeType::LIST_LITERAL; }
+    int line() const override { return token.line; }
+    std::string tokenLiteral() const override { return token.literal; }
+    void expressionNode() override {}
+};
+
+// Imaginary literal -> 4j (a complex constant with re = 0)
+class ComplexLiteral : public Expression {
+public:
+    Token token;
+    double imag = 0.0;
+
+    NodeType nodeType() const override { return NodeType::COMPLEX_LITERAL; }
     int line() const override { return token.line; }
     std::string tokenLiteral() const override { return token.literal; }
     void expressionNode() override {}

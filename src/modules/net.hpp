@@ -100,9 +100,12 @@ inline ObjPtr makeNetModule() {
 
     // send(sock, text) -> bytes sent
     def("send", [](const Args& a, int line, const CallFn&) -> ObjPtr {
-        if (a.size() != 2 || !netIsInt(a[0]) || !netIsStr(a[1]))
+        if (a.size() != 2 || !netIsInt(a[0]) ||
+            (!netIsStr(a[1]) && a[1]->type() != ObjectType::BYTES))
             return makeError("net.send(sock, text) expects (socket, string)", line);
-        const std::string& s = netStr(a[1]);
+        const std::string& s = a[1]->type() == ObjectType::BYTES
+            ? static_cast<BytesObject*>(a[1].get())->data
+            : netStr(a[1]);
         long long n = ::send((int)netInt(a[0]), s.data(), (int)s.size(), 0);
         if (n < 0) return netErr("send", line);
         return makeObj<IntegerObject>(n);

@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <cmath>
+#include <complex>
 #include "../object/object.hpp"
 
 // Object-path semantics shared by the VM's slow paths: binary operators on
@@ -33,6 +34,12 @@ namespace Runtime {
             }
             return makeError("struct '" + si->shape->name + "' has no field '" +
                              prop + "' (fields: " + avail + ")", line);
+        }
+        if (obj->type() == ObjectType::COMPLEX) {
+            auto* c = static_cast<ComplexObject*>(obj.get());
+            if (prop == "real") return makeObj<FloatObject>(c->re);
+            if (prop == "imag") return makeObj<FloatObject>(c->im);
+            return makeError("complex has no member '" + prop + "' (real, imag)", line);
         }
         if (obj->type() != ObjectType::MAP) {
             return makeError("'.' access expects a map or module, got " +
@@ -113,6 +120,21 @@ namespace Runtime {
             return evalMemberAccess(obj, static_cast<StringObject*>(idx.get())->value, line);
         }
 
+        if (obj->type() == ObjectType::BYTES) {
+            if (idx->type() != ObjectType::INTEGER) {
+                return makeError("bytes index must be an integer, got " + typeName(idx->type()) + "", line);
+            }
+            const std::string& d = static_cast<BytesObject*>(obj.get())->data;
+            long long i = static_cast<IntegerObject*>(idx.get())->value;
+            long long n = (long long)d.size();
+            if (i < 0) i += n;
+            if (i < 0 || i >= n) {
+                return makeError("bytes index out of range: " + idx->inspect() +
+                                 " (length " + std::to_string(n) + ")", line);
+            }
+            return makeObj<IntegerObject>((long long)(unsigned char)d[(size_t)i]);
+        }
+
         if (obj->type() == ObjectType::TUPLE) {
             if (idx->type() != ObjectType::INTEGER) {
                 return makeError("tuple index must be an integer, got " + typeName(idx->type()) + "", line);
@@ -145,6 +167,54 @@ namespace Runtime {
         if (op == "==") return boolObj(objectEquals(left, right));
         if (op == "!=") return boolObj(!objectEquals(left, right));
 
+        // Complex arithmetic: complex ⊕ complex/number for + - * / ** (RFC-018)
+        {
+            bool lc = left->type() == ObjectType::COMPLEX;
+            bool rc = right->type() == ObjectType::COMPLEX;
+            if ((lc || rc) &&
+                (op == "+" || op == "-" || op == "*" || op == "/" || op == "**")) {
+                auto asC = [](const Ref<Object>& o, bool isC, double& r, double& i) -> bool {
+                    if (isC) { auto* c = static_cast<ComplexObject*>(o.get()); r = c->re; i = c->im; return true; }
+                    if (o->type() == ObjectType::INTEGER) { r = (double)static_cast<IntegerObject*>(o.get())->value; i = 0; return true; }
+                    if (o->type() == ObjectType::FLOAT)   { r = static_cast<FloatObject*>(o.get())->value; i = 0; return true; }
+                    return false;
+                };
+                double ar, ai, br, bi;
+                if (asC(left, lc, ar, ai) && asC(right, rc, br, bi)) {
+                    std::complex<double> a(ar, ai), b(br, bi), out;
+                    if (op == "+") out = a + b;
+                    else if (op == "-") out = a - b;
+                    else if (op == "*") out = a * b;
+                    else if (op == "/") {
+                        if (br == 0.0 && bi == 0.0) return makeError("complex division by zero", line);
+                        out = a / b;
+                    } else out = std::pow(a, b);
+                    return makeObj<ComplexObject>(out.real(), out.imag());
+                }
+                return makeError("complex numbers only combine with numbers ('" + op + "')", line);
+            }
+        }
+
+        // Set algebra: | union, & intersection, - difference (insertion-ordered)
+        if (left->type() == ObjectType::SET && right->type() == ObjectType::SET &&
+            (op == "|" || op == "&" || op == "-")) {
+            auto* a = static_cast<SetObject*>(left.get());
+            auto* b = static_cast<SetObject*>(right.get());
+            auto out = makeObj<SetObject>();
+            GcRoot _or(out.get());
+            if (op == "|") {
+                for (const auto& e : a->entries) out->set(e.first, TRUE_OBJ);
+                for (const auto& e : b->entries) out->set(e.first, TRUE_OBJ);
+            } else if (op == "&") {
+                for (const auto& e : a->entries)
+                    if (b->get(e.first) != nullptr) out->set(e.first, TRUE_OBJ);
+            } else {
+                for (const auto& e : a->entries)
+                    if (b->get(e.first) == nullptr) out->set(e.first, TRUE_OBJ);
+            }
+            return out;
+        }
+
         // Membership: element in list / substring in string / key in map / number in range
         if (op == "in") {
             switch (right->type()) {
@@ -165,6 +235,7 @@ namespace Runtime {
                     return boolObj(hay.find(needle) != std::string::npos);
                 }
                 case ObjectType::MAP:
+                case ObjectType::SET:
                     return boolObj(static_cast<MapObject*>(right.get())->get(left) != nullptr);
                 case ObjectType::RANGE: {
                     if (left->type() != ObjectType::INTEGER) return FALSE_OBJ;

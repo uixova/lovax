@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.13.0 — core types: tuple, Set, bytes, complex (RFC-018)
+
+Four missing fundamentals from the Python/Lua gap analysis, each a new GC
+object type — no value-representation change, no perf regression.
+
+- **tuple** — `(a, b)`, one-tuple `(5,)`, empty `()`; **multi-return**
+  `return a, b` + unpacking `set q, r = f()`; indexing, iteration, `in`,
+  deep equality; immutable (shares the list layout, the tag blocks mutation).
+- **Set** — `Set([1, 2, 3])` (capital S: lowercase `set` is the keyword);
+  `a | b` / `a & b` / `a - b`, `in`, order-insensitive `==`, `add/remove/has/
+  values/clone`; insertion-ordered, prints `Set{1, 2}`. A value-less map
+  underneath — indexes and iteration reused.
+- **bytes** — `bytes([72, 101])` / `bytes("text")`; index → int, slice, `len`,
+  `text()` decodes; prints `b"He\x01"`. **Breaking:** `file.read_bytes` now
+  returns bytes (was list-of-ints); `write_bytes` accepts both; `net.send`
+  accepts bytes. Foundation for future hash/compress modules.
+- **complex** — `3 + 4j` literal; `+ - * / **`, unary `-`, `.real/.imag`,
+  `abs(z)`, `3+0j == 3`; `use cmath` → `make, sqrt, exp, log, sin, cos, conj,
+  abs, arg, polar`.
+
+Gates: 74/74 golden bit-for-bit both dispatch modes, GC_STRESS+ASan clean,
+fuzz/sandbox green, bench flat, 3150-call new-type fuzz under ASan: 0 crashes.
+
 ## v0.12.0 — modular layout + the memory release
 
 The cross-language benchmark (benchmarks/cross) exposed struct memory as the

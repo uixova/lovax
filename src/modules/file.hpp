@@ -192,9 +192,9 @@ inline ObjPtr makeFileModule() {
         return result;
     });
 
-    // read_bytes(path): reads a binary file as a list of ints (0-255).
-    // For game assets, .bin saves, etc. A dedicated bytes type arrives with the VM;
-    // until then files larger than 10 MB are rejected to avoid allocation storms.
+    // read_bytes(path): reads a binary file as a bytes value.
+    // For game assets, .bin saves, etc. Files larger than 10 MB are rejected
+    // to avoid allocation storms.
     def("read_bytes", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
         LOVAX_GATE(perms().read, "file read", "--allow-read");
         if (args.size() != 1) return argCountError("read_bytes", "1", args.size(), line);
@@ -207,25 +207,26 @@ inline ObjPtr makeFileModule() {
             return makeError("read_bytes() file too large (10 MB limit): " + path, line);
         }
         f.seekg(0);
-        std::vector<char> buf((size_t)size);
-        f.read(buf.data(), size);
-        auto list = makeObj<ListObject>();
-        list->elements.reserve((size_t)size);
-        for (char c : buf) {
-            list->elements.push_back(
-                makeObj<IntegerObject>((long long)(unsigned char)c));
-        }
-        return list;
+        std::string buf((size_t)size, '\0');
+        f.read(&buf[0], size);
+        return makeObj<BytesObject>(std::move(buf));
     });
 
-    // write_bytes(path, list): writes a list of ints (0-255) as a binary file
+    // write_bytes(path, data): writes bytes (or a list of ints 0-255) as a binary file
     def("write_bytes", [pathArg](const Args& args, int line, const CallFn&) -> ObjPtr {
         LOVAX_GATE(perms().write, "file write", "--allow-write");
         if (args.size() != 2) return argCountError("write_bytes", "2", args.size(), line);
         std::string path;
         if (auto err = pathArg(args, "write_bytes", line, path)) return err;
+        if (args[1]->type() == ObjectType::BYTES) {
+            const std::string& data = static_cast<BytesObject*>(args[1].get())->data;
+            std::ofstream bf(path, std::ios::binary);
+            if (!bf.is_open()) return makeError("cannot write file: " + path, line);
+            bf.write(data.data(), (std::streamsize)data.size());
+            return NULL_OBJ_;
+        }
         if (args[1]->type() != ObjectType::LIST) {
-            return makeError("write_bytes(path, list) expects a list of bytes", line);
+            return makeError("write_bytes(path, data) expects bytes or a list of ints", line);
         }
         std::string buf;
         const auto& els = static_cast<ListObject*>(args[1].get())->elements;

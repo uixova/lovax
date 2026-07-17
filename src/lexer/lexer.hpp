@@ -458,6 +458,14 @@ private:
             return t;
         }
 
+        // Imaginary literal: 4j / 2.5j -> a complex constant (3 + 4j builds on '+')
+        if (ch == 'j' && !isLetter(peekChar()) && !isDigit(peekChar())) {
+            readChar(); // consume 'j'
+            t.type = TokenType::IMAGINARY;
+            t.literal = lit;
+            return t;
+        }
+
         t.type = isFloat ? TokenType::FLOAT : TokenType::INT;
         t.literal = lit;
         return t;

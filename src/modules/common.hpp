@@ -75,6 +75,13 @@ inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
         }
         return out;
     }
+    if (v->type() == ObjectType::SET) {
+        auto* src = static_cast<SetObject*>(v.get());
+        auto out = makeObj<SetObject>();
+        GcRoot _grcs(out.get());
+        for (const auto& e : src->entries) out->set(e.first, TRUE_OBJ);
+        return out;
+    }
     if (v->type() == ObjectType::STRUCT) {
         auto* src = static_cast<StructInstanceObject*>(v.get());
         auto out = makeObj<StructInstanceObject>();

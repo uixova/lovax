@@ -918,6 +918,7 @@ private:
             case TokenType::MINUS:
             case TokenType::TILDE:
             case TokenType::NOT:        return parsePrefixExpression();
+            case TokenType::IMAGINARY:  return parseComplexLiteral();
             case TokenType::LPAREN:     return parseGroupedExpression();
             case TokenType::LBRACKET:   return parseListLiteral();
             case TokenType::LBRACE:     return parseMapLiteral();
@@ -979,6 +980,18 @@ private:
         }
         if (!expectPeek(TokenType::RPAREN)) return nullptr;
         return expr;
+    }
+
+    std::unique_ptr<Expression> parseComplexLiteral() {
+        auto lit = std::make_unique<ComplexLiteral>();
+        lit->token = curToken;
+        try {
+            lit->imag = std::stod(curToken.literal);
+        } catch (...) {
+            addError("invalid imaginary literal: " + curToken.literal, curToken);
+            return nullptr;
+        }
+        return lit;
     }
 
     std::unique_ptr<Expression> parseIntegerLiteral() {

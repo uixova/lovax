@@ -1,0 +1,36 @@
+set s = Set([1, 2, 3, 2, 1])
+say s
+say len(s)
+say kind(s)
+say 2 in s
+say 9 in s
+add(s, 4)
+add(s, 4)
+say s
+remove(s, 1)
+say s
+say has(s, 3), contains(s, 3)
+set a = Set([1, 2, 3])
+set b = Set([3, 4])
+say a | b
+say a & b
+say a - b
+say Set([3, 2, 1]) == Set([1, 2, 3])
+say Set([1]) == Set([2])
+for x in Set(["k", "l"]):
+    say x
+say values(Set([5, 6]))
+set e = Set()
+say e, len(e)
+set c = clone(a)
+add(c, 99)
+say a, c
+say Set(["a", "b"])
+try:
+    add(s, [1])
+catch err:
+    say "err: {err}"
+try:
+    say Set(5)
+catch err2:
+    say "err2: {err2}"

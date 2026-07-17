@@ -37,9 +37,12 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             case ObjectType::TUPLE:
                 return makeObj<IntegerObject>((long long)static_cast<ListObject*>(a.get())->elements.size());
             case ObjectType::MAP:
+            case ObjectType::SET:
                 return makeObj<IntegerObject>((long long)static_cast<MapObject*>(a.get())->entries.size());
             case ObjectType::STRUCT:
                 return makeObj<IntegerObject>((long long)static_cast<StructInstanceObject*>(a.get())->slots.size());
+            case ObjectType::BYTES:
+                return makeObj<IntegerObject>((long long)static_cast<BytesObject*>(a.get())->data.size());
             case ObjectType::RANGE:
                 return makeObj<IntegerObject>(static_cast<RangeObject*>(a.get())->length());
             default:
@@ -50,6 +53,10 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // --- text(x): converts any value to a string (RFC-002: no implicit conversion) ---
     def("text", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("text", "1", args.size(), line);
+        if (args[0]->type() == ObjectType::BYTES) {
+            // Decode: the raw bytes become the string's contents (UTF-8 passthrough).
+            return makeObj<StringObject>(static_cast<BytesObject*>(args[0].get())->data);
+        }
         return makeObj<StringObject>(args[0]->inspect());
     });
 
@@ -75,6 +82,72 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         } catch (...) {
             return makeError("num() could not convert: \"" + s + "\" is not a valid number", line);
         }
+    });
+
+    // --- Set() / Set(list): a unique-element collection (string/int/bool) ---
+    def("Set", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() > 1) return argCountError("Set", "0-1", args.size(), line);
+        auto out = makeObj<SetObject>();
+        GcRoot _grset(out.get());
+        if (args.size() == 1) {
+            if (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE) {
+                return makeError("Set() expects a list or tuple of elements, got " +
+                                 typeName(args[0]->type()) + "", line);
+            }
+            for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
+                if (e->type() != ObjectType::STRING && e->type() != ObjectType::INTEGER &&
+                    e->type() != ObjectType::BOOLEAN) {
+                    return makeError("Set elements must be string, int or bool; got " +
+                                     typeName(e->type()) + "", line);
+                }
+                out->set(e, TRUE_OBJ);
+            }
+        }
+        return out;
+    });
+
+    // --- add(set, x): inserts an element (no-op if present), returns the set ---
+    def("add", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2) return argCountError("add", "2", args.size(), line);
+        if (args[0]->type() != ObjectType::SET) {
+            return makeError("add() expects a set, got " + typeName(args[0]->type()) + "", line);
+        }
+        if (args[1]->type() != ObjectType::STRING && args[1]->type() != ObjectType::INTEGER &&
+            args[1]->type() != ObjectType::BOOLEAN) {
+            return makeError("Set elements must be string, int or bool; got " +
+                             typeName(args[1]->type()) + "", line);
+        }
+        static_cast<SetObject*>(args[0].get())->set(args[1], TRUE_OBJ);
+        return args[0];
+    });
+
+    // --- bytes(x): binary data from a list of ints (0-255), a string's raw
+    //     bytes, or another bytes value. Immutable; index -> int, text() decodes ---
+    def("bytes", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1) return argCountError("bytes", "1", args.size(), line);
+        if (args[0]->type() == ObjectType::BYTES) return args[0];
+        if (args[0]->type() == ObjectType::STRING) {
+            return makeObj<BytesObject>(static_cast<StringObject*>(args[0].get())->value);
+        }
+        if (args[0]->type() == ObjectType::LIST || args[0]->type() == ObjectType::TUPLE) {
+            std::string data;
+            const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+            data.reserve(els.size());
+            for (const auto& e : els) {
+                if (e->type() != ObjectType::INTEGER) {
+                    return makeError("bytes() list elements must be integers 0-255, got " +
+                                     typeName(e->type()) + "", line);
+                }
+                long long v = static_cast<IntegerObject*>(e.get())->value;
+                if (v < 0 || v > 255) {
+                    return makeError("bytes() values must be 0-255, got " + std::to_string(v), line);
+                }
+                data += (char)(unsigned char)v;
+            }
+            return makeObj<BytesObject>(std::move(data));
+        }
+        return makeError("bytes() expects a list of ints, a string or bytes; got " +
+                         typeName(args[0]->type()) + "", line);
     });
 
     // --- kind(x): returns the type name: "int", "float", "string", "list"... ---
@@ -124,7 +197,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             list->elements.erase(list->elements.begin() + idx);
             return removed;
         }
-        if (args[0]->type() == ObjectType::MAP) {
+        if (args[0]->type() == ObjectType::MAP || args[0]->type() == ObjectType::SET) {
             auto* map = static_cast<MapObject*>(args[0].get());
             if (map->frozen) {
                 return makeError("module '" + map->moduleName + "' cannot be modified (frozen)", line);
@@ -132,7 +205,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             auto val = map->get(args[1]);
             if (val == nullptr) return NULL_OBJ_;
             map->remove(args[1]);
-            return val;
+            return args[0]->type() == ObjectType::SET ? args[1] : val;
         }
         return makeError("remove() expects a list or map, got " + typeName(args[0]->type()) + "", line);
     });
@@ -168,6 +241,14 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             for (const auto& s : si->slots) list->elements.push_back(s);
             return list;
         }
+        if (args[0]->type() == ObjectType::SET) {
+            auto list = makeObj<ListObject>();
+            GcRoot _grsetv(list.get());
+            for (const auto& e : static_cast<SetObject*>(args[0].get())->entries) {
+                list->elements.push_back(e.first);
+            }
+            return list;
+        }
         if (args[0]->type() != ObjectType::MAP) {
             return makeError("values() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
@@ -187,7 +268,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             auto* si = static_cast<StructInstanceObject*>(args[0].get());
             return boolObj(si->getField(static_cast<StringObject*>(args[1].get())->value) != nullptr);
         }
-        if (args[0]->type() != ObjectType::MAP) {
+        if (args[0]->type() != ObjectType::MAP && args[0]->type() != ObjectType::SET) {
             return makeError("has() expects a map, got " + typeName(args[0]->type()) + "", line);
         }
         return boolObj(static_cast<MapObject*>(args[0].get())->get(args[1]) != nullptr);
@@ -221,6 +302,10 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         }
         if (args[0]->type() == ObjectType::FLOAT) {
             return makeObj<FloatObject>(std::fabs(asDouble(args[0])));
+        }
+        if (args[0]->type() == ObjectType::COMPLEX) {
+            auto* c = static_cast<ComplexObject*>(args[0].get());
+            return makeObj<FloatObject>(std::sqrt(c->re * c->re + c->im * c->im));
         }
         return makeError("abs() expects a number, got " + typeName(args[0]->type()) + "", line);
     });
@@ -361,7 +446,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             }
             return FALSE_OBJ;
         }
-        if (args[0]->type() == ObjectType::MAP) {
+        if (args[0]->type() == ObjectType::MAP || args[0]->type() == ObjectType::SET) {
             return boolObj(static_cast<MapObject*>(args[0].get())->get(args[1]) != nullptr);
         }
         return makeError("contains() expects string/list/map, got " + typeName(args[0]->type()) + "", line);
@@ -521,6 +606,11 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
     // sum(list): sum of numbers (int if all ints)
     def("sum", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1) return argCountError("sum", "1", args.size(), line);
+        if (args[0]->type() == ObjectType::BYTES) {
+            long long t = 0;
+            for (unsigned char c : static_cast<BytesObject*>(args[0].get())->data) t += c;
+            return makeObj<IntegerObject>(t);
+        }
         if (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE) {
             return makeError("sum() expects a list, got " + typeName(args[0]->type()) + "", line);
         }

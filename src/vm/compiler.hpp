@@ -923,6 +923,11 @@ private:
                 emitU16((uint16_t)l->elements.size(), l->token.line);
                 break;
             }
+            case NodeType::COMPLEX_LITERAL: {
+                const auto* c = static_cast<const ComplexLiteral*>(expr);
+                emitConst(Value::object(makeObj<ComplexObject>(0.0, c->imag)), c->token.line);
+                break;
+            }
             case NodeType::TUPLE_LITERAL: {
                 const auto* t = static_cast<const TupleLiteral*>(expr);
                 for (const auto& e : t->elements) compileExpression(e.get());
