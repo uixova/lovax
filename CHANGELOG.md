@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.12.0 — modular layout + the memory release
+
+The cross-language benchmark (benchmarks/cross) exposed struct memory as the
+worst number in the language: **btree peaked at 270 MB vs Lua's 24 MB**. v0.12
+fixes the two root causes and reorganizes the stdlib into Lua-style one-file
+modules. Result, same machine: **btree 270 → 37 MB and 653 → 216 ms; gc bench
+30 → 15 MB — Lovax now sits in the Lua tier on every memory benchmark.**
+
+### One file per module (`src/modules/`)
+- `builtins.hpp` (1022 lines) + `stdlib.hpp` (2191) split into `src/modules/`:
+  `common` (shared helpers, permission gates, JSON core), `base` (global
+  builtins), `math`, `game`, `strings`, `file`, `os`, `time`, `canvas`, `net`.
+  The old headers remain as thin include points — nothing upstream changed.
+  Adding a future module (json, regex, datetime…) is now a one-file affair.
+
+### Compact struct instances (RFC-017)
+- A struct instance was a full `MapObject`: entries for `__type__`, every field
+  **and every method closure**, plus three per-instance hash indexes. Now one
+  `StructShapeObject` per type (field→slot map + method table, built once at
+  declaration) and instances are a shape pointer + flat slot array. The member
+  inline-cache stores the slot index, verified against the shape.
+- **Breaking:** writing an *undeclared* field (`p.z = 1`) is now a runtime
+  error — `struct 'P' has no field 'z' (fields are fixed at declaration)`.
+  This catches field typos at the assignment site and is what makes the flat
+  layout possible. `p["field"]`, `keys/values/len/has/get/copy/clone`,
+  equality and printing all still work on instances.
+
+### Honest GC accounting + `--mem-stats`
+- `bytesAllocated` counted headers only and was **never reduced at sweep**, so
+  the "collect when heap doubles" threshold doubled off a forever-growing
+  total — collections got rarer as programs ran and garbage piled up. The
+  sweep now recomputes **live** bytes (payload-aware: string capacity, vector
+  storage, map indexes, coroutine stacks); `nextGC = live × 1.5` (4 MB floor).
+- `lovax --mem-stats script.lov` prints allocations / collections / peak /
+  total GC time / max pause — the measurement rig for the coming incremental
+  GC's ≤1 ms pause budget.
+
+### Gates
+- 70/70 golden bit-for-bit in both dispatch modes (2 new struct cases),
+  GC_STRESS + ASan/UBSan/Leak clean, fuzz (71 inputs) and sandbox green,
+  no time regressions (`tests/bench.sh` and the cross harness).
+
 ## v0.11.0 — value representation: a tracing garbage collector
 
 The value model is rebuilt for the engine era (RFC-013). `std::shared_ptr<Object>`
