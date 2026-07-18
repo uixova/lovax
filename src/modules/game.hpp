@@ -142,6 +142,7 @@ inline ObjPtr makeGameModule() {
         for (const auto& l : sig->listeners) {
             if (l.get() == args[1].get()) return args[0]; // already connected
         }
+        gcShade(args[1].get());   // write barrier (RFC-023)
         sig->listeners.push_back(args[1]);
         return args[0];
     });

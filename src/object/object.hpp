@@ -44,10 +44,11 @@ public:
     // virtual call. type() stays for readability and returns the same tag.
     const ObjectType tag;
 
-    // GC bookkeeping (RFC-013). gcNext links every heap object; gcMarked is the
-    // mark bit. Set by the tracing collector only — never on the hot path.
+    // GC bookkeeping (RFC-013/RFC-023). gcNext links every heap object;
+    // gcColor is the tri-color state (0 white, 1 gray, 2 black) driving the
+    // incremental collector. Touched by the collector and the write barrier.
     Object* gcNext = nullptr;
-    bool gcMarked = false;
+    unsigned char gcColor = 0;
 
     explicit Object(ObjectType t) : tag(t) {}
     virtual ~Object() = default;
@@ -68,59 +69,148 @@ public:
 #include "../vm/gc.hpp"
 namespace Lovax {
 
-// Marks an object gray: sets the bit and queues it for child-scanning. Safe on
-// null and on already-marked objects (the graph may have cycles).
+// Marks an object gray: queues it for child-scanning. Safe on null and on
+// already-marked objects (the graph may have cycles).
 inline void gcMarkObject(Object* o) {
-    if (o == nullptr || o->gcMarked) return;
-    o->gcMarked = true;
+    if (o == nullptr || o->gcColor != GC_WHITE) return;
+    o->gcColor = GC_GRAY;
     Heap::get().worklist.push_back(o);
 }
 
-// One full stop-the-world mark-sweep cycle.
+// Write barrier (RFC-023, Dijkstra "shade the child"): while marking is in
+// progress, a reference written INTO a pre-existing container might attach a
+// white object to an already-scanned (black) one — the marker would never see
+// it. Shading the child gray closes the hole. Container color is not checked:
+// over-shading is a little extra marking, never a bug.
+inline void gcShade(Object* o) {
+    if (Heap::get().phase == GcPhase::MARK) gcMarkObject(o);
+}
+
+namespace GcDetail {
+
+// Marks every root: permanents (singletons/modules), the runtime's VM roots
+// (stacks/globals/frames), and C++-held temporaries.
+inline void markAllRoots(Heap& h) {
+    for (Object* r : h.permanentRoots) gcMarkObject(r);
+    if (h.markRoots) h.markRoots();
+    for (Object* r : h.tempRoots) gcMarkObject(r);
+}
+
+// Processes up to `budget` gray objects. Returns true when the list drained.
+inline bool markStep(Heap& h, size_t budget) {
+    while (budget-- > 0) {
+        if (h.worklist.empty()) return true;
+        Object* o = h.worklist.back();
+        h.worklist.pop_back();
+        o->gcColor = GC_BLACK;
+        o->gcMark();
+    }
+    return h.worklist.empty();
+}
+
+// Sweeps up to `budget` objects from the cursor. Returns true when done.
+inline bool sweepStep(Heap& h, size_t budget) {
+    while (budget-- > 0) {
+        Object* o = *h.sweepCursor;
+        if (o == nullptr) return true;
+        if (o->gcColor != GC_WHITE) {
+            o->gcColor = GC_WHITE;
+            h.sweepLive += o->gcBytes();
+            h.sweepCursor = &o->gcNext;
+        } else {
+            *h.sweepCursor = o->gcNext;
+            delete o;
+        }
+    }
+    return *h.sweepCursor == nullptr;
+}
+
+inline void finishCycle(Heap& h) {
+    // Splice sweep-born objects back onto the main list (white, unscanned —
+    // the next cycle treats them like any other object).
+    if (h.newborn != nullptr) {
+        h.newbornTail->gcNext = h.first;
+        h.first = h.newborn;
+        h.newborn = h.newbornTail = nullptr;
+    }
+    h.bytesAllocated = h.sweepLive + h.allocSinceSweep;
+    h.nextGC = h.bytesAllocated + h.bytesAllocated / 2;   // grow 1.5×
+    if (h.nextGC < 4 * 1024 * 1024) h.nextGC = 4 * 1024 * 1024;
+    h.phase = GcPhase::IDLE;
+    h.sweepCursor = nullptr;
+    h.collections++;
+}
+
+} // namespace GcDetail
+
+// One incremental slice (RFC-023): runs at safepoints only. Each slice stays
+// within a small object budget so the pause is bounded (the game-frame
+// contract); the cycle spreads across many safepoints.
+inline void gcStep() {
+    Heap& h = Heap::get();
+    if (h.collecting) return;
+    h.collecting = true;
+    auto t0 = std::chrono::steady_clock::now();
+
+    switch (h.phase) {
+        case GcPhase::IDLE:
+            // Begin a cycle: gray the roots (cheap — the root SET is small).
+            h.phase = GcPhase::MARK;
+            GcDetail::markAllRoots(h);
+            break;
+        case GcPhase::MARK:
+            if (GcDetail::markStep(h, h.stepBudget)) {
+                // Atomic finish: stacks are not write-barriered, so re-scan
+                // every root and drain what that grays. Root sets are small,
+                // and most of the graph is already black — this stays short.
+                GcDetail::markAllRoots(h);
+                while (!GcDetail::markStep(h, h.stepBudget * 4)) {}
+                h.sweepCursor = &h.first;
+                h.sweepLive = 0;
+                h.allocSinceSweep = 0;
+                h.phase = GcPhase::SWEEP;
+            }
+            break;
+        case GcPhase::SWEEP:
+            if (GcDetail::sweepStep(h, h.stepBudget * 2)) {
+                GcDetail::finishCycle(h);
+            }
+            break;
+    }
+
+    auto dt = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now() - t0).count();
+    h.gcNanos += dt;
+    if (dt > h.maxPauseNanos) h.maxPauseNanos = dt;
+    h.collecting = false;
+}
+
+// One full stop-the-world cycle (GC_STRESS and shutdown paths): all phases to
+// completion in a single pause.
 inline void gcCollect() {
     Heap& h = Heap::get();
     if (h.collecting) return;
     h.collecting = true;
     auto t0 = std::chrono::steady_clock::now();
 
-    // 1. Mark roots: permanent (singletons/modules), the runtime's VM roots, and
-    //    any C++-held temporaries.
-    for (Object* r : h.permanentRoots) gcMarkObject(r);
-    if (h.markRoots) h.markRoots();
-    for (Object* r : h.tempRoots) gcMarkObject(r);
-
-    // 2. Trace: drain the gray worklist, marking each object's children.
-    while (!h.worklist.empty()) {
-        Object* o = h.worklist.back();
-        h.worklist.pop_back();
-        o->gcMark();
+    if (h.phase == GcPhase::IDLE) {
+        h.phase = GcPhase::MARK;
+        GcDetail::markAllRoots(h);
     }
-
-    // 3. Sweep: free the unmarked, clear the mark bit on survivors — and
-    //    recompute live bytes while we're walking anyway, so the threshold
-    //    tracks the REAL live set (payload growth included) instead of a
-    //    forever-growing total of everything ever allocated.
-    size_t live = 0;
-    Object** link = &h.first;
-    while (*link) {
-        Object* o = *link;
-        if (o->gcMarked) {
-            o->gcMarked = false;
-            live += o->gcBytes();
-            link = &o->gcNext;
-        } else {
-            *link = o->gcNext;
-            delete o;
-        }
+    if (h.phase == GcPhase::MARK) {
+        while (!GcDetail::markStep(h, 4096)) {}
+        GcDetail::markAllRoots(h);
+        while (!GcDetail::markStep(h, 4096)) {}
+        h.sweepCursor = &h.first;
+        h.sweepLive = 0;
+        h.allocSinceSweep = 0;
+        h.phase = GcPhase::SWEEP;
     }
-
-    h.bytesAllocated = live;
-    h.nextGC = live + live / 2;   // grow 1.5×: tighter peak, measured no time cost
-    if (h.nextGC < 4 * 1024 * 1024) h.nextGC = 4 * 1024 * 1024;
+    while (!GcDetail::sweepStep(h, 65536)) {}
+    GcDetail::finishCycle(h);
 
     auto dt = std::chrono::duration_cast<std::chrono::nanoseconds>(
                   std::chrono::steady_clock::now() - t0).count();
-    h.collections++;
     h.gcNanos += dt;
     if (dt > h.maxPauseNanos) h.maxPauseNanos = dt;
     h.collecting = false;
@@ -286,6 +376,7 @@ public:
     }
     void setStr(const Ref<Object>& key, const std::string& k,
                 const Ref<Object>& val) {
+        gcShade(key.get()); gcShade(val.get());   // write barrier (RFC-023)
         auto it = strIndex.find(k);
         if (it != strIndex.end()) { entries[it->second].second = val; return; }
         strIndex[k] = entries.size();
@@ -293,6 +384,7 @@ public:
     }
 
     void set(const Ref<Object>& key, const Ref<Object>& val) {
+        gcShade(key.get()); gcShade(val.get());   // write barrier (RFC-023)
         switch (key->type()) {
             case ObjectType::STRING:
                 setStr(key, static_cast<StringObject*>(key.get())->value, val);

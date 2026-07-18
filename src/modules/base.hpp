@@ -178,6 +178,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args[0]->type() != ObjectType::LIST) {
             return makeError("push() expects a list as its first argument, got " + typeName(args[0]->type()) + "", line);
         }
+        gcShade(args[1].get());   // write barrier (RFC-023)
         static_cast<ListObject*>(args[0].get())->elements.push_back(args[1]);
         return args[0];
     });
@@ -766,6 +767,7 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
             return makeError("insert() index out of range: " + args[1]->inspect() +
                              " (length " + std::to_string(n) + ")", line);
         }
+        gcShade(args[2].get());   // write barrier (RFC-023)
         els.insert(els.begin() + idx, args[2]);
         return args[0];
     });
