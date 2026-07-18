@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.16.0 — incremental GC: the ≤1 ms pause contract (RFC-023)
+
+The stop-the-world collector became a tri-color incremental one: MARK and
+SWEEP proceed in 3000-object slices at the existing safepoints; a Dijkstra
+write barrier (child-shading; MapObject chokepoint + the bounded VM/builtin
+write set) keeps marking sound while the program runs; stacks stay
+barrier-free via an atomic root re-scan at finish; sweep-phase births live on
+a side list until the cycle ends.
+
+**Measured: btree max pause 13.6 ms → 0.18 ms (74×), gc bench → 0.19 ms;
+a particles game frame triggers zero collections.** Memory peaks and run
+times unchanged. Known granularity note: one giant map still scans
+atomically (hashmap 4.9 ms) — same per-object granularity as Lua.
+
+Verification gained a second stress mode: `LOVAX_GC_STRESS_INC` runs
+one-object slices for maximal interleaving — the barrier torture test. Both
+stress modes: 81/81 golden bit-for-bit + ASan/UBSan/Leak clean. (That gate
+caught a real pre-release miscollection: sweep-born objects allocated black
+leaked stale color into the next cycle — fixed structurally, RFC-023.)
+
 ## v0.15.0 — robustness: structured errors, testing, quality gates
 
 - **Structured errors (RFC-022).** `throw` carries maps/structs/lists/tuples

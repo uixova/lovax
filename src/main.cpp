@@ -11,7 +11,7 @@
 #include "utils/colors.hpp"
 #include "pkg.hpp"
 
-static const char* LOVAX_VERSION = "0.15.0";
+static const char* LOVAX_VERSION = "0.16.0";
 
 // Evaluate one REPL chunk on a persistent VM. A lone bare expression is echoed
 // (wrapped in 'say') so `2 + 3` or `player.hp` print their value like Python.

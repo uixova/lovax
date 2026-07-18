@@ -84,12 +84,14 @@ inline ObjPtr makeCollectionsModule() {
     def("push_back", [needDeque](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (auto e = needDeque(args, "push_back", line)) return e;
         if (args.size() != 2) return argCountError("push_back", "2", args.size(), line);
+        gcShade(args[1].get());   // write barrier (RFC-023)
         static_cast<DequeObject*>(args[0].get())->items.push_back(args[1]);
         return args[0];
     });
     def("push_front", [needDeque](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (auto e = needDeque(args, "push_front", line)) return e;
         if (args.size() != 2) return argCountError("push_front", "2", args.size(), line);
+        gcShade(args[1].get());   // write barrier (RFC-023)
         static_cast<DequeObject*>(args[0].get())->items.push_front(args[1]);
         return args[0];
     });

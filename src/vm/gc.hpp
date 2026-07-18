@@ -75,10 +75,23 @@ template <class T>
 Ref<T> refCast(Object* p) { return Ref<T>(static_cast<T*>(p)); }
 
 inline void gcMarkObject(Object* o); // fwd; defined in object.hpp once Object is complete
-void gcCollect();                    // fwd; defined in object.hpp (slow path)
+void gcCollect();                    // fwd; defined in object.hpp (full STW cycle)
+void gcStep();                       // fwd; defined in object.hpp (incremental slice)
 
-// Collect if one is due. Inline + cheap: the common case is one bool test.
+// Tri-color states (RFC-023). White = unvisited, gray = queued, black = scanned.
+constexpr unsigned char GC_WHITE = 0, GC_GRAY = 1, GC_BLACK = 2;
+
+// Collector phase. MARK and SWEEP proceed in bounded slices at safepoints.
+enum class GcPhase : unsigned char { IDLE, MARK, SWEEP };
+
+// Collect/advance if due. Inline + cheap: the common case is one bool test.
+// While a cycle is in flight, gcAlloc keeps gcPending set so every safepoint
+// runs one more bounded slice until the cycle completes.
+#ifdef LOVAX_GC_STRESS
 inline void gcSafepoint() { if (gcPending) { gcPending = false; gcCollect(); } }
+#else
+inline void gcSafepoint() { if (gcPending) { gcPending = false; gcStep(); } }
+#endif
 
 struct Heap {
     Object* first = nullptr;            // head of the all-objects list
@@ -90,6 +103,23 @@ struct Heap {
     std::vector<Object*> tempRoots;     // GcRoot stack (C++-held temporaries)
     std::vector<Object*> permanentRoots;// immortal: singletons, builtin modules
     std::function<void()> markRoots;    // installed by the runtime
+
+    // Incremental state (RFC-023)
+    GcPhase phase = GcPhase::IDLE;
+    Object** sweepCursor = nullptr;     // resumable sweep position
+    size_t sweepLive = 0;               // live bytes tallied by this sweep
+    size_t allocSinceSweep = 0;         // allocations made while sweeping
+    // Objects born while SWEEPING go on a side list the cursor never touches;
+    // they splice back at cycle end, still white, so the NEXT cycle marks them
+    // normally. (Allocating them black instead leaks stale black objects into
+    // the next cycle whose children then get swept — a proven miscollection.)
+    Object* newborn = nullptr;
+    Object* newbornTail = nullptr;
+#ifdef LOVAX_GC_STRESS_INC
+    size_t stepBudget = 1;              // maximal interleaving: torture the barrier
+#else
+    size_t stepBudget = 3000;           // objects per slice (measured sub-ms)
+#endif
 
     // --mem-stats counters (always maintained — they're a few adds; printed
     // by main only when the flag is given).
@@ -118,15 +148,25 @@ T* gcAlloc(A&&... args) {
     // the next VM safepoint (loop back-edge / call), where the value stack is the
     // complete root set and no unrooted C++ temporary is live.
     if (h.enabled) {
-#ifdef LOVAX_GC_STRESS
+#if defined(LOVAX_GC_STRESS) || defined(LOVAX_GC_STRESS_INC)
         gcPending = true;
 #else
-        if (h.bytesAllocated > h.nextGC) gcPending = true;
+        // Trip when over threshold, and keep tripping while a cycle is in
+        // flight so every safepoint advances it by one bounded slice.
+        if (h.bytesAllocated > h.nextGC || h.phase != GcPhase::IDLE) gcPending = true;
 #endif
     }
     T* obj = new T(std::forward<A>(args)...);
-    obj->gcNext = h.first;
-    h.first = obj;
+    if (h.phase == GcPhase::SWEEP) {
+        // Side list: invisible to the sweep cursor, spliced back at cycle end.
+        obj->gcNext = h.newborn;
+        h.newborn = obj;
+        if (h.newbornTail == nullptr) h.newbornTail = obj;
+        h.allocSinceSweep += sizeof(T);
+    } else {
+        obj->gcNext = h.first;
+        h.first = obj;
+    }
     // Count the payload the constructor produced (string bytes, vector storage),
     // not just the header — the threshold must see the real heap. Post-construction
     // growth is folded back in when the sweep recomputes live bytes.

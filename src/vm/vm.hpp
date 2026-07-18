@@ -247,6 +247,8 @@ public:
             // Paused at a yield: keep its context for the next resume.
             co->status = CoroObject::Status::SUSPENDED;
             co->state = saveExec();
+            // Barrier: a black coroutine just absorbed live stack contents.
+            if (co->gcColor == GC_BLACK) { co->gcColor = GC_GRAY; Heap::get().worklist.push_back(co); }
             out = yieldValue_ ? yieldValue_ : NULL_OBJ_;
         } else {
             // Ran to completion: the return value is on top of the coroutine stack.
@@ -623,6 +625,9 @@ private:
         for (size_t i = 0; i < openUpvalues_.size();) {
             if (openUpvalues_[i]->stackSlot >= fromSlot) {
                 openUpvalues_[i]->value = *stackAt(openUpvalues_[i]->stackSlot);
+                // Barrier: the value leaves the root stack for a heap cell.
+                if (openUpvalues_[i]->value.kind == VKind::OBJ)
+                    gcShade(openUpvalues_[i]->value.obj);
                 openUpvalues_[i]->closed = true;
                 openUpvalues_.erase(openUpvalues_.begin() + i);
             } else {
@@ -946,7 +951,11 @@ private:
                 }
                 VM_CASE(SET_UPVALUE) {
                     auto& cell = frame->closure->upvalues[readU16()];
-                    if (cell->closed) cell->value = pop();
+                    if (cell->closed) {
+                        cell->value = pop();
+                        // Barrier: the owning closure may already be black.
+                        if (cell->value.kind == VKind::OBJ) gcShade(cell->value.obj);
+                    }
                     else *stackAt(cell->stackSlot) = pop();
                     VM_NEXT_FAST;
                 }
@@ -1382,7 +1391,9 @@ private:
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
-                            list->elements[i] = toObject(val);
+                            auto nv = toObject(val);
+                            gcShade(nv.get());          // write barrier (RFC-023)
+                            list->elements[i] = nv;
                             VM_NEXT;
                         }
                     }
@@ -1526,7 +1537,9 @@ private:
                             }
                         }
                         if (slot != MapObject::NPOS) {
-                            si->slots[slot] = toObject(*pval);
+                            auto nv = toObject(*pval);
+                            gcShade(nv.get());          // write barrier (RFC-023)
+                            si->slots[slot] = nv;
                             pval->obj = nullptr; pobj->obj = nullptr; sp_ -= 2;
                             VM_NEXT_FAST;
                         }
@@ -1542,8 +1555,10 @@ private:
                         auto* m = static_cast<MapObject*>(pobj->obj);
                         IC_LOOKUP(m, prop, ics, ent)
                         if (ent != nullptr) {
+                            auto nv = toObject(*pval);
+                            gcShade(nv.get());          // write barrier (RFC-023)
                             const_cast<std::pair<Ref<Object>,
-                                Ref<Object>>*>(ent)->second = toObject(*pval);
+                                Ref<Object>>*>(ent)->second = nv;
                             pval->obj = nullptr; pobj->obj = nullptr; sp_ -= 2;
                             VM_NEXT_FAST;
                         }
@@ -2049,6 +2064,7 @@ private:
                 return makeError("list index out of range: " + idx->inspect() +
                                  " (length " + std::to_string(n) + ")", line);
             }
+            gcShade(val.get());                          // write barrier (RFC-023)
             list->elements[i] = val;
             return nullptr;
         }
@@ -2082,6 +2098,7 @@ private:
                 return makeError("struct '" + si->shape->name + "' has no field '" +
                                  prop + "' (fields are fixed at declaration)", line);
             }
+            gcShade(val.get());                          // write barrier (RFC-023)
             si->slots[it->second] = val;
             return nullptr;
         }
@@ -2142,6 +2159,7 @@ private:
                 return makeError("struct '" + si->shape->name + "' has no field '" +
                                  prop + "' (fields are fixed at declaration)", line);
             }
+            gcShade(val.get());                          // write barrier (RFC-023)
             si->slots[it->second] = val;
             return nullptr;
         }
@@ -2155,6 +2173,7 @@ private:
         }
         // Allocate the key object only when the field is genuinely new.
         size_t pos = map->findStr(prop);
+        gcShade(val.get());                              // write barrier (RFC-023)
         if (pos != MapObject::NPOS) map->entries[pos].second = val;
         else map->setStr(makeObj<StringObject>(prop), prop, val);
         return nullptr;
