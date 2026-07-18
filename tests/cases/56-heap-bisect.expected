@@ -1,0 +1,8 @@
+# exit: 0
+1 2 3 5
+acil orta dusuk
+1
+2
+0
+2
+err: heap_pop() on an empty heap

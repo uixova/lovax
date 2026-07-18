@@ -28,17 +28,22 @@ registry, socket layer) keep the door open without shipping dead code.
 | Gap-analysis item | Lovax answer | Status |
 |---|---|---|
 | itertools | `use iters` — chain/product/combinations/permutations/accumulate/takewhile/dropwhile/groupby/repeat/zip_longest | ✅ v0.14 (eager; lazy = v2 with generators) |
+| heapq / bisect | `collections.heap_push/heap_pop/heapify` (min-heap, `[priority, payload]` pairs) + `collections.bisect` (+ core `binary_search`) | ✅ v0.16 |
 | functools | `use functools` — partial, memoize; `reduce` is core | ✅ v0.14 |
 | logging | `use log` — debug/info/warn/error, set_level, to_file, timestamps | ✅ v0.14 |
 | glob / pathlib-style | `file.glob(pattern)`, `file.walk(dir)`, path_join/basename/dirname/extension | ✅ v0.14 |
 | subprocess (basic) | `os.run(cmd)` → `{code, out}`, gated by `--allow-run` | ✅ v0.14 |
 | JSON in-memory | `use json` — parse/text (same core as save_data/load_data) | ✅ v0.14 |
-| exception hierarchy | error **kinds** (throw any value + `e.kind` convention) | 🔜 v0.15 (RFC-022) |
-| testing framework | `use testing` — assert_eq/assert_true/assert_error + runner | 🔜 v0.15 |
+| exception hierarchy | error **kinds**: structured `throw` + `e.kind` convention + `error(kind, msg)` (RFC-022) | ✅ v0.15 |
+| testing framework | `use testing` — assert_eq/assert_true/assert_error + `summary()` | ✅ v0.15 |
 | type hints | separate tooling release (with LSP), pre-engine plan keeps it out of v0.14 | ⏳ deliberate |
 | HTTP client (minimal) | Tier-3 boundary: socket layer + bytes are the foundation; module lands post-engine if needed | ⏳ deliberate |
 | string extras | partition ✅, encode/decode = `bytes(text)`/`text(bytes)` ✅, is_alpha/is_digit/is_space ✅ (existing), casefold = Turkish-aware upper/lower ✅ | ✅ |
 | math extras | pi/tau/e/inf/nan, log10/log2, hypot, copysign, is_finite, prod, gcd/lcm/factorial (existing) | ✅ v0.14 |
+
+Every row above is EXECUTE-PROVEN: `tests/cases/57-analiz-dogrulama.lov`
+runs 55 assertions covering each ✅ line via the testing module, as a golden
+test in the release gate.
 
 ## Explicitly out (Tier 3 — bloat by our own analysis)
 

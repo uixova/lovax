@@ -1,0 +1,23 @@
+use collections
+set h = []
+collections.heap_push(h, 5)
+collections.heap_push(h, 1)
+collections.heap_push(h, 3)
+collections.heap_push(h, 2)
+say collections.heap_pop(h), collections.heap_pop(h), collections.heap_pop(h), collections.heap_pop(h)
+# oncelik kuyrugu: [oncelik, veri]
+set pq = []
+collections.heap_push(pq, [3, "dusuk"])
+collections.heap_push(pq, [1, "acil"])
+collections.heap_push(pq, [2, "orta"])
+say collections.heap_pop(pq)[1], collections.heap_pop(pq)[1], collections.heap_pop(pq)[1]
+set L = [9, 4, 7, 1, 8]
+collections.heapify(L)
+say collections.heap_pop(L)
+say collections.bisect([10, 20, 30, 40], 25)
+say collections.bisect([10, 20, 30, 40], 10)
+say collections.bisect(["a", "c", "e"], "d")
+try:
+    collections.heap_pop([])
+catch e:
+    say "err: {e}"

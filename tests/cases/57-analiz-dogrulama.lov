@@ -1,0 +1,136 @@
+# ============================================================
+# ANALYSIS_*.md dogrulama sciripti: Tier 1+2'nin HER satiri
+# calistirilarak kanitlanir. testing moduluyle sayilir.
+# ============================================================
+use testing
+
+# --- Tier 1: cekirdek tipler ---
+set t = (1, 2)
+testing.assert_eq(kind(t), "tuple", "tuple tipi")
+fn ikili():
+    return 7, 8
+set a, b = ikili()
+testing.assert_eq(a + b, 15, "coklu donus + unpack")
+testing.assert_eq(kind(Set([1])), "set", "Set tipi")
+testing.assert_eq(Set([1,2]) | Set([2,3]), Set([1,2,3]), "set birlesim")
+testing.assert_eq(Set([1,2]) & Set([2,3]), Set([2]), "set kesisim")
+testing.assert_eq(Set([1,2]) - Set([2]), Set([1]), "set fark")
+testing.assert_eq(kind(bytes("ab")), "bytes", "bytes tipi")
+testing.assert_eq(bytes("ab")[0], 97, "bytes indeks")
+testing.assert_eq(text(bytes([104, 105])), "hi", "bytes decode")
+set z = 3 + 4j
+testing.assert_eq(kind(z), "complex", "complex tipi")
+testing.assert_eq(abs(z), 5.0, "complex abs")
+testing.assert_eq(z.real, 3.0, "complex .real")
+use cmath
+testing.assert_eq(cmath.conj(z), 3 - 4j, "cmath.conj")
+
+# --- Tier 1: regex (kendi motor) ---
+use regex
+testing.assert_eq(regex.match("hello1", "[a-z]+\d"), "hello1", "regex match")
+testing.assert_eq(regex.find_all("a1b2", "\d"), ["1", "2"], "regex find_all")
+testing.assert_eq(regex.replace("x-y", "-", "+"), "x+y", "regex replace")
+testing.assert_eq(regex.groups("ab", "(a)(b)"), ["ab", "a", "b"], "regex gruplar")
+
+# --- Tier 1: datetime (kendi takvim) ---
+use datetime
+set dt = datetime.make(2026, 7, 17)
+testing.assert_eq(datetime.format(dt, "%Y-%m-%d"), "2026-07-17", "datetime format")
+testing.assert_eq(datetime.weekday(dt), 4, "datetime weekday (Cuma)")
+testing.assert_eq(datetime.diff(datetime.add(dt, 1, 0, 0, 0), dt), 86400, "timedelta")
+testing.assert_eq(datetime.parse("2026-07-17", "%Y-%m-%d").timestamp, dt.timestamp, "datetime parse")
+
+# --- Tier 1: random dagilimlar (deterministik) ---
+use random
+seed(42)
+set n1 = random.normal(0, 1)
+seed(42)
+testing.assert_eq(random.normal(0, 1), n1, "deterministik normal")
+seed(1)
+testing.assert_true(random.poisson(3) >= 0, "poisson")
+testing.assert_true(random.exponential(1.0) > 0, "exponential")
+testing.assert_true(random.gamma(2, 1) > 0, "gamma")
+set bb = random.beta(2, 2)
+testing.assert_true(bb > 0 and bb < 1, "beta")
+testing.assert_eq(len(random.choices(["a","b"], [1, 1], 5)), 5, "agirlikli choices")
+testing.assert_eq(len(random.sample([1,2,3,4], 2)), 2, "sample")
+set st = random.getstate()
+set r1 = random.uniform(0, 1)
+random.setstate(st)
+testing.assert_eq(random.uniform(0, 1), r1, "getstate/setstate")
+
+# --- Tier 1: format + collections ---
+use strings
+testing.assert_eq(strings.fmt(3.14159, ".2f"), "3.14", "format .2f")
+testing.assert_eq(strings.fmt(7, "03d"), "007", "format 0Nd")
+testing.assert_eq(strings.partition("a=b", "="), ("a", "=", "b"), "partition")
+use collections
+testing.assert_eq(collections.counter(["x","x","y"])["x"], 2, "Counter")
+set dq = collections.deque([2])
+collections.push_front(dq, 1)
+testing.assert_eq(collections.pop_front(dq), 1, "deque O(1) on")
+set mm = {}
+collections.setdefault(mm, "k", 9)
+testing.assert_eq(mm["k"], 9, "setdefault")
+set hh = []
+collections.heap_push(hh, 5)
+collections.heap_push(hh, 1)
+testing.assert_eq(collections.heap_pop(hh), 1, "heapq karsiligi")
+testing.assert_eq(collections.bisect([10, 20, 30], 25), 2, "bisect karsiligi")
+
+# --- Tier 2: iters + functools + log + json ---
+use iters
+testing.assert_eq(iters.chain([1], [2]), [1, 2], "itertools chain")
+testing.assert_eq(len(iters.combinations([1,2,3], 2)), 3, "combinations")
+testing.assert_eq(len(iters.permutations([1,2,3])), 6, "permutations")
+testing.assert_eq(iters.accumulate([1,2,3]), [1,3,6], "accumulate")
+use functools
+fn kare(x):
+    return x * x
+set k2 = functools.memoize(kare)
+testing.assert_eq(k2(4), 16, "memoize")
+fn top3(a, b, c):
+    return a + b + c
+testing.assert_eq(functools.partial(top3, 1)(2, 3), 6, "partial")
+use json
+testing.assert_eq(json.parse(json.text([1, "a", true])), [1, "a", true], "json roundtrip")
+use log
+log.set_level("error")
+log.info("bastirildi")
+testing.assert_true(true, "log modulu")
+
+# --- Tier 2: glob/walk/subprocess/math ---
+use file
+testing.assert_true(len(file.walk("src/modules")) > 15, "walk")
+testing.assert_true(len(file.glob("src/modules/*.hpp")) > 15, "glob")
+use os
+testing.assert_eq(os.run("echo ok")["out"], "ok\n", "subprocess os.run")
+use math
+testing.assert_true(math.pi > 3.14 and math.pi < 3.15, "math.pi")
+testing.assert_eq(math.hypot(3, 4), 5.0, "hypot")
+testing.assert_eq(math.prod([2, 3]), 6, "prod")
+testing.assert_eq(math.log2(8), 3.0, "log2")
+
+# --- Tier 2: yapili hatalar + testing (bu scriptin kendisi) ---
+try:
+    throw error("io", "test")
+catch e:
+    testing.assert_eq(e.kind, "io", "hata kind konvansiyonu")
+
+# --- Kompakt struct + eski cekirdek hala saglam ---
+struct Nokta:
+    x = 0
+    y = 0
+    fn boy():
+        return this.x + this.y
+set p = Nokta(3, 4)
+testing.assert_eq(p.boy(), 7, "struct metod")
+set ekstra_hata = false
+try:
+    p.z = 1
+catch e2:
+    set ekstra_hata = true
+testing.assert_true(ekstra_hata, "sabit alan kurali")
+
+set kalan = testing.summary()
+exit(kalan)
