@@ -56,6 +56,32 @@ jobs:
           done
           [ "$fail" = 0 ] && echo "GC_STRESS clean" || exit 1
 
+      - name: Incremental-GC barrier gate (GC_STRESS_INC + ASan, bit-for-bit)
+        run: |
+          # One-object collector slices at every safepoint: maximal
+          # mutator/collector interleaving. A write-barrier hole frees a live
+          # object (ASan UAF) or silently corrupts output (bit-for-bit check).
+          g++ -std=c++17 -g -O1 -DLOVAX_GC_STRESS_INC -fsanitize=address,undefined -o lovax_inc src/main.cpp
+          export ASAN_OPTIONS=abort_on_error=0:detect_leaks=1
+          export UBSAN_OPTIONS=halt_on_error=0
+          fail=0
+          for f in tests/cases/*.lov; do
+            name=$(basename "$f" .lov)
+            out=$(./lovax_inc "$f" 2>&1); code=$?
+            if echo "$out" | grep -qE "AddressSanitizer|runtime error:|LeakSanitizer|SUMMARY:"; then
+              echo "STRESS_INC SANITIZER FAILURE in $f"; echo "$out" | tail -25; fail=1
+            else
+              printf -v full '# exit: %s\n%s' "$code" "$out"
+              if [ "$full" != "$(cat tests/cases/$name.expected)" ]; then
+                echo "STRESS_INC OUTPUT DIFF in $f"; fail=1
+              fi
+            fi
+          done
+          [ "$fail" = 0 ] && echo "GC_STRESS_INC clean + bit-for-bit" || exit 1
+
+      - name: C++ unit tests
+        run: ./tests/unit.sh
+
       - name: Security gate (fuzz — no crashes allowed)
         run: |
           # Run the adversarial/fuzz suite under the ASan build: a memory bug

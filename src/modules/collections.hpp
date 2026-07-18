@@ -120,6 +120,120 @@ inline ObjPtr makeCollectionsModule() {
         return out;
     });
 
+    // ---- Heap (priority queue) + bisect: the last P1 gap-analysis items. ----
+    // A heap is a plain list kept in min-heap order by these functions.
+    // Elements: numbers, or [priority, payload] lists compared by priority.
+    auto heapKey = [](const ObjPtr& e, double& out) -> bool {
+        if (isNumeric(e)) { out = asDouble(e); return true; }
+        if (e->type() == ObjectType::LIST || e->type() == ObjectType::TUPLE) {
+            const auto& els = static_cast<ListObject*>(e.get())->elements;
+            if (!els.empty() && isNumeric(els[0])) { out = asDouble(els[0]); return true; }
+        }
+        return false;
+    };
+
+    // heap_push(heap, x): inserts keeping min-heap order
+    def("heap_push", [heapKey](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 || args[0]->type() != ObjectType::LIST) {
+            return makeError("collections.heap_push(heap, x) expects a list and a value", line);
+        }
+        double kx;
+        if (!heapKey(args[1], kx)) {
+            return makeError("heap elements must be numbers or [priority, ...] lists", line);
+        }
+        gcShade(args[1].get());   // write barrier (RFC-023)
+        auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        els.push_back(args[1]);
+        size_t i = els.size() - 1;
+        while (i > 0) {           // sift up
+            size_t parent = (i - 1) / 2;
+            double kp;
+            if (!heapKey(els[parent], kp)) {
+                return makeError("heap contains a non-heap element", line);
+            }
+            if (kp <= kx) break;
+            std::swap(els[i], els[parent]);
+            i = parent;
+        }
+        return args[0];
+    });
+
+    // heap_pop(heap): removes and returns the SMALLEST element
+    def("heap_pop", [heapKey](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
+            return makeError("collections.heap_pop(heap) expects a list", line);
+        }
+        auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        if (els.empty()) return makeError("heap_pop() on an empty heap", line);
+        auto top = els[0];
+        els[0] = els.back();
+        els.pop_back();
+        size_t i = 0, n = els.size();
+        while (true) {            // sift down
+            size_t l = 2 * i + 1, r = 2 * i + 2, smallest = i;
+            double ks, kc;
+            if (n > 0 && !heapKey(els[smallest], ks)) break;
+            if (l < n && heapKey(els[l], kc) && kc < ks) { smallest = l; ks = kc; }
+            if (r < n && heapKey(els[r], kc) && kc < ks) smallest = r;
+            if (smallest == i) break;
+            std::swap(els[i], els[smallest]);
+            i = smallest;
+        }
+        return top;
+    });
+
+    // heapify(list): reorders a list into min-heap order, in place
+    def("heapify", [heapKey](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
+            return makeError("collections.heapify(list) expects a list", line);
+        }
+        auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        for (const auto& e : els) {
+            double k;
+            if (!heapKey(e, k)) {
+                return makeError("heap elements must be numbers or [priority, ...] lists", line);
+            }
+        }
+        auto lt = [heapKey](const ObjPtr& a, const ObjPtr& b) {
+            double ka = 0, kb = 0;
+            heapKey(a, ka); heapKey(b, kb);
+            return ka < kb;
+        };
+        std::make_heap(els.begin(), els.end(),
+                       [lt](const ObjPtr& a, const ObjPtr& b) { return lt(b, a); });
+        return args[0];
+    });
+
+    // bisect(sorted_list, x): leftmost insertion index that keeps the order
+    // (Python's bisect_left; binary_search — exact find — is a core builtin)
+    def("bisect", [](const Args& args, int line, const CallFn&) -> ObjPtr {
+        if (args.size() != 2 ||
+            (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE)) {
+            return makeError("collections.bisect(sorted_list, x) expects a list", line);
+        }
+        const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+        bool numeric = isNumeric(args[1]);
+        bool stringy = args[1]->type() == ObjectType::STRING;
+        if (!numeric && !stringy) {
+            return makeError("bisect() works with numbers or strings", line);
+        }
+        size_t lo = 0, hi = els.size();
+        while (lo < hi) {
+            size_t mid = (lo + hi) / 2;
+            bool less;
+            if (numeric) {
+                if (!isNumeric(els[mid])) return makeError("bisect() needs a uniformly typed sorted list", line);
+                less = asDouble(els[mid]) < asDouble(args[1]);
+            } else {
+                if (els[mid]->type() != ObjectType::STRING) return makeError("bisect() needs a uniformly typed sorted list", line);
+                less = static_cast<StringObject*>(els[mid].get())->value <
+                       static_cast<StringObject*>(args[1].get())->value;
+            }
+            if (less) lo = mid + 1; else hi = mid;
+        }
+        return makeObj<IntegerObject>((long long)lo);
+    });
+
     mod->frozen = true;
     mod->moduleName = "collections";
     gcPermanentRoot(mod.get());
