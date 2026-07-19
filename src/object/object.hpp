@@ -9,6 +9,7 @@
 #include <sstream>
 #include <chrono>
 #include <deque>
+#include <cstdint>
 
 namespace Lovax {
 
@@ -345,52 +346,139 @@ protected:
     explicit MapObject(ObjectType t) : Object(t) {}   // for SetObject
 public:
     std::vector<std::pair<Ref<Object>, Ref<Object>>> entries;
-    // Typed indexes: no key-tag string is ever built for a lookup. String keys
-    // hash the raw bytes, int/bool keys never touch a string at all.
-    std::unordered_map<std::string, size_t> strIndex;
-    std::unordered_map<long long, size_t> intIndex;
+    // Key index (v0.17 Track A): ONE flat open-addressing table replaces the two
+    // std::unordered_map typed indexes. A slot caches the key's 64-bit hash and
+    // its entry position; a lookup is mask -> linear probe -> compare cached hash
+    // -> confirm against the real key in `entries` (tag + value). No per-node
+    // allocation, no key string copy, contiguous probing (lj_tab.c-inspired,
+    // adapted to our separate ordered-entries design). Bool keys keep their
+    // trivial 2-slot array.
+    struct KeySlot { uint64_t h; size_t pos; };
+    std::vector<KeySlot> index;     // capacity always a power of two; pos==NPOS empty
+    size_t indexUsed = 0;           // filled slots (load kept under 70%)
     static constexpr size_t NPOS = (size_t)-1;
     size_t boolIndex[2] = {NPOS, NPOS};
     bool frozen = false;          // true: immutable (modules)
     std::string moduleName;       // module name if this is a module (for errors + inspect)
 
+    // Hashes cover EVERY byte (a sampled hash goes quadratic on adversarial
+    // keys — LuaJIT #555), then avalanche so power-of-two masking sees all bits.
+    static uint64_t mix64(uint64_t h) {
+        h ^= h >> 32; h *= 0xd6e8feb86659fd93ull; h ^= h >> 32;
+        return h;
+    }
+    static uint64_t strHash(const char* s, size_t n) {
+        uint64_t h = 1469598103934665603ull;              // FNV-1a 64
+        for (size_t i = 0; i < n; ++i) { h ^= (unsigned char)s[i]; h *= 1099511628211ull; }
+        return mix64(h);
+    }
+    static uint64_t intHash(long long v) {
+        return mix64((uint64_t)v * 0x9E3779B97F4A7C15ull);
+    }
+
+    // Probes for (h, eq). Returns the matching slot, or the first empty slot
+    // (the insertion point) if absent. Callers guarantee a non-full table.
+    template <class EQ>
+    size_t probeSlot(uint64_t h, EQ&& eq) const {
+        size_t mask = index.size() - 1;
+        size_t i = (size_t)h & mask;
+        while (true) {
+            const KeySlot& s = index[i];
+            if (s.pos == NPOS) return i;
+            if (s.h == h && eq(entries[s.pos].first.get())) return i;
+            i = (i + 1) & mask;
+        }
+    }
+    // Doubles the table (or creates the first 8 slots) and re-seats every slot
+    // by its cached hash — entry keys are never re-hashed.
+    void indexGrow() {
+        size_t ncap = index.empty() ? 8 : index.size() * 2;
+        std::vector<KeySlot> old = std::move(index);
+        index.assign(ncap, KeySlot{0, NPOS});
+        size_t mask = ncap - 1;
+        for (const KeySlot& s : old) {
+            if (s.pos == NPOS) continue;
+            size_t i = (size_t)s.h & mask;
+            while (index[i].pos != NPOS) i = (i + 1) & mask;
+            index[i] = s;
+        }
+    }
+    bool indexWantsGrow() const { return (indexUsed + 1) * 10 >= index.size() * 7; }
+    // Rebuilds index + boolIndex from `entries` (after a removal shifted positions).
+    void rebuildIndex() {
+        size_t need = entries.size() * 10 / 7 + 1;
+        size_t ncap = 8;
+        while (ncap < need) ncap *= 2;
+        index.assign(ncap, KeySlot{0, NPOS});
+        indexUsed = 0;
+        boolIndex[0] = boolIndex[1] = NPOS;
+        size_t mask = ncap - 1;
+        for (size_t p = 0; p < entries.size(); ++p) {
+            Object* k = entries[p].first.get();
+            uint64_t h;
+            if (k->tag == ObjectType::STRING) {
+                const std::string& s = static_cast<StringObject*>(k)->value;
+                h = strHash(s.data(), s.size());
+            } else if (k->tag == ObjectType::INTEGER) {
+                h = intHash(static_cast<IntegerObject*>(k)->value);
+            } else {  // BOOLEAN
+                boolIndex[static_cast<BooleanObject*>(k)->value ? 1 : 0] = p;
+                continue;
+            }
+            size_t i = (size_t)h & mask;
+            while (index[i].pos != NPOS) i = (i + 1) & mask;   // keys are unique
+            index[i] = KeySlot{h, p};
+            indexUsed++;
+        }
+    }
+
     void gcMark() override {
         for (auto& e : entries) { gcMarkObject(e.first.get()); gcMarkObject(e.second.get()); }
     }
     size_t gcBytes() const override {
-        // entries storage + rough hash-table node cost per index entry
         return sizeof(*this) +
                entries.capacity() * sizeof(entries[0]) +
-               strIndex.size() * 64 + intIndex.size() * 48;
+               index.capacity() * sizeof(KeySlot);
     }
 
     void copyIndexFrom(const MapObject& src) {
-        strIndex = src.strIndex;
-        intIndex = src.intIndex;
+        index = src.index;
+        indexUsed = src.indexUsed;
         boolIndex[0] = src.boolIndex[0];
         boolIndex[1] = src.boolIndex[1];
     }
     void clearIndex() {
-        strIndex.clear();
-        intIndex.clear();
+        index.clear();
+        indexUsed = 0;
         boolIndex[0] = boolIndex[1] = NPOS;
     }
 
     // Zero-allocation lookups by native key
-    Ref<Object> getStr(const std::string& k) const {
-        auto it = strIndex.find(k);
-        return it == strIndex.end() ? nullptr : entries[it->second].second;
-    }
     size_t findStr(const std::string& k) const {
-        auto it = strIndex.find(k);
-        return it == strIndex.end() ? NPOS : it->second;
+        if (index.empty()) return NPOS;
+        uint64_t h = strHash(k.data(), k.size());
+        size_t i = probeSlot(h, [&](const Object* key) {
+            return key->tag == ObjectType::STRING &&
+                   static_cast<const StringObject*>(key)->value == k;
+        });
+        return index[i].pos;                      // NPOS when the probe hit empty
+    }
+    Ref<Object> getStr(const std::string& k) const {
+        size_t pos = findStr(k);
+        return pos == NPOS ? nullptr : entries[pos].second;
     }
     void setStr(const Ref<Object>& key, const std::string& k,
                 const Ref<Object>& val) {
         gcShade(key.get()); gcShade(val.get());   // write barrier (RFC-023)
-        auto it = strIndex.find(k);
-        if (it != strIndex.end()) { entries[it->second].second = val; return; }
-        strIndex[k] = entries.size();
+        if (indexWantsGrow()) indexGrow();
+        uint64_t h = strHash(k.data(), k.size());
+        size_t i = probeSlot(h, [&](const Object* kk) {
+            return kk->tag == ObjectType::STRING &&
+                   static_cast<const StringObject*>(kk)->value == k;
+        });
+        if (index[i].pos != NPOS) { entries[index[i].pos].second = val; return; }
+        index[i] = KeySlot{h, entries.size()};
+        indexUsed++;
         entries.push_back({key, val});
     }
 
@@ -402,9 +490,15 @@ public:
                 return;
             case ObjectType::INTEGER: {
                 long long k = static_cast<IntegerObject*>(key.get())->value;
-                auto it = intIndex.find(k);
-                if (it != intIndex.end()) { entries[it->second].second = val; return; }
-                intIndex[k] = entries.size();
+                if (indexWantsGrow()) indexGrow();
+                uint64_t h = intHash(k);
+                size_t i = probeSlot(h, [&](const Object* kk) {
+                    return kk->tag == ObjectType::INTEGER &&
+                           static_cast<const IntegerObject*>(kk)->value == k;
+                });
+                if (index[i].pos != NPOS) { entries[index[i].pos].second = val; return; }
+                index[i] = KeySlot{h, entries.size()};
+                indexUsed++;
                 entries.push_back({key, val});
                 return;
             }
@@ -424,8 +518,14 @@ public:
             case ObjectType::STRING:
                 return getStr(static_cast<StringObject*>(key.get())->value);
             case ObjectType::INTEGER: {
-                auto it = intIndex.find(static_cast<IntegerObject*>(key.get())->value);
-                return it == intIndex.end() ? nullptr : entries[it->second].second;
+                if (index.empty()) return nullptr;
+                long long k = static_cast<IntegerObject*>(key.get())->value;
+                size_t i = probeSlot(intHash(k), [&](const Object* kk) {
+                    return kk->tag == ObjectType::INTEGER &&
+                           static_cast<const IntegerObject*>(kk)->value == k;
+                });
+                size_t pos = index[i].pos;
+                return pos == NPOS ? nullptr : entries[pos].second;
             }
             case ObjectType::BOOLEAN: {
                 size_t pos = boolIndex[static_cast<BooleanObject*>(key.get())->value ? 1 : 0];
@@ -438,37 +538,30 @@ public:
     bool remove(const Ref<Object>& key) {
         size_t pos = NPOS;
         switch (key->type()) {
-            case ObjectType::STRING: {
-                auto it = strIndex.find(static_cast<StringObject*>(key.get())->value);
-                if (it == strIndex.end()) return false;
-                pos = it->second; strIndex.erase(it);
+            case ObjectType::STRING:
+                pos = findStr(static_cast<StringObject*>(key.get())->value);
                 break;
-            }
             case ObjectType::INTEGER: {
-                auto it = intIndex.find(static_cast<IntegerObject*>(key.get())->value);
-                if (it == intIndex.end()) return false;
-                pos = it->second; intIndex.erase(it);
+                if (index.empty()) return false;
+                long long k = static_cast<IntegerObject*>(key.get())->value;
+                size_t i = probeSlot(intHash(k), [&](const Object* kk) {
+                    return kk->tag == ObjectType::INTEGER &&
+                           static_cast<const IntegerObject*>(kk)->value == k;
+                });
+                pos = index[i].pos;
                 break;
             }
-            case ObjectType::BOOLEAN: {
-                int k = static_cast<BooleanObject*>(key.get())->value ? 1 : 0;
-                if (boolIndex[k] == NPOS) return false;
-                pos = boolIndex[k]; boolIndex[k] = NPOS;
+            case ObjectType::BOOLEAN:
+                pos = boolIndex[static_cast<BooleanObject*>(key.get())->value ? 1 : 0];
                 break;
-            }
             default: return false;
         }
+        if (pos == NPOS) return false;
         entries.erase(entries.begin() + pos);
-        // Shift every index after the removed slot
-        for (auto& kv : strIndex) {
-            if (kv.second > pos) kv.second--;
-        }
-        for (auto& kv : intIndex) {
-            if (kv.second > pos) kv.second--;
-        }
-        for (int i = 0; i < 2; ++i) {
-            if (boolIndex[i] != NPOS && boolIndex[i] > pos) boolIndex[i]--;
-        }
+        // Every stored position after the erased entry shifted down by one, and
+        // the matching slot must vanish; a rebuild does both (removal was
+        // already O(n) here — the erase itself shifts the entries vector).
+        rebuildIndex();
         return true;
     }
     std::string inspect() const override {
