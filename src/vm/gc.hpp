@@ -5,6 +5,7 @@
 #include <functional>
 #include <cstddef>
 #include <type_traits>
+#include <new>
 
 // Tracing mark-sweep garbage collector (RFC-013). This header is included from
 // object.hpp *after* class Object is defined — it is not a standalone include.
@@ -84,6 +85,53 @@ constexpr unsigned char GC_WHITE = 0, GC_GRAY = 1, GC_BLACK = 2;
 // Collector phase. MARK and SWEEP proceed in bounded slices at safepoints.
 enum class GcPhase : unsigned char { IDLE, MARK, SWEEP };
 
+// Size-class free-list allocator (RFC-024 pre-work). Every VM object is small
+// and fixed-shape, so malloc/free per object is pure overhead: a pool serves an
+// allocation as one free-list pop and a free as one push. Objects larger than
+// MAXSZ (none of ours today, but coroutines could) fall back to ::operator new.
+//
+// Freed slots are recycled, so ASan cannot see a use-after-free through the pool
+// — the GC_STRESS builds keep plain new/delete (see gcAlloc / sweepStep) so that
+// safety net stays intact; only release builds pool.
+struct Pool {
+    static constexpr size_t ALIGN = 16;
+    static constexpr size_t MAXSZ = 256;                 // 16 classes: 16..256
+    static constexpr int NCLASS = (int)(MAXSZ / ALIGN);
+    static constexpr unsigned char BIG = 0xFF;           // oversized: not pooled
+    void* freeList[NCLASS] = {};
+
+    static int classOf(size_t n) { return (int)((n + ALIGN - 1) / ALIGN) - 1; }
+
+    void* allocRaw(size_t n, unsigned char& scOut) {
+        if (n == 0 || n > MAXSZ) { scOut = BIG; return ::operator new(n ? n : 1); }
+        int c = classOf(n);
+        scOut = (unsigned char)c;
+        void* head = freeList[c];
+        if (head == nullptr) { refill(c); head = freeList[c]; }
+        freeList[c] = *reinterpret_cast<void**>(head);
+        return head;
+    }
+    void freeRaw(void* p, unsigned char sc) {
+        if (sc == BIG) { ::operator delete(p); return; }
+        *reinterpret_cast<void**>(p) = freeList[sc];
+        freeList[sc] = p;
+    }
+    // Carve one 64 KB arena block into slots and thread them onto the free list.
+    // Arena blocks are never returned to the OS (like most poolers): the free
+    // list caps live arena at the peak concurrent objects per class.
+    void refill(int c) {
+        size_t sz = (size_t)(c + 1) * ALIGN;
+        size_t count = (64 * 1024) / sz;
+        if (count < 32) count = 32;
+        char* block = static_cast<char*>(::operator new(count * sz));
+        for (size_t i = 0; i < count; ++i) {
+            void* slot = block + i * sz;
+            *reinterpret_cast<void**>(slot) = freeList[c];
+            freeList[c] = slot;
+        }
+    }
+};
+
 // Collect/advance if due. Inline + cheap: the common case is one bool test.
 // While a cycle is in flight, gcAlloc keeps gcPending set so every safepoint
 // runs one more bounded slice until the cycle completes.
@@ -129,6 +177,8 @@ struct Heap {
     long long gcNanos = 0;              // total time spent collecting
     long long maxPauseNanos = 0;        // worst single collection
 
+    Pool pool;                          // size-class object allocator (release builds)
+
     static Heap& get() { static Heap h; return h; }
 };
 
@@ -156,7 +206,17 @@ T* gcAlloc(A&&... args) {
         if (h.bytesAllocated > h.nextGC || h.phase != GcPhase::IDLE) gcPending = true;
 #endif
     }
+#if defined(LOVAX_GC_STRESS) || defined(LOVAX_GC_STRESS_INC)
+    // Plain new/delete: a freed object is poisoned so ASan catches a missed root.
     T* obj = new T(std::forward<A>(args)...);
+#else
+    // Pool: placement-new into a recycled size-class slot. gcSizeClass records
+    // the class so the sweep returns the raw memory to the matching free list.
+    unsigned char sc;
+    void* mem = h.pool.allocRaw(sizeof(T), sc);
+    T* obj = new (mem) T(std::forward<A>(args)...);
+    obj->gcSizeClass = sc;
+#endif
     if (h.phase == GcPhase::SWEEP) {
         // Side list: invisible to the sweep cursor, spliced back at cycle end.
         obj->gcNext = h.newborn;

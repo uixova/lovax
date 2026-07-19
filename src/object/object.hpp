@@ -49,6 +49,10 @@ public:
     // incremental collector. Touched by the collector and the write barrier.
     Object* gcNext = nullptr;
     unsigned char gcColor = 0;
+    // Pool size-class of this object's allocation (RFC-024 pre-work): the sweep
+    // returns the raw memory to the right free list. 0xFF = malloc'd (oversized).
+    // Fits in the padding after gcColor, so it costs no extra bytes.
+    unsigned char gcSizeClass = 0;
 
     explicit Object(ObjectType t) : tag(t) {}
     virtual ~Object() = default;
@@ -119,7 +123,14 @@ inline bool sweepStep(Heap& h, size_t budget) {
             h.sweepCursor = &o->gcNext;
         } else {
             *h.sweepCursor = o->gcNext;
+#if defined(LOVAX_GC_STRESS) || defined(LOVAX_GC_STRESS_INC)
             delete o;
+#else
+            // Destroy the object, then hand the raw slot back to its free list.
+            unsigned char sc = o->gcSizeClass;
+            o->~Object();
+            h.pool.freeRaw(o, sc);
+#endif
         }
     }
     return *h.sweepCursor == nullptr;
