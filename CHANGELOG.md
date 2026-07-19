@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.18.1 — int64 overflow is now SPEC: two's-complement wrap (hardening)
+
+Pre-engine final audit findings, closed:
+
+- **Crash fixed**: `INT64_MIN / -1` and `INT64_MIN % -1` raised SIGFPE (a
+  hardware trap the fuzzer couldn't reach — the literal parse path can't
+  produce INT64_MIN directly). Guarded: `/ -1` = wrapped negation, `% -1` = 0.
+- **Signed overflow was UB**, now defined: int64 `+ - * <<` and negation wrap
+  two's-complement on EVERY platform (unsigned-arithmetic internally), in the
+  VM fast paths AND the runtime slow path. Same bits as before on x86 — zero
+  golden churn — but now portable, deterministic, and UBSan-clean.
+- New golden `59-int-tasma`: INT64_MIN/MAX edges, wrap identities,
+  the two trap guards — bit-identical in both value layouts, UBSan-proven.
+- CI: 16-byte fallback (`LOVAX_NO_NANBOX`) build+golden step added, as
+  RFC-024 promised.
+
 ## v0.18.0 — 8-byte NaN-boxed Value with exact int64 (RFC-024)
 
 The 16-byte tagged union became an 8-byte NaN-boxed value — the layout the

@@ -25,6 +25,13 @@ jobs:
           g++ -std=c++17 -O2 -DLOVAX_NO_COMPUTED_GOTO -o lovax src/main.cpp
           ./tests/run_tests.sh
 
+      # RFC-024: the 16-byte tagged-union Value is the fallback for targets
+      # without the 47-bit-pointer guarantee — it must stay bit-identical.
+      - name: Build + golden (16-byte Value fallback, LOVAX_NO_NANBOX)
+        run: |
+          g++ -std=c++17 -O2 -DLOVAX_NO_NANBOX -o lovax src/main.cpp
+          ./tests/run_tests.sh
+
       - name: Sanitizer sweep (ASan + UBSan) — every case must stay clean
         run: |
           g++ -std=c++17 -g -O1 -fsanitize=address,undefined -o lovax src/main.cpp
