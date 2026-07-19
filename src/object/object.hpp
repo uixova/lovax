@@ -36,7 +36,8 @@ enum class ObjectType {
     RETURN_VALUE,
     BREAK_SIGNAL,
     CONTINUE_SIGNAL,
-    ERROR
+    ERROR,
+    BOXED_INT   // RFC-024: int64 outside the 47-bit inline range (NANBOX only)
 };
 
 class Object {
@@ -230,6 +231,10 @@ inline void gcCollect() {
 
 // Human-friendly float printing: 6.28 (not 6.280000), 2.0 (not 2 — keep the type visible)
 inline std::string formatFloat(double v) {
+    // One canonical NaN, no sign: "-nan" is a libc/platform accident, and the
+    // NANBOX layout (RFC-024) canonicalizes NaN bits anyway — both layouts and
+    // all platforms must print the same thing (the determinism promise).
+    if (v != v) return "nan";
     std::ostringstream ss;
     ss.precision(14);
     ss << v;
@@ -256,6 +261,17 @@ public:
     double value;
     FloatObject(double val) : Object(ObjectType::FLOAT), value(val) {}
     std::string inspect() const override { return formatFloat(value); }
+};
+
+// RFC-024 (NANBOX): carrier for an int64 outside [-2^46, 2^46). Lives ONLY
+// inside a Value — every bridge into the Object world (toObject) converts it
+// to a plain IntegerObject, so no other subsystem ever sees this type. To the
+// language it IS an int: Value::tag()/asInt()/kind() treat it transparently.
+class BoxedIntObject : public Object {
+public:
+    long long value;
+    BoxedIntObject(long long v) : Object(ObjectType::BOXED_INT), value(v) {}
+    std::string inspect() const override { return std::to_string(value); }
 };
 
 class StringObject : public Object {
@@ -831,6 +847,7 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::BREAK_SIGNAL: return "break";
         case ObjectType::CONTINUE_SIGNAL: return "continue";
         case ObjectType::ERROR:        return "error";
+        case ObjectType::BOXED_INT:    return "int";   // transparent to the language
     }
     return "?";
 }

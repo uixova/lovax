@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.18.0 — 8-byte NaN-boxed Value with exact int64 (RFC-024)
+
+The 16-byte tagged union became an 8-byte NaN-boxed value — the layout the
+JIT (v1.x) will assume, landed and proven BEFORE the FFI ABI freezes.
+A value now fits one register.
+
+- **Layout**: doubles as their own bits (NaN canonicalized on write — the
+  x86 negative quiet NaN would collide with the tag range); everything else
+  top-13-bits-set + 4-bit tag + 47-bit payload. Ints in [-2^46, 2^46) ride
+  inline; a rarer int64 is heap-boxed transparently (own tag, so NO type
+  query ever dereferences — only an actual boxed read does). **Exact int64
+  semantics fully preserved** — the hybrid LuaJIT itself doesn't offer
+  (it drops to int32-or-double; we refused).
+- **Phase 1 first**: every direct field access (~150 sites) went behind an
+  accessor API with the fields made private — the compiler proves the layout
+  is swappable. The 16-byte union stays as `LOVAX_NO_NANBOX` (auto on
+  non-64-bit targets) and keeps running in CI.
+- New golden `58-buyuk-int`: 2^53+1 arithmetic/keys/compares — bit-identical
+  in BOTH layouts (the "JS/LuaJIT can't do this" proof).
+- One behavior fix: NaN now always prints "nan" (never "-nan" — that was a
+  libc accident, at odds with the determinism promise).
+
+**Measured (interleaved best-of-7): fib 232→194 ms (−16%), btree −8%,
+everything else equal — no bench regressed.** The full win arrives with the
+JIT: type guard = one tag compare, unbox = shift/mask.
+
+Gates: golden 84/84 × 6 modes (NANBOX CG/NOCG/STRESS+ASan/STRESS_INC+ASan +
+16B-fallback CG/STRESS+ASan), fuzz 0 crashes, sandbox, unit (Value size
+check now layout-aware), bench no-regression.
+
 ## v0.17.0 — runtime acceleration, Track A (allocator + map index)
 
 First slice of the pre-JIT runtime work: the speed that must come from data
