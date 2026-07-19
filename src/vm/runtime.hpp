@@ -302,11 +302,15 @@ namespace Runtime {
             long long l = static_cast<IntegerObject*>(left.get())->value;
             long long r = static_cast<IntegerObject*>(right.get())->value;
 
-            if (op == "+") return makeObj<IntegerObject>(l + r);
-            if (op == "-") return makeObj<IntegerObject>(l - r);
-            if (op == "*") return makeObj<IntegerObject>(l * r);
+            // wrapAdd/Sub/Mul: the language's int64 spec is two's-complement
+            // wrap — defined on every platform, UBSan-clean (same as the VM
+            // fast paths). The -1 guards close the INT64_MIN SIGFPE trap.
+            if (op == "+") return makeObj<IntegerObject>(wrapAdd(l, r));
+            if (op == "-") return makeObj<IntegerObject>(wrapSub(l, r));
+            if (op == "*") return makeObj<IntegerObject>(wrapMul(l, r));
             if (op == "/") {
                 if (r == 0) return makeError("division by zero", line);
+                if (r == -1) return makeObj<IntegerObject>(wrapNeg(l));
                 // Floor division: keeps the identity with floor-mod -> (a / b) * b + a % b == a
                 long long q = l / r;
                 if ((l % r != 0) && ((l < 0) != (r < 0))) q--;
@@ -319,10 +323,11 @@ namespace Runtime {
                 if (r < 0 || r > 63) {
                     return makeError("shift amount must be within 0-63: " + std::to_string(r), line);
                 }
-                return makeObj<IntegerObject>(op == "<<" ? (l << r) : (l >> r));
+                return makeObj<IntegerObject>(op == "<<" ? wrapShl(l, r) : (l >> r));
             }
             if (op == "%") {
                 if (r == 0) return makeError("modulo by zero", line);
+                if (r == -1) return makeObj<IntegerObject>(0);
                 // Floor mod (Python/Lua rule): the result carries the divisor's sign.
                 // The right behavior for grid/angle wrapping in games: -5 % 3 -> 1
                 long long m = l % r;

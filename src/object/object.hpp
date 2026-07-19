@@ -229,6 +229,27 @@ inline void gcCollect() {
     h.collecting = false;
 }
 
+// ===== Defined int64 arithmetic =====
+// Signed overflow is UB in C++; the LANGUAGE's spec is two's-complement wrap —
+// identical bits on every platform (the determinism promise) and UBSan-clean.
+// Also closes a real crash: INT64_MIN / -1 and % -1 raise SIGFPE on x86 —
+// callers guard with the -1 special case (divide: wrapNeg; modulo: 0).
+inline long long wrapAdd(long long a, long long b) {
+    return (long long)((unsigned long long)a + (unsigned long long)b);
+}
+inline long long wrapSub(long long a, long long b) {
+    return (long long)((unsigned long long)a - (unsigned long long)b);
+}
+inline long long wrapMul(long long a, long long b) {
+    return (long long)((unsigned long long)a * (unsigned long long)b);
+}
+inline long long wrapNeg(long long a) {
+    return (long long)(0ull - (unsigned long long)a);
+}
+inline long long wrapShl(long long a, long long s) {
+    return (long long)((unsigned long long)a << s);
+}
+
 // Human-friendly float printing: 6.28 (not 6.280000), 2.0 (not 2 — keep the type visible)
 inline std::string formatFloat(double v) {
     // One canonical NaN, no sign: "-nan" is a libc/platform accident, and the

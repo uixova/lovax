@@ -994,13 +994,18 @@ private:
                         push(fromObject(res));                                              \
                     }
 
-                VM_CASE(ADD) { NUMERIC_FAST("+", Value::integer(l + r), Value::real(l + r)); VM_NEXT; }
-                VM_CASE(SUB) { NUMERIC_FAST("-", Value::integer(l - r), Value::real(l - r)); VM_NEXT; }
-                VM_CASE(MUL) { NUMERIC_FAST("*", Value::integer(l * r), Value::real(l * r)); VM_NEXT; }
+                VM_CASE(ADD) { NUMERIC_FAST("+", Value::integer(wrapAdd(l, r)), Value::real(l + r)); VM_NEXT; }
+                VM_CASE(SUB) { NUMERIC_FAST("-", Value::integer(wrapSub(l, r)), Value::real(l - r)); VM_NEXT; }
+                VM_CASE(MUL) { NUMERIC_FAST("*", Value::integer(wrapMul(l, r)), Value::real(l * r)); VM_NEXT; }
                 VM_CASE(DIV) {
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
                     if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
                         if (pb->asInt() == 0) VM_THROW(makeError("division by zero", currentLine()));
+                        // INT64_MIN / -1 traps (SIGFPE) on x86 — by our wrap
+                        // spec the quotient is the (wrapped) negation.
+                        if (pb->asInt() == -1) {
+                            pa->setInt(wrapNeg(pa->asInt())); --sp_; VM_NEXT_FAST;
+                        }
                         long long q = pa->asInt() / pb->asInt();
                         if ((pa->asInt() % pb->asInt() != 0) && ((pa->asInt() < 0) != (pb->asInt() < 0))) q--;
                         pa->setInt(q); --sp_; VM_NEXT_FAST;
@@ -1022,6 +1027,8 @@ private:
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
                     if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
                         if (pb->asInt() == 0) VM_THROW(makeError("modulo by zero", currentLine()));
+                        // INT64_MIN % -1 traps (SIGFPE) on x86; result is 0.
+                        if (pb->asInt() == -1) { pa->setInt(0); --sp_; VM_NEXT_FAST; }
                         long long m = pa->asInt() % pb->asInt();
                         if (m != 0 && ((m < 0) != (pb->asInt() < 0))) m += pb->asInt();
                         pa->setInt(m); --sp_; VM_NEXT_FAST;
@@ -1089,7 +1096,7 @@ private:
                                 "shift amount must be within 0-63: " + std::to_string(b.asInt()),
                                 currentLine()));
                         }
-                        push(Value::integer(op == Op::SHL ? (a.asInt() << b.asInt()) : (a.asInt() >> b.asInt())));
+                        push(Value::integer(op == Op::SHL ? wrapShl(a.asInt(), b.asInt()) : (a.asInt() >> b.asInt())));
                     } else {
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a), toObject(b), currentLine());
                         if (isError(res)) VM_THROW(res);
@@ -1107,7 +1114,7 @@ private:
 
                 VM_CASE(NEGATE) {
                     Value* pa = sp_ - 1;
-                    if (pa->tag() == VKind::INT)   { pa->setInt(-pa->asInt()); VM_NEXT_FAST; }
+                    if (pa->tag() == VKind::INT)   { pa->setInt(wrapNeg(pa->asInt())); VM_NEXT_FAST; }
                     if (pa->tag() == VKind::FLOAT) { pa->setFloat(-pa->asFloat()); VM_NEXT_FAST; }
                     if (pa->isObjType(ObjectType::COMPLEX)) {
                         auto* c = static_cast<ComplexObject*>(pa->asObj());
@@ -1860,9 +1867,9 @@ private:
                     }                                                                   \
                     VM_NEXT;
 
-                VM_CASE(ADD_I) { IMM_ARITH("+", pa->setInt(pa->asInt() + k), pa->setFloat(pa->asFloat() + k)) }
-                VM_CASE(SUB_I) { IMM_ARITH("-", pa->setInt(pa->asInt() - k), pa->setFloat(pa->asFloat() - k)) }
-                VM_CASE(MUL_I) { IMM_ARITH("*", pa->setInt(pa->asInt() * k), pa->setFloat(pa->asFloat() * k)) }
+                VM_CASE(ADD_I) { IMM_ARITH("+", pa->setInt(wrapAdd(pa->asInt(), k)), pa->setFloat(pa->asFloat() + k)) }
+                VM_CASE(SUB_I) { IMM_ARITH("-", pa->setInt(wrapSub(pa->asInt(), k)), pa->setFloat(pa->asFloat() - k)) }
+                VM_CASE(MUL_I) { IMM_ARITH("*", pa->setInt(wrapMul(pa->asInt(), k)), pa->setFloat(pa->asFloat() * k)) }
                 VM_CASE(MOD_I) {
                     int16_t k = (int16_t)readU16();
                     Value* pa = sp_ - 1;
@@ -1957,13 +1964,13 @@ private:
                     }                                                                   \
                     VM_NEXT;
 
-                VM_CASE(LGET_ADD_I) { LGET_ARITH_I("+", Value::integer(v->asInt() + k), Value::real(v->asFloat() + k)) }
-                VM_CASE(LGET_SUB_I) { LGET_ARITH_I("-", Value::integer(v->asInt() - k), Value::real(v->asFloat() - k)) }
+                VM_CASE(LGET_ADD_I) { LGET_ARITH_I("+", Value::integer(wrapAdd(v->asInt(), k)), Value::real(v->asFloat() + k)) }
+                VM_CASE(LGET_SUB_I) { LGET_ARITH_I("-", Value::integer(wrapSub(v->asInt(), k)), Value::real(v->asFloat() - k)) }
 
                 VM_CASE(ADD_INPLACE) {
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
                     if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
-                        pa->setInt(pa->asInt() + pb->asInt()); --sp_; VM_NEXT_FAST;
+                        pa->setInt(wrapAdd(pa->asInt(), pb->asInt())); --sp_; VM_NEXT_FAST;
                     }
                     if (pa->isNumber() && pb->isNumber()) {
                         *pa = Value::real(pa->asDouble() + pb->asDouble()); --sp_; VM_NEXT_FAST;
