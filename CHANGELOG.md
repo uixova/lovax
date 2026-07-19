@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.17.0 — runtime acceleration, Track A (allocator + map index)
+
+First slice of the pre-JIT runtime work: the speed that must come from data
+structures, not from codegen (studying LuaJIT showed its low numbers are
+runtime work + JIT together — `lj_alloc.c`, `lj_tab.c` lessons, own designs).
+
+- **Size-class pool allocator.** Every VM object allocation is now one
+  free-list pop; a sweep-freed object is one push (16 classes, 16..256 B,
+  oversized falls back to `operator new`). Objects carry their size class in
+  a spare padding byte. GC_STRESS builds keep plain new/delete so ASan still
+  catches a missed root; the pool path itself is validated under ASan with
+  redzoned arenas.
+- **Map key index rewritten.** One flat power-of-two open-addressing table
+  (cached 64-bit hash + entry position per slot) replaces the two
+  std::unordered_map typed indexes: no per-node allocation, no key-string
+  copy, contiguous probing. Full-bytes FNV-1a + avalanche (a sampled hash
+  goes quadratic on adversarial keys — LuaJIT #555). Insertion order, the
+  public MapObject API and every golden output are unchanged.
+
+**Measured (interleaved best-of-5, same machine):** gc 46→28 ms (−39%),
+hashmap 168→91 ms (−46%), btree 125→109 ms (−13%), heavy_loop 315→156 ms
+(−50%); hashmap peak RSS 66→56 MB, everything else flat. fib/strcat
+unchanged as designed — fib is the JIT's job (v1.x), strcat is copy-bound
+and needs escape analysis (Track B); in-place append without it would be
+unsound (aliasing), so it was deliberately not done.
+
+String interning evaluated and deferred: the remaining gain is small next
+to the GC-coupled weak-table risk; revisit at v0.18 when the 8-byte value
+representation touches StringObject anyway.
+
+Gates: golden 83/83 in five build modes (CG, NOCG, GC_STRESS+ASan,
+GC_STRESS_INC+ASan, pool+ASan), fuzz 0 crashes, sandbox, unit, net-multi,
+bench no-regression.
+
 ## v0.16.0 — incremental GC: the ≤1 ms pause contract (RFC-023)
 
 The stop-the-world collector became a tri-color incremental one: MARK and
