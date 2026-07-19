@@ -1,4 +1,23 @@
-# Cross-language benchmark — v0.14 (2026-07-17)
+# Cross-language benchmark
+
+## v0.17 runtime acceleration — Lovax before/after (2026-07-19)
+
+Same machine, same day, interleaved best-of-5 (only Lovax re-measured; the
+other languages' columns below are from the v0.14 run on the same host —
+re-run the full field with `run.sh` before quoting cross-language numbers).
+
+| bench   | v0.16 | v0.17 | change | what did it |
+|---------|------:|------:|--------|-------------|
+| gc      | 46    | **28**  | −39% | pool allocator |
+| hashmap | 168   | **91**  | −46% | pool + open-addressing cached-hash index |
+| btree   | 125   | **109** | −13% | pool allocator |
+| heavy_loop | 315 | **156** | −50% | both (maps + allocation everywhere) |
+| fib     | 230   | 231   | flat | by design: compute gap is the JIT's job (v1.x) |
+| strcat  | 62    | 64    | flat | copy-bound; in-place append needs escape analysis (Track B) |
+
+Memory: hashmap peak RSS 66→56 MB, btree 37→34 MB, rest flat.
+
+# v0.14 field table (2026-07-17)
 
 Same machine, same workload (outputs verified identical across all languages),
 external wall-clock best-of-5. Reproduce with `benchmarks/cross/run.sh`.
