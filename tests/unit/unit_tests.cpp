@@ -14,7 +14,11 @@ static int fails = 0;
 } while (0)
 
 static void testValueSize() {
-    CHECK(sizeof(Value) == 16);          // RFC-013: the 16-byte tagged value
+#ifdef LOVAX_NANBOX
+    CHECK(sizeof(Value) == 8);           // RFC-024: NaN-boxed value, one register
+#else
+    CHECK(sizeof(Value) == 16);          // RFC-013: portable 16-byte tagged union
+#endif
 }
 
 static void testObjectEquals() {

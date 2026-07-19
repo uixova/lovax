@@ -1,5 +1,24 @@
 # Cross-language benchmark
 
+## v0.18 8-byte NaN-boxed Value — Lovax before/after (2026-07-19)
+
+RFC-024 landed: value = one register, exact int64 kept via transparent
+boxing. Interleaved best-of-7, same machine/day:
+
+| bench   | v0.17 (16B) | v0.18 (8B) | change |
+|---------|------:|------:|--------|
+| fib     | 232   | **194** | −16% |
+| btree   | 111   | **102** | −8%  |
+| hashmap | 86    | 85    | flat |
+| strcat  | 66    | 64    | flat |
+| gc      | 31    | 31    | flat |
+
+No regressions. Cumulative v0.16 → v0.18 (clean interleaved baselines):
+fib 230→194 (−16%), hashmap 168→85 (−49%), gc 46→31 (−33%), btree 125→102
+(−18%), heavy_loop 315→~150 (−52%) — all before any JIT. (The RESULTS.md
+v0.14 table's fib 416 was measured under post-compile machine load; the
+clean same-day baseline is 230 — recorded here for honesty.)
+
 ## v0.17 runtime acceleration — Lovax before/after (2026-07-19)
 
 Same machine, same day, interleaved best-of-5 (only Lovax re-measured; the

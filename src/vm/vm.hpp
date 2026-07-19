@@ -626,8 +626,7 @@ private:
             if (openUpvalues_[i]->stackSlot >= fromSlot) {
                 openUpvalues_[i]->value = *stackAt(openUpvalues_[i]->stackSlot);
                 // Barrier: the value leaves the root stack for a heap cell.
-                if (openUpvalues_[i]->value.tag() == VKind::OBJ)
-                    gcShade(openUpvalues_[i]->value.asObj());
+                gcShadeValue(openUpvalues_[i]->value);
                 openUpvalues_[i]->closed = true;
                 openUpvalues_.erase(openUpvalues_.begin() + i);
             } else {
@@ -954,7 +953,7 @@ private:
                     if (cell->closed) {
                         cell->value = pop();
                         // Barrier: the owning closure may already be black.
-                        if (cell->value.tag() == VKind::OBJ) gcShade(cell->value.asObj());
+                        gcShadeValue(cell->value);
                     }
                     else *stackAt(cell->stackSlot) = pop();
                     VM_NEXT_FAST;
@@ -1782,7 +1781,7 @@ private:
                     std::string msg = valueInspect(v);
                     auto err = makeError(msg, currentLine());
                     // Structured throw (RFC-022): maps/structs/lists/tuples are
-                    // carried intact so catch can inspect e.tag() etc.
+                    // carried intact so catch can inspect e.kind etc.
                     if (v.tag() == VKind::OBJ &&
                         (v.isObjType(ObjectType::MAP) || v.isObjType(ObjectType::STRUCT) ||
                          v.isObjType(ObjectType::LIST) || v.isObjType(ObjectType::TUPLE))) {

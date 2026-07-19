@@ -1,0 +1,25 @@
+# RFC-024: exact int64 proof — values outside the 47-bit inline range must
+# behave identically in both value layouts (boxed transparently under NANBOX).
+set big = 9007199254740993
+say big
+say big + 1
+say big - big
+say -big
+set mask = 9223372036854775807
+say mask
+say mask & 255
+say mask >> 32
+set m = {}
+m[big] = "boxed-key"
+say m[big]
+set l = [big, big + 5]
+say l
+say big == 9007199254740993
+say big > 9007199254740992
+say big / 7
+say big % 7
+fn double_it(x):
+    return x + x
+say double_it(big)
+for i in range(3):
+    say big + i

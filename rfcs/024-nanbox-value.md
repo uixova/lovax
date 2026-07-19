@@ -1,6 +1,12 @@
 # RFC-024: 8-byte NaN-boxed Value with exact int64 (hybrid boxed-int)
 
-Status: ACCEPTED (design; implementation lands as v0.18)
+Status: IMPLEMENTED (v0.18.0) — default on 64-bit x86-64/arm64;
+LOVAX_NO_NANBOX forces the 16-byte fallback (kept alive in CI).
+One deviation from the design text: the boxed int carries its OWN 4-bit tag
+(T_BOXINT) instead of riding under T_OBJ — sharing T_OBJ cost a pointer
+dereference on every type query of any object value (measured +25% on
+heavy_loop); a separate tag makes every tag()/isObj()/isInt() query
+heap-free, and only an actual boxed asInt() read dereferences.
 Supersedes the value-representation part of RFC-013 (which chose the 16-byte
 tagged union and explicitly deferred NaN-boxing).
 
