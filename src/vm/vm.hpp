@@ -456,8 +456,8 @@ public:
             if (builtinNames().count(name)) {
                 // Skip untouched core builtins; keep user redefinitions.
                 if (globals_[i].isObj() &&
-                    globals_[i].obj->type() == ObjectType::BUILTIN &&
-                    static_cast<BuiltinObject*>(globals_[i].obj)->name == name) {
+                    globals_[i].asObj()->type() == ObjectType::BUILTIN &&
+                    static_cast<BuiltinObject*>(globals_[i].asObj())->name == name) {
                     continue;
                 }
             }
@@ -626,8 +626,8 @@ private:
             if (openUpvalues_[i]->stackSlot >= fromSlot) {
                 openUpvalues_[i]->value = *stackAt(openUpvalues_[i]->stackSlot);
                 // Barrier: the value leaves the root stack for a heap cell.
-                if (openUpvalues_[i]->value.kind == VKind::OBJ)
-                    gcShade(openUpvalues_[i]->value.obj);
+                if (openUpvalues_[i]->value.tag() == VKind::OBJ)
+                    gcShade(openUpvalues_[i]->value.asObj());
                 openUpvalues_[i]->closed = true;
                 openUpvalues_.erase(openUpvalues_.begin() + i);
             } else {
@@ -643,7 +643,7 @@ private:
         Value& callee = peek(argc);
 
         if (callee.isObjType(ObjectType::FUNCTION)) {
-            auto* closure = static_cast<ClosureObject*>(callee.obj);
+            auto* closure = static_cast<ClosureObject*>(callee.asObj());
             const auto& proto = *closure->proto;
 
             if (proto.variadic) {
@@ -687,7 +687,7 @@ private:
         }
 
         if (callee.isObjType(ObjectType::BUILTIN)) {
-            auto builtin = refCast<BuiltinObject>(callee.obj);
+            auto builtin = refCast<BuiltinObject>(callee.asObj());
             std::vector<Ref<Object>> args;
             args.reserve(argc);
             for (int i = argc - 1; i >= 0; --i) args.push_back(toObject(peek(i)));
@@ -954,7 +954,7 @@ private:
                     if (cell->closed) {
                         cell->value = pop();
                         // Barrier: the owning closure may already be black.
-                        if (cell->value.kind == VKind::OBJ) gcShade(cell->value.obj);
+                        if (cell->value.tag() == VKind::OBJ) gcShade(cell->value.asObj());
                     }
                     else *stackAt(cell->stackSlot) = pop();
                     VM_NEXT_FAST;
@@ -962,14 +962,14 @@ private:
 
                 VM_CASE(EQUAL) {
                     bool eq = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr;
-                    sp_[-2].kind = VKind::BOOL; sp_[-2].b = eq; --sp_;
+                    sp_[-1].wipeObj(); sp_[-2].wipeObj();
+                    sp_[-2].setBool(eq); --sp_;
                     VM_NEXT_FAST;
                 }
                 VM_CASE(NOT_EQUAL) {
                     bool eq = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr;
-                    sp_[-2].kind = VKind::BOOL; sp_[-2].b = !eq; --sp_;
+                    sp_[-1].wipeObj(); sp_[-2].wipeObj();
+                    sp_[-2].setBool(!eq); --sp_;
                     VM_NEXT_FAST;
                 }
 
@@ -979,8 +979,8 @@ private:
                 // destructor-safe VM_NEXT applies.
                 #define NUMERIC_FAST(opChar, intExpr, dblExpr)                              \
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;                               \
-                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {                 \
-                        long long l = pa->i, r = pb->i; (void)l; (void)r;                   \
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {                 \
+                        long long l = pa->asInt(), r = pb->asInt(); (void)l; (void)r;                   \
                         *pa = intExpr; --sp_; VM_NEXT_FAST;                                 \
                     }                                                                       \
                     if (pa->isNumber() && pb->isNumber()) {                                 \
@@ -1000,11 +1000,11 @@ private:
                 VM_CASE(MUL) { NUMERIC_FAST("*", Value::integer(l * r), Value::real(l * r)); VM_NEXT; }
                 VM_CASE(DIV) {
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
-                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {
-                        if (pb->i == 0) VM_THROW(makeError("division by zero", currentLine()));
-                        long long q = pa->i / pb->i;
-                        if ((pa->i % pb->i != 0) && ((pa->i < 0) != (pb->i < 0))) q--;
-                        pa->i = q; --sp_; VM_NEXT_FAST;
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
+                        if (pb->asInt() == 0) VM_THROW(makeError("division by zero", currentLine()));
+                        long long q = pa->asInt() / pb->asInt();
+                        if ((pa->asInt() % pb->asInt() != 0) && ((pa->asInt() < 0) != (pb->asInt() < 0))) q--;
+                        pa->setInt(q); --sp_; VM_NEXT_FAST;
                     }
                     if (pa->isNumber() && pb->isNumber()) {
                         double r = pb->asDouble();
@@ -1021,11 +1021,11 @@ private:
                 }
                 VM_CASE(MOD) {
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
-                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {
-                        if (pb->i == 0) VM_THROW(makeError("modulo by zero", currentLine()));
-                        long long m = pa->i % pb->i;
-                        if (m != 0 && ((m < 0) != (pb->i < 0))) m += pb->i;
-                        pa->i = m; --sp_; VM_NEXT_FAST;
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
+                        if (pb->asInt() == 0) VM_THROW(makeError("modulo by zero", currentLine()));
+                        long long m = pa->asInt() % pb->asInt();
+                        if (m != 0 && ((m < 0) != (pb->asInt() < 0))) m += pb->asInt();
+                        pa->setInt(m); --sp_; VM_NEXT_FAST;
                     }
                     if (pa->isNumber() && pb->isNumber()) {
                         double r = pb->asDouble();
@@ -1046,8 +1046,8 @@ private:
                     Value b = pop(), a = pop();
                     if (a.isNumber() && b.isNumber()) {
                         double result = std::pow(a.asDouble(), b.asDouble());
-                        if (a.kind == VKind::INT && b.kind == VKind::INT &&
-                            b.i >= 0 && result == std::floor(result) && std::fabs(result) < 9.2e18) {
+                        if (a.tag() == VKind::INT && b.tag() == VKind::INT &&
+                            b.asInt() >= 0 && result == std::floor(result) && std::fabs(result) < 9.2e18) {
                             push(Value::integer((long long)result));
                         } else {
                             push(Value::real(result));
@@ -1066,8 +1066,8 @@ private:
 
                 #define INT_ONLY_OP(opStr, expr)                                            \
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;                               \
-                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {                 \
-                        long long l = pa->i, r = pb->i; (void)l; (void)r;                   \
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {                 \
+                        long long l = pa->asInt(), r = pb->asInt(); (void)l; (void)r;                   \
                         *pa = expr; --sp_; VM_NEXT_FAST;                                    \
                     }                                                                       \
                     {                                                                       \
@@ -1084,13 +1084,13 @@ private:
                 VM_CASE(SHL) VM_CASE(SHR) {
                     Value b = pop(), a = pop();
                     const char* opStr = (op == Op::SHL) ? "<<" : ">>";
-                    if (a.kind == VKind::INT && b.kind == VKind::INT) {
-                        if (b.i < 0 || b.i > 63) {
+                    if (a.tag() == VKind::INT && b.tag() == VKind::INT) {
+                        if (b.asInt() < 0 || b.asInt() > 63) {
                             VM_THROW(makeError(
-                                "shift amount must be within 0-63: " + std::to_string(b.i),
+                                "shift amount must be within 0-63: " + std::to_string(b.asInt()),
                                 currentLine()));
                         }
-                        push(Value::integer(op == Op::SHL ? (a.i << b.i) : (a.i >> b.i)));
+                        push(Value::integer(op == Op::SHL ? (a.asInt() << b.asInt()) : (a.asInt() >> b.asInt())));
                     } else {
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a), toObject(b), currentLine());
                         if (isError(res)) VM_THROW(res);
@@ -1108,10 +1108,10 @@ private:
 
                 VM_CASE(NEGATE) {
                     Value* pa = sp_ - 1;
-                    if (pa->kind == VKind::INT)   { pa->i = -pa->i; VM_NEXT_FAST; }
-                    if (pa->kind == VKind::FLOAT) { pa->d = -pa->d; VM_NEXT_FAST; }
+                    if (pa->tag() == VKind::INT)   { pa->setInt(-pa->asInt()); VM_NEXT_FAST; }
+                    if (pa->tag() == VKind::FLOAT) { pa->setFloat(-pa->asFloat()); VM_NEXT_FAST; }
                     if (pa->isObjType(ObjectType::COMPLEX)) {
-                        auto* c = static_cast<ComplexObject*>(pa->obj);
+                        auto* c = static_cast<ComplexObject*>(pa->asObj());
                         *pa = Value::object(makeObj<ComplexObject>(-c->re, -c->im));
                         VM_NEXT;
                     }
@@ -1121,13 +1121,13 @@ private:
                 }
                 VM_CASE(NOT_) {
                     bool t = valueTruthy(sp_[-1]);
-                    sp_[-1].obj = nullptr;
-                    sp_[-1].kind = VKind::BOOL; sp_[-1].b = !t;
+                    sp_[-1].wipeObj();
+                    sp_[-1].setBool(!t);
                     VM_NEXT_FAST;
                 }
                 VM_CASE(BIT_NOT) {
                     Value* pa = sp_ - 1;
-                    if (pa->kind == VKind::INT) { pa->i = ~pa->i; VM_NEXT_FAST; }
+                    if (pa->tag() == VKind::INT) { pa->setInt(~pa->asInt()); VM_NEXT_FAST; }
                     VM_THROW(makeError(
                         "'~' only works on integers, got " + valueTypeName(*pa),
                         currentLine()));
@@ -1161,7 +1161,7 @@ private:
                     {
                         Value& callee = peek(argc);
                         if (callee.isObjType(ObjectType::FUNCTION)) {
-                            ClosureObject* cl = static_cast<ClosureObject*>(callee.obj);
+                            ClosureObject* cl = static_cast<ClosureObject*>(callee.asObj());
                             const Proto& p = *cl->proto;
                             if (!p.variadic && argc == p.paramCount &&
                                 frames_.size() < MAX_FRAMES &&
@@ -1196,7 +1196,7 @@ private:
                     Value& recv = peek(argc + 1);
                     bool isStruct = recv.isObjType(ObjectType::STRUCT) ||
                         (recv.isObjType(ObjectType::MAP) &&
-                         static_cast<MapObject*>(recv.obj)->getStr(typeKey) != nullptr);
+                         static_cast<MapObject*>(recv.asObj())->getStr(typeKey) != nullptr);
                     syncOut();
                     {
                         Ref<Object> err;
@@ -1217,7 +1217,7 @@ private:
                 }
                 VM_CASE(CLOSURE) {
                     uint16_t protoIdx = readU16();
-                    auto holder = refCast<ProtoObject>(constant(protoIdx).obj);
+                    auto holder = refCast<ProtoObject>(constant(protoIdx).asObj());
                     auto closure = makeObj<ClosureObject>(holder->proto);
                     // Functions created inside a module keep resolving globals
                     // against that module.
@@ -1250,11 +1250,11 @@ private:
                     uint16_t nf = readU16();
                     auto shape = makeObj<StructShapeObject>();
                     GcRoot sr(shape.get());
-                    shape->name = static_cast<StringObject*>(constant(nameC).obj)->value;
+                    shape->name = static_cast<StringObject*>(constant(nameC).asObj())->value;
                     shape->fieldNames.reserve(nf);
                     for (uint16_t i = 0; i < nf; ++i) {
                         uint16_t fc = readU16();
-                        auto key = refCast<StringObject>(constant(fc).obj);
+                        auto key = refCast<StringObject>(constant(fc).asObj());
                         shape->fieldIndex[key->value] = (int)i;
                         shape->fieldNames.push_back(key);
                     }
@@ -1262,7 +1262,7 @@ private:
                     shape->methods.reserve(nm);
                     for (uint16_t i = 0; i < nm; ++i) {
                         uint16_t mc = readU16();
-                        auto key = refCast<StringObject>(constant(mc).obj);
+                        auto key = refCast<StringObject>(constant(mc).asObj());
                         // Methods were pushed in declaration order: oldest deepest.
                         shape->methodIndex[key->value] = shape->methods.size();
                         shape->methods.push_back({key, toObject(peek(nm - 1 - i))});
@@ -1275,7 +1275,7 @@ private:
                     // Stack: [shape, factory] -> attach and keep the factory.
                     Value fac = pop();
                     Value shp = pop();
-                    static_cast<ClosureObject*>(fac.obj)->structShape = toObject(shp);
+                    static_cast<ClosureObject*>(fac.asObj())->structShape = toObject(shp);
                     push(fac);
                     VM_NEXT;
                 }
@@ -1349,9 +1349,9 @@ private:
 
                 VM_CASE(INDEX_GET) {
                     Value idx = pop(), obj = pop();
-                    if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
-                        auto* list = static_cast<ListObject*>(obj.obj);
-                        long long i = idx.i;
+                    if (obj.isObjType(ObjectType::LIST) && idx.tag() == VKind::INT) {
+                        auto* list = static_cast<ListObject*>(obj.asObj());
+                        long long i = idx.asInt();
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
@@ -1367,9 +1367,9 @@ private:
                 VM_CASE(INDEX_GET_KEEP) {
                     Value& obj = peek(1);
                     Value& idx = peek(0);
-                    if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
-                        auto* list = static_cast<ListObject*>(obj.obj);
-                        long long i = idx.i;
+                    if (obj.isObjType(ObjectType::LIST) && idx.tag() == VKind::INT) {
+                        auto* list = static_cast<ListObject*>(obj.asObj());
+                        long long i = idx.asInt();
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
@@ -1385,9 +1385,9 @@ private:
                 }
                 VM_CASE(INDEX_SET) {
                     Value val = pop(), idx = pop(), obj = pop();
-                    if (obj.isObjType(ObjectType::LIST) && idx.kind == VKind::INT) {
-                        auto* list = static_cast<ListObject*>(obj.obj);
-                        long long i = idx.i;
+                    if (obj.isObjType(ObjectType::LIST) && idx.tag() == VKind::INT) {
+                        auto* list = static_cast<ListObject*>(obj.asObj());
+                        long long i = idx.asInt();
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
@@ -1433,7 +1433,7 @@ private:
                 // resolve in the shared fallback (evalMemberAccess).
                 #define STRUCT_IC_GET(top, icsIdx, ACT)                                  \
                     if ((top)->isObjType(ObjectType::STRUCT)) {                          \
-                        auto* si = static_cast<StructInstanceObject*>((top)->obj);       \
+                        auto* si = static_cast<StructInstanceObject*>((top)->asObj());       \
                         uint32_t& ic = frame->chunk->icache[icsIdx];                     \
                         if (ic < si->slots.size() &&                                     \
                             si->shape->fieldNames[ic]->value == prop) {                  \
@@ -1451,13 +1451,13 @@ private:
                 VM_CASE(MEMBER_GET) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj)->value;
+                        static_cast<StringObject*>(constant(nameC).asObj())->value;
                     Value* top = sp_ - 1;
                     #define STRUCT_ACT_REPLACE(slotRef) *top = fromObject(slotRef)
                     STRUCT_IC_GET(top, ics, STRUCT_ACT_REPLACE)
                     #undef STRUCT_ACT_REPLACE
                     if (top->isObjType(ObjectType::MAP)) {
-                        IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
+                        IC_LOOKUP(static_cast<MapObject*>(top->asObj()), prop, ics, ent)
                         if (ent != nullptr) {
                             *top = fromObject(ent->second);
                             VM_NEXT_FAST;
@@ -1476,12 +1476,12 @@ private:
                     Value* top = sp_ - 1;
                     if (top->isNil()) VM_NEXT_FAST;            // a?.b -> null (in place)
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj)->value;
+                        static_cast<StringObject*>(constant(nameC).asObj())->value;
                     #define STRUCT_ACT_REPLACE(slotRef) *top = fromObject(slotRef)
                     STRUCT_IC_GET(top, ics, STRUCT_ACT_REPLACE)
                     #undef STRUCT_ACT_REPLACE
                     if (top->isObjType(ObjectType::MAP)) {
-                        IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
+                        IC_LOOKUP(static_cast<MapObject*>(top->asObj()), prop, ics, ent)
                         if (ent != nullptr) {
                             *top = fromObject(ent->second);
                             VM_NEXT_FAST;
@@ -1498,13 +1498,13 @@ private:
                 VM_CASE(MEMBER_GET_KEEP) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj)->value;
+                        static_cast<StringObject*>(constant(nameC).asObj())->value;
                     Value* top = sp_ - 1;
                     #define STRUCT_ACT_PUSH(slotRef) push(fromObject(slotRef))
                     STRUCT_IC_GET(top, ics, STRUCT_ACT_PUSH)
                     #undef STRUCT_ACT_PUSH
                     if (top->isObjType(ObjectType::MAP)) {
-                        IC_LOOKUP(static_cast<MapObject*>(top->obj), prop, ics, ent)
+                        IC_LOOKUP(static_cast<MapObject*>(top->asObj()), prop, ics, ent)
                         if (ent != nullptr) {
                             push(fromObject(ent->second));
                             VM_NEXT_FAST;
@@ -1520,10 +1520,10 @@ private:
                 VM_CASE(MEMBER_SET) {
                     uint16_t nameC = readU16(), ics = readU16();
                     const std::string& prop =
-                        static_cast<StringObject*>(constant(nameC).obj)->value;
+                        static_cast<StringObject*>(constant(nameC).asObj())->value;
                     Value* pobj = sp_ - 2; Value* pval = sp_ - 1;
                     if (pobj->isObjType(ObjectType::STRUCT)) {
-                        auto* si = static_cast<StructInstanceObject*>(pobj->obj);
+                        auto* si = static_cast<StructInstanceObject*>(pobj->asObj());
                         uint32_t& ic = frame->chunk->icache[ics];
                         size_t slot = MapObject::NPOS;
                         if (ic < si->slots.size() &&
@@ -1540,7 +1540,7 @@ private:
                             auto nv = toObject(*pval);
                             gcShade(nv.get());          // write barrier (RFC-023)
                             si->slots[slot] = nv;
-                            pval->obj = nullptr; pobj->obj = nullptr; sp_ -= 2;
+                            pval->wipeObj(); pobj->wipeObj(); sp_ -= 2;
                             VM_NEXT_FAST;
                         }
                         // Struct fields are fixed at declaration: no new fields.
@@ -1551,15 +1551,15 @@ private:
                                            currentLine()));
                     }
                     if (pobj->isObjType(ObjectType::MAP) &&
-                        !static_cast<MapObject*>(pobj->obj)->frozen) {
-                        auto* m = static_cast<MapObject*>(pobj->obj);
+                        !static_cast<MapObject*>(pobj->asObj())->frozen) {
+                        auto* m = static_cast<MapObject*>(pobj->asObj());
                         IC_LOOKUP(m, prop, ics, ent)
                         if (ent != nullptr) {
                             auto nv = toObject(*pval);
                             gcShade(nv.get());          // write barrier (RFC-023)
                             const_cast<std::pair<Ref<Object>,
                                 Ref<Object>>*>(ent)->second = nv;
-                            pval->obj = nullptr; pobj->obj = nullptr; sp_ -= 2;
+                            pval->wipeObj(); pobj->wipeObj(); sp_ -= 2;
                             VM_NEXT_FAST;
                         }
                     }
@@ -1586,8 +1586,8 @@ private:
                     ObjectType firstObjType = ObjectType::NULL_OBJ;
                     for (int i = n - 1; i >= 0; --i) {
                         if (i == n - 1) {
-                            firstKind = peek(i).kind;
-                            if (peek(i).isObj()) firstObjType = peek(i).obj->type();
+                            firstKind = peek(i).tag();
+                            if (peek(i).isObj()) firstObjType = peek(i).asObj()->type();
                         } else {
                             out += " ";
                         }
@@ -1656,7 +1656,7 @@ private:
                     // Range iteration is the hot loop shape (for i in 0..n): all-scalar,
                     // in-place slot writes, direct dispatch.
                     {
-                        IterObject* itp = static_cast<IterObject*>(peek().obj);
+                        IterObject* itp = static_cast<IterObject*>(peek().asObj());
                         if (itp->kind == IterObject::Kind::RANGE) {
                             auto* r = static_cast<RangeObject*>(itp->source.get());
                             if (r->step > 0 ? itp->index >= r->end : itp->index <= r->end) {
@@ -1670,7 +1670,7 @@ private:
                             VM_NEXT_FAST;
                         }
                     }
-                    auto iter = refCast<IterObject>(peek().obj);
+                    auto iter = refCast<IterObject>(peek().asObj());
 
                     Value first, second;
                     bool done = false;
@@ -1782,8 +1782,8 @@ private:
                     std::string msg = valueInspect(v);
                     auto err = makeError(msg, currentLine());
                     // Structured throw (RFC-022): maps/structs/lists/tuples are
-                    // carried intact so catch can inspect e.kind etc.
-                    if (v.kind == VKind::OBJ &&
+                    // carried intact so catch can inspect e.tag() etc.
+                    if (v.tag() == VKind::OBJ &&
                         (v.isObjType(ObjectType::MAP) || v.isObjType(ObjectType::STRUCT) ||
                          v.isObjType(ObjectType::LIST) || v.isObjType(ObjectType::TUPLE))) {
                         err->payload = toObject(v);
@@ -1798,10 +1798,10 @@ private:
                 }
                 VM_CASE(RANGE_NEW) {
                     Value b = pop(), a = pop();
-                    if (a.kind != VKind::INT || b.kind != VKind::INT) {
+                    if (a.tag() != VKind::INT || b.tag() != VKind::INT) {
                         VM_THROW(makeError("range operator '..' expects two integers", currentLine()));
                     }
-                    push(Value::object(makeObj<RangeObject>(a.i, b.i, 1)));
+                    push(Value::object(makeObj<RangeObject>(a.asInt(), b.asInt(), 1)));
                     VM_NEXT;
                 }
                 VM_CASE(IS_TYPE) {
@@ -1810,7 +1810,7 @@ private:
                         VM_THROW(makeError("'is' expects a type name string on the right "
                                            "(e.g. x is \"int\")", currentLine()));
                     }
-                    const std::string& want = static_cast<StringObject*>(name.obj)->value;
+                    const std::string& want = static_cast<StringObject*>(name.asObj())->value;
                     push(Value::boolean(valueTypeName(val) == want));
                     VM_NEXT;
                 }
@@ -1821,7 +1821,7 @@ private:
                         VM_THROW(makeError("unpacking assignment expects a list or tuple, got " +
                                            valueTypeName(v), currentLine()));
                     }
-                    auto* list = static_cast<ListObject*>(v.obj);
+                    auto* list = static_cast<ListObject*>(v.asObj());
                     if (list->elements.size() != n) {
                         VM_THROW(makeError("unpacking mismatch: " + std::to_string(n) +
                                            " target(s) but value has " +
@@ -1840,7 +1840,7 @@ private:
                 VM_CASE(RUNTIME_ERROR) {
                     uint16_t msgC = readU16();
                     const std::string& msg =
-                        static_cast<StringObject*>(constant(msgC).obj)->value;
+                        static_cast<StringObject*>(constant(msgC).asObj())->value;
                     VM_THROW(makeError(msg, currentLine()));
                 }
 
@@ -1850,8 +1850,8 @@ private:
                 #define IMM_ARITH(opStr, intStmt, dblStmt)                              \
                     int16_t k = (int16_t)readU16();                                     \
                     Value* pa = sp_ - 1;                                                \
-                    if (pa->kind == VKind::INT)   { intStmt; VM_NEXT_FAST; }            \
-                    if (pa->kind == VKind::FLOAT) { dblStmt; VM_NEXT_FAST; }            \
+                    if (pa->tag() == VKind::INT)   { intStmt; VM_NEXT_FAST; }            \
+                    if (pa->tag() == VKind::FLOAT) { dblStmt; VM_NEXT_FAST; }            \
                     {                                                                   \
                         Value a = pop();                                                \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
@@ -1861,16 +1861,16 @@ private:
                     }                                                                   \
                     VM_NEXT;
 
-                VM_CASE(ADD_I) { IMM_ARITH("+", pa->i += k, pa->d += k) }
-                VM_CASE(SUB_I) { IMM_ARITH("-", pa->i -= k, pa->d -= k) }
-                VM_CASE(MUL_I) { IMM_ARITH("*", pa->i *= k, pa->d *= k) }
+                VM_CASE(ADD_I) { IMM_ARITH("+", pa->setInt(pa->asInt() + k), pa->setFloat(pa->asFloat() + k)) }
+                VM_CASE(SUB_I) { IMM_ARITH("-", pa->setInt(pa->asInt() - k), pa->setFloat(pa->asFloat() - k)) }
+                VM_CASE(MUL_I) { IMM_ARITH("*", pa->setInt(pa->asInt() * k), pa->setFloat(pa->asFloat() * k)) }
                 VM_CASE(MOD_I) {
                     int16_t k = (int16_t)readU16();
                     Value* pa = sp_ - 1;
-                    if (pa->kind == VKind::INT && k != 0) {
-                        long long m = pa->i % k;
+                    if (pa->tag() == VKind::INT && k != 0) {
+                        long long m = pa->asInt() % k;
                         if (m != 0 && ((m < 0) != (k < 0))) m += k;
-                        pa->i = m;
+                        pa->setInt(m);
                         VM_NEXT_FAST;
                     }
                     {
@@ -1885,7 +1885,7 @@ private:
                 #define IMM_BITWISE(opStr, intStmt)                                     \
                     int16_t k = (int16_t)readU16();                                     \
                     Value* pa = sp_ - 1;                                                \
-                    if (pa->kind == VKind::INT) { intStmt; VM_NEXT_FAST; }              \
+                    if (pa->tag() == VKind::INT) { intStmt; VM_NEXT_FAST; }              \
                     {                                                                   \
                         Value a = pop();                                                \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(a),     \
@@ -1895,17 +1895,17 @@ private:
                     }                                                                   \
                     VM_NEXT;
 
-                VM_CASE(BAND_I) { IMM_BITWISE("&", pa->i &= k) }
-                VM_CASE(BOR_I)  { IMM_BITWISE("|", pa->i |= k) }
-                VM_CASE(BXOR_I) { IMM_BITWISE("^", pa->i ^= k) }
+                VM_CASE(BAND_I) { IMM_BITWISE("&", pa->setInt(pa->asInt() & k)) }
+                VM_CASE(BOR_I)  { IMM_BITWISE("|", pa->setInt(pa->asInt() | k)) }
+                VM_CASE(BXOR_I) { IMM_BITWISE("^", pa->setInt(pa->asInt() ^ k)) }
 
                 // CMP_JF: compare the top two values, pop both, jump when NOT true.
                 // One dispatch instead of compare + JUMP_IF_FALSE + a bool roundtrip.
                 #define CMP_JF(opStr, cmpInt, cmpDbl)                                   \
                     uint16_t d = readU16();                                             \
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;                           \
-                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {             \
-                        long long l = pa->i, r = pb->i; (void)l; (void)r;               \
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {             \
+                        long long l = pa->asInt(), r = pb->asInt(); (void)l; (void)r;               \
                         sp_ -= 2; if (!(cmpInt)) ip += d; VM_NEXT_FAST;                 \
                     }                                                                   \
                     if (pa->isNumber() && pb->isNumber()) {                             \
@@ -1928,14 +1928,14 @@ private:
                 VM_CASE(EQUAL_JF) {
                     uint16_t d = readU16();
                     bool t = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr; sp_ -= 2;
+                    sp_[-1].wipeObj(); sp_[-2].wipeObj(); sp_ -= 2;
                     if (!t) ip += d;
                     VM_NEXT_FAST;
                 }
                 VM_CASE(NOT_EQUAL_JF) {
                     uint16_t d = readU16();
                     bool t = valueEquals(sp_[-2], sp_[-1]);
-                    sp_[-1].obj = nullptr; sp_[-2].obj = nullptr; sp_ -= 2;
+                    sp_[-1].wipeObj(); sp_[-2].wipeObj(); sp_ -= 2;
                     if (t) ip += d;
                     VM_NEXT_FAST;
                 }
@@ -1948,8 +1948,8 @@ private:
                 #define LGET_ARITH_I(opStr, intExpr, dblExpr)                           \
                     uint16_t sl = readU16(); int16_t k = (int16_t)readU16();            \
                     Value* v = &slots[sl];                                              \
-                    if (v->kind == VKind::INT)   { push(intExpr); VM_NEXT_FAST; }       \
-                    if (v->kind == VKind::FLOAT) { push(dblExpr); VM_NEXT_FAST; }       \
+                    if (v->tag() == VKind::INT)   { push(intExpr); VM_NEXT_FAST; }       \
+                    if (v->tag() == VKind::FLOAT) { push(dblExpr); VM_NEXT_FAST; }       \
                     {                                                                   \
                         auto res = Runtime::evalInfixExpression(opStr, toObject(*v),    \
                             makeObj<IntegerObject>(k), currentLine());         \
@@ -1958,13 +1958,13 @@ private:
                     }                                                                   \
                     VM_NEXT;
 
-                VM_CASE(LGET_ADD_I) { LGET_ARITH_I("+", Value::integer(v->i + k), Value::real(v->d + k)) }
-                VM_CASE(LGET_SUB_I) { LGET_ARITH_I("-", Value::integer(v->i - k), Value::real(v->d - k)) }
+                VM_CASE(LGET_ADD_I) { LGET_ARITH_I("+", Value::integer(v->asInt() + k), Value::real(v->asFloat() + k)) }
+                VM_CASE(LGET_SUB_I) { LGET_ARITH_I("-", Value::integer(v->asInt() - k), Value::real(v->asFloat() - k)) }
 
                 VM_CASE(ADD_INPLACE) {
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
-                    if (pa->kind == VKind::INT && pb->kind == VKind::INT) {
-                        pa->i += pb->i; --sp_; VM_NEXT_FAST;
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
+                        pa->setInt(pa->asInt() + pb->asInt()); --sp_; VM_NEXT_FAST;
                     }
                     if (pa->isNumber() && pb->isNumber()) {
                         *pa = Value::real(pa->asDouble() + pb->asDouble()); --sp_; VM_NEXT_FAST;
@@ -1975,13 +1975,13 @@ private:
                         // possibly-shared one). makeObj can't collect mid-instruction
                         // (deferred to the next safepoint), so ls/rs stay valid.
                         // TODO(v0.11-perf): restore in-place append with a builder flag.
-                        auto* ls = static_cast<StringObject*>(pa->obj);
-                        const std::string& rs = static_cast<StringObject*>(pb->obj)->value;
+                        auto* ls = static_cast<StringObject*>(pa->asObj());
+                        const std::string& rs = static_cast<StringObject*>(pb->asObj())->value;
                         auto out = makeObj<StringObject>(std::string());
                         out->value.reserve(ls->value.size() + rs.size());
                         out->value.append(ls->value).append(rs);
-                        pa->obj = out.get();
-                        pb->obj = nullptr; --sp_;
+                        pa->setObjPtr(out.get());
+                        pb->wipeObj(); --sp_;
                         VM_NEXT_FAST;
                     }
                     {
@@ -1997,12 +1997,12 @@ private:
                 #define CMP_I_JF(opStr, cmpInt, cmpDbl)                                 \
                     int16_t k = (int16_t)readU16(); uint16_t d = readU16();             \
                     Value* pa = sp_ - 1;                                                \
-                    if (pa->kind == VKind::INT) {                                       \
-                        long long l = pa->i; (void)l;                                   \
+                    if (pa->tag() == VKind::INT) {                                       \
+                        long long l = pa->asInt(); (void)l;                                   \
                         --sp_; if (!(cmpInt)) ip += d; VM_NEXT_FAST;                    \
                     }                                                                   \
-                    if (pa->kind == VKind::FLOAT) {                                     \
-                        double l = pa->d; (void)l;                                      \
+                    if (pa->tag() == VKind::FLOAT) {                                     \
+                        double l = pa->asFloat(); (void)l;                                      \
                         --sp_; if (!(cmpDbl)) ip += d; VM_NEXT_FAST;                    \
                     }                                                                   \
                     {                                                                   \
@@ -2109,9 +2109,9 @@ private:
     // list[a:b] / string[a:b] with Python rules (negative indices, clamped, end-exclusive)
     Ref<Object> sliceOp(const Ref<Object>& obj,
                                     const Value& startV, const Value& endV, int line) {
-        if (startV.kind != VKind::NIL && startV.kind != VKind::INT)
+        if (startV.tag() != VKind::NIL && startV.tag() != VKind::INT)
             return makeError("slice bounds must be integers", line);
-        if (endV.kind != VKind::NIL && endV.kind != VKind::INT)
+        if (endV.tag() != VKind::NIL && endV.tag() != VKind::INT)
             return makeError("slice bounds must be integers", line);
 
         auto norm = [](long long idx, long long n) {
@@ -2124,8 +2124,8 @@ private:
         if (obj->type() == ObjectType::LIST) {
             auto* list = static_cast<ListObject*>(obj.get());
             long long n = (long long)list->elements.size();
-            long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
-            long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
+            long long a = startV.tag() == VKind::INT ? norm(startV.asInt(), n) : 0;
+            long long b = endV.tag() == VKind::INT ? norm(endV.asInt(), n) : n;
             auto out = makeObj<ListObject>();
             for (long long i = a; i < b; ++i) out->elements.push_back(list->elements[i]);
             return out;
@@ -2134,16 +2134,16 @@ private:
             const std::string& s = static_cast<StringObject*>(obj.get())->value;
             auto offs = utf8Offsets(s);
             long long n = (long long)offs.size() - 1;
-            long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
-            long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
+            long long a = startV.tag() == VKind::INT ? norm(startV.asInt(), n) : 0;
+            long long b = endV.tag() == VKind::INT ? norm(endV.asInt(), n) : n;
             if (a >= b) return makeObj<StringObject>("");
             return makeObj<StringObject>(s.substr(offs[a], offs[b] - offs[a]));
         }
         if (obj->type() == ObjectType::BYTES) {
             const std::string& d = static_cast<BytesObject*>(obj.get())->data;
             long long n = (long long)d.size();
-            long long a = startV.kind == VKind::INT ? norm(startV.i, n) : 0;
-            long long b = endV.kind == VKind::INT ? norm(endV.i, n) : n;
+            long long a = startV.tag() == VKind::INT ? norm(startV.asInt(), n) : 0;
+            long long b = endV.tag() == VKind::INT ? norm(endV.asInt(), n) : n;
             if (a >= b) return makeObj<BytesObject>(std::string());
             return makeObj<BytesObject>(d.substr((size_t)a, (size_t)(b - a)));
         }

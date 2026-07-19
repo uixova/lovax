@@ -19,6 +19,10 @@ enum class VKind : uint8_t { NIL, BOOL, INT, FLOAT, OBJ };
 // (the NaN payload is ~48 bits); Lovax keeps exact int64, so a clean tagged union
 // is both correct and portable — no per-platform pointer-bit assumptions.
 struct Value {
+private:
+    // RFC-024 Phase 1: the layout is private — ALL access goes through the
+    // accessors below, so the 8-byte NANBOX layout can replace this block
+    // without touching a single call site.
     VKind kind = VKind::NIL;
     union {
         bool b;
@@ -27,6 +31,7 @@ struct Value {
         Object* obj;   // engaged only when kind == OBJ; lifetime managed by the GC
     };
 
+public:
     Value() : kind(VKind::NIL), i(0) {}
     static Value nil()                { Value v; v.kind = VKind::NIL;   v.i = 0; return v; }
     static Value boolean(bool x)      { Value v; v.kind = VKind::BOOL;  v.b = x; return v; }
@@ -46,16 +51,35 @@ struct Value {
     double asDouble() const { return kind == VKind::INT ? (double)i : d; }
 
     bool isObjType(ObjectType t) const { return kind == VKind::OBJ && obj->type() == t; }
+
+    // ---- RFC-024 Phase 1 accessors: the only sanctioned access paths. ----
+    // The raw fields stay public until every site is converted; then they go
+    // private and the 8-byte NANBOX layout slots in behind this exact API
+    // (tag test = one compare, payload = shift/mask — no call sites change).
+    VKind tag() const           { return kind; }
+    long long asInt() const     { return i; }     // valid only when isInt()
+    double    asFloat() const   { return d; }     // valid only when isFloat()
+    bool      asBool() const    { return b; }     // valid only when isBool()
+    Object*   asObj() const     { return obj; }   // valid only when isObj()
+    void setInt(long long x)    { kind = VKind::INT;   i = x; }
+    void setFloat(double x)     { kind = VKind::FLOAT; d = x; }
+    void setBool(bool x)        { kind = VKind::BOOL;  b = x; }
+    void setObjPtr(Object* o)   { kind = VKind::OBJ;   obj = o; }
+    void setNil()               { kind = VKind::NIL;   i = 0; }
+    // Stack-hygiene helper: null the reference WITHOUT retagging (used when a
+    // popped slot is wiped so the GC root scan can't see a stale pointer).
+    // Under NANBOX this becomes "store nil" — the slot is dead either way.
+    void wipeObj()              { obj = nullptr; }
 };
 
 // Boxes a Value into the heap Object model (for builtins, containers, slow paths).
 inline Ref<Object> toObject(const Value& v) {
-    switch (v.kind) {
+    switch (v.tag()) {
         case VKind::NIL:   return NULL_OBJ_;
-        case VKind::BOOL:  return v.b ? TRUE_OBJ : FALSE_OBJ;
-        case VKind::INT:   return makeObj<IntegerObject>(v.i);
-        case VKind::FLOAT: return makeObj<FloatObject>(v.d);
-        case VKind::OBJ:   return v.obj;
+        case VKind::BOOL:  return v.asBool() ? TRUE_OBJ : FALSE_OBJ;
+        case VKind::INT:   return makeObj<IntegerObject>(v.asInt());
+        case VKind::FLOAT: return makeObj<FloatObject>(v.asFloat());
+        case VKind::OBJ:   return v.asObj();
     }
     return NULL_OBJ_;
 }
@@ -74,16 +98,16 @@ inline Value fromObject(const Ref<Object>& o) {
 // Truthiness (Python model), fast path for immediates.
 // GC: mark the object a Value points at (immediates carry no pointer).
 inline void gcMarkValue(const Value& v) {
-    if (v.kind == VKind::OBJ) gcMarkObject(v.obj);
+    if (v.isObj()) gcMarkObject(v.asObj());
 }
 
 inline bool valueTruthy(const Value& v) {
-    switch (v.kind) {
+    switch (v.tag()) {
         case VKind::NIL:   return false;
-        case VKind::BOOL:  return v.b;
-        case VKind::INT:   return v.i != 0;
-        case VKind::FLOAT: return v.d != 0.0;
-        case VKind::OBJ:   return objectTruthy(v.obj);
+        case VKind::BOOL:  return v.asBool();
+        case VKind::INT:   return v.asInt() != 0;
+        case VKind::FLOAT: return v.asFloat() != 0.0;
+        case VKind::OBJ:   return objectTruthy(v.asObj());
     }
     return true;
 }
@@ -91,42 +115,42 @@ inline bool valueTruthy(const Value& v) {
 // Deep equality, fast paths for immediates.
 inline bool valueEquals(const Value& a, const Value& b) {
     if (a.isNumber() && b.isNumber()) {
-        if (a.kind == VKind::INT && b.kind == VKind::INT) return a.i == b.i;
+        if (a.isInt() && b.isInt()) return a.asInt() == b.asInt();
         return a.asDouble() == b.asDouble();
     }
-    if (a.kind != b.kind) {
-        if (a.kind == VKind::OBJ || b.kind == VKind::OBJ) {
+    if (a.tag() != b.tag()) {
+        if (a.isObj() || b.isObj()) {
             return objectEquals(toObject(a), toObject(b));
         }
         return false;
     }
-    switch (a.kind) {
+    switch (a.tag()) {
         case VKind::NIL:  return true;
-        case VKind::BOOL: return a.b == b.b;
-        case VKind::OBJ:  return objectEquals(a.obj, b.obj);
+        case VKind::BOOL: return a.asBool() == b.asBool();
+        case VKind::OBJ:  return objectEquals(a.asObj(), b.asObj());
         default:          return false;
     }
 }
 
 // Display string (matches the tree-era say/inspect output exactly).
 inline std::string valueInspect(const Value& v) {
-    switch (v.kind) {
+    switch (v.tag()) {
         case VKind::NIL:   return "null";
-        case VKind::BOOL:  return v.b ? "true" : "false";
-        case VKind::INT:   return std::to_string(v.i);
-        case VKind::FLOAT: return formatFloat(v.d);
-        case VKind::OBJ:   return v.obj->inspect();
+        case VKind::BOOL:  return v.asBool() ? "true" : "false";
+        case VKind::INT:   return std::to_string(v.asInt());
+        case VKind::FLOAT: return formatFloat(v.asFloat());
+        case VKind::OBJ:   return v.asObj()->inspect();
     }
     return "";
 }
 
 inline std::string valueTypeName(const Value& v) {
-    switch (v.kind) {
+    switch (v.tag()) {
         case VKind::NIL:   return "null";
         case VKind::BOOL:  return "bool";
         case VKind::INT:   return "int";
         case VKind::FLOAT: return "float";
-        case VKind::OBJ:   return typeName(v.obj->tag);
+        case VKind::OBJ:   return typeName(v.asObj()->tag);
     }
     return "?";
 }
