@@ -262,6 +262,30 @@ public:
         return out;
     }
 
+    // ===== Embed / FFI registration (RFC-025) =====
+    // Install a native function the script can call by name as a global.
+    // Register BEFORE interpret(): the compiler shares globalsTable_, so the
+    // name resolves to this slot, and syncGlobalSlots() preserves it.
+    void native(const std::string& name, BuiltinObject::BuiltinFn fn) {
+        bindGlobal(name, makeObj<BuiltinObject>(name, std::move(fn)));
+    }
+
+    // Register a native MODULE reachable with `use <name>`. Built like any
+    // stdlib module (frozen map of builtins) and rooted for the process.
+    void nativeModule(const std::string& name,
+                      std::initializer_list<
+                          std::pair<std::string, BuiltinObject::BuiltinFn>> fns) {
+        auto mod = makeObj<MapObject>();
+        for (auto& e : fns) {
+            mod->set(makeObj<StringObject>(e.first),
+                     makeObj<BuiltinObject>(e.first, e.second));
+        }
+        mod->frozen = true;
+        mod->moduleName = name;
+        gcPermanentRoot(mod.get());
+        StdLib::registerHostModule(name, mod);
+    }
+
     // Compiles and runs a program. Returns NULL_OBJ_ or an ErrorObject.
     Ref<Object> interpret(const Program* program) {
         // GC stays off through compilation and frame setup: the compile-time

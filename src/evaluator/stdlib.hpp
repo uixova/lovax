@@ -35,6 +35,17 @@
 namespace Lovax {
 namespace StdLib {
 
+// Host-registered modules (RFC-025 embed bridge): the engine calls
+// registerHostModule("engine", map) and a script reaches it with `use engine`.
+// Consulted AFTER the built-ins, so a host cannot shadow a core module.
+inline std::unordered_map<std::string, ObjPtr>& hostModules() {
+    static std::unordered_map<std::string, ObjPtr> m;
+    return m;
+}
+inline void registerHostModule(const std::string& name, ObjPtr mod) {
+    hostModules()[name] = mod;
+}
+
 inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "net") return makeNetModule();
     if (name == "math") return makeMathModule();
@@ -54,6 +65,9 @@ inline ObjPtr getBuiltinModule(const std::string& name) {
     if (name == "functools") return makeFunctoolsModule();
     if (name == "log") return makeLogModule();
     if (name == "testing") return makeTestingModule();
+    auto& hm = hostModules();
+    auto it = hm.find(name);
+    if (it != hm.end()) return it->second;
     return nullptr;
 }
 

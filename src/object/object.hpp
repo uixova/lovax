@@ -37,7 +37,8 @@ enum class ObjectType {
     BREAK_SIGNAL,
     CONTINUE_SIGNAL,
     ERROR,
-    BOXED_INT   // RFC-024: int64 outside the 47-bit inline range (NANBOX only)
+    BOXED_INT,  // RFC-024: int64 outside the 47-bit inline range (NANBOX only)
+    NATIVE      // RFC-025: opaque host handle (engine object behind a void*)
 };
 
 class Object {
@@ -667,6 +668,38 @@ public:
     }
 };
 
+// Opaque host handle (RFC-025 embed/FFI). Wraps a native pointer the engine
+// owns — a Sprite*, an Entity, a file handle — so a script can hold it, pass it
+// back to native functions, and store it in containers, without the VM knowing
+// its shape. `typeId` lets a native callback verify the handle is the kind it
+// expects; `typeName` is what kind()/inspect show.
+//
+// Lifetime, two modes:
+//  - OWNING  (finalize != null): the GC calls finalize(ptr) when the handle is
+//    collected — the engine frees its C++ object. finalize runs DURING the
+//    sweep: it must NOT allocate a Lovax object or re-enter the VM (Lua __gc
+//    rule). Use it only to hand `ptr` back to a plain C++ deleter.
+//  - BORROWED (finalize == null): the engine owns the lifetime; the handle is a
+//    non-owning view. The engine must not let the script outlive `ptr` (or use
+//    a generation/validity scheme on its side).
+class NativeObject : public Object {
+public:
+    void* ptr = nullptr;
+    uint32_t typeId = 0;
+    void (*finalize)(void*) = nullptr;
+    const char* typeName = "native";   // static string (host-owned literal)
+
+    NativeObject(void* p, uint32_t tid, void (*fin)(void*), const char* tn)
+        : Object(ObjectType::NATIVE), ptr(p), typeId(tid),
+          finalize(fin), typeName(tn ? tn : "native") {}
+    ~NativeObject() override { if (finalize && ptr) finalize(ptr); }
+    std::string inspect() const override {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%p", ptr);
+        return std::string("<") + typeName + " " + buf + ">";
+    }
+};
+
 // Double-ended queue -> collections.deque(): O(1) push/pop at both ends
 // (a list pays O(n) for front operations). Module functions operate on it.
 class DequeObject : public Object {
@@ -869,6 +902,7 @@ inline std::string typeName(ObjectType t) {
         case ObjectType::CONTINUE_SIGNAL: return "continue";
         case ObjectType::ERROR:        return "error";
         case ObjectType::BOXED_INT:    return "int";   // transparent to the language
+        case ObjectType::NATIVE:       return "native";
     }
     return "?";
 }
