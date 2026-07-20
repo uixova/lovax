@@ -1,0 +1,86 @@
+# Data-structure torture: structs (compact slots, methods, nested), sets
+# (union/intersect/diff, order-insensitive equality), and collections
+# (deque both ends, heap priority order, counter, bisect).
+
+# struct: many fields, methods, nesting, equality
+struct Vec:
+    x = 0
+    y = 0
+    fn add(other):
+        return Vec(this.x + other.x, this.y + other.y)
+    fn len_sq():
+        return this.x * this.x + this.y * this.y
+set a = Vec(3, 4)
+set b = Vec(1, 2)
+set c = a.add(b)
+say c.x
+say c.y
+say a.len_sq()
+say Vec(3, 4) == Vec(3, 4)
+say Vec(3, 4) == Vec(3, 5)
+
+struct Line:
+    start = null
+    end = null
+set ln = Line(Vec(0, 0), Vec(3, 4))
+say ln.end.len_sq()
+
+# set operations
+set s1 = Set([1, 2, 3, 4, 5])
+set s2 = Set([4, 5, 6, 7])
+say len(s1)
+say len(s1 | s2)
+say len(s1 & s2)
+say len(s1 - s2)
+say has(s1, 3)
+say has(s1, 99)
+say Set([1, 2, 3]) == Set([3, 2, 1])
+add(s1, 100)
+say has(s1, 100)
+remove(s1, 1)
+say has(s1, 1)
+
+# set of mixed types + big ints
+set sm = Set([1, "one", true, 9007199254740993])
+say len(sm)
+say has(sm, 9007199254740993)
+say has(sm, "one")
+
+# collections: deque, heap, counter, bisect
+use collections
+set dq = collections.deque([1, 2, 3])
+collections.push_front(dq, 0)
+collections.push_back(dq, 4)
+say collections.pop_front(dq)
+say collections.pop_back(dq)
+say collections.to_list(dq)
+
+set h = []
+collections.heap_push(h, 5)
+collections.heap_push(h, 1)
+collections.heap_push(h, 3)
+collections.heap_push(h, 2)
+collections.heap_push(h, 4)
+set sorted_out = []
+for i in range(5):
+    push(sorted_out, collections.heap_pop(h))
+say sorted_out
+
+set cnt = collections.counter(["a", "b", "a", "c", "a", "b"])
+say cnt["a"]
+say cnt["b"]
+say cnt["c"]
+
+say collections.bisect([1, 3, 5, 7, 9], 4)
+say collections.bisect([1, 3, 5, 7, 9], 5)
+say collections.bisect([1, 3, 5, 7, 9], 0)
+say collections.bisect([1, 3, 5, 7, 9], 100)
+
+# priority queue with [priority, payload] pairs (big-int priorities)
+set pq = []
+collections.heap_push(pq, [9007199254740993, "huge"])
+collections.heap_push(pq, [1, "small"])
+collections.heap_push(pq, [500, "mid"])
+say collections.heap_pop(pq)[1]
+say collections.heap_pop(pq)[1]
+say collections.heap_pop(pq)[1]

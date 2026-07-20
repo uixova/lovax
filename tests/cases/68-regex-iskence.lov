@@ -1,0 +1,54 @@
+# Adversarial regex (RFC-021 own engine): catastrophic-backtracking patterns
+# MUST fail cleanly via the step limit — never hang. Plus large inputs, deep
+# alternation, and boundary cases. This case must return in well under a second.
+
+use regex
+
+# catastrophic backtracking classics: (a+)+$, (a*)*, nested quantifiers on a
+# non-matching tail. The step limit turns each into a clean error, not a hang.
+fn safe(subject, pattern):
+    try:
+        set r = regex.match(subject, pattern)
+        if r == null:
+            return "no-match"
+        return "match"
+    catch e:
+        return "limited"
+
+say safe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "(a+)+$")
+say safe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "(a*)*b")
+say safe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "(a|a)+$")
+say safe("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "(x+x+)+y")
+
+# large input, benign linear pattern (must MATCH, fast)
+set big = ""
+for i in range(2000):
+    big = big + "ab"
+say regex.match(big, "(ab)+") != null
+say len(regex.find_all(big, "ab"))
+
+# deep alternation
+say regex.match("hunter", "(cat|dog|fish|bird|hunter|wolf)")
+say regex.match("zebra", "(cat|dog|fish|bird|hunter|wolf)") == null
+
+# anchors, classes, escapes together
+say regex.find_all("a1 b22 c333 d4444", "\d+")
+say regex.replace("  trim   me  ", "\s+", "_")
+say regex.groups("2026-07-20T13:45", "(\d+)-(\d+)-(\d+)T(\d+):(\d+)")
+say regex.split("one::two:::three", ":+")
+
+# empty pattern / empty subject edges
+say regex.match("", "") != null
+say regex.find_all("abc", "")
+say regex.match("abc", "x*") != null
+
+# malformed patterns -> clean error, no crash
+fn bad(pattern):
+    try:
+        regex.match("test", pattern)
+        return "ok"
+    catch e:
+        return "error"
+say bad("(unclosed")
+say bad("a\{999999\}")
+say bad("[z-a]")

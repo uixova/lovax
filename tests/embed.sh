@@ -64,5 +64,50 @@ if $CXX -I. "$TMP/gate.cpp" -o "$TMP/gate" 2>"$TMP/e4"; then
     check "gate allows by default"    "$allowed" "s3cr3t"
 else echo "  FAIL: gate build"; cat "$TMP/e4"; fail=1; fi
 
+echo "== embed: re-entrancy (native -> script -> native) + error across boundary =="
+cat > "$TMP/reentry.cpp" <<'EOF'
+#include <cstdio>
+#include "src/embed/embed.hpp"
+using namespace Lovax; using namespace Lovax::Embed;
+int main() {
+    Host rt;
+    // a native that calls BACK into a script function via the CallFn — the
+    // deepest re-entrancy path (native -> script closure -> native ...).
+    rt.native("apply_twice", [](const std::vector<Ref<Object>>& a, int line,
+                                const BuiltinObject::CallFn& call) -> Ref<Object> {
+        if (a.size() != 2) return makeError("apply_twice(fn, x)", line);
+        auto once = call(a[0], { a[1] }, line);            // script fn
+        if (isError(once)) return once;                     // propagate script error
+        return call(a[0], { once }, line);                  // feed result back in
+    });
+    rt.native("boom", [](const std::vector<Ref<Object>>&, int line,
+                         const BuiltinObject::CallFn&) -> Ref<Object> {
+        return makeError("native boom", line);              // error crosses back to script
+    });
+    bool ok = rt.loadSource(
+        "fn inc(x):\n    return x + 1\n"
+        "say apply_twice(inc, 10)\n"                         // 10 -> 11 -> 12
+        "fn dbl(x):\n    return x * 2\n"
+        "say apply_twice(dbl, 9007199254740993)\n"          // boxed int through re-entrancy
+        "set caught = false\n"
+        "try:\n"
+        "    boom()\n"
+        "catch e:\n"
+        "    caught = true\n"
+        "    say \"script caught: {e}\"\n"
+        "say caught\n");
+    if (!ok) { std::printf("load failed: %s\n", rt.lastError()->inspect().c_str()); return 1; }
+    return 0;
+}
+EOF
+if $CXX -I. "$TMP/reentry.cpp" -o "$TMP/reentry" 2>"$TMP/e5"; then
+    out=$("$TMP/reentry" 2>&1); rc=$?
+    check "re-entrancy exit 0" "rc=$rc" "rc=0"
+    check "native->script->native (inc)" "$out" "12"
+    check "boxed int through re-entrancy" "$out" "36028797018963972"
+    check "native error caught by script" "$out" "script caught:"
+    check "script recovered after native error" "$out" "true"
+else echo "  FAIL: reentry build"; cat "$TMP/e5"; fail=1; fi
+
 echo
 if [ "$fail" = 0 ]; then echo "EMBED GATE PASSED"; else echo "EMBED GATE FAILED"; exit 1; fi
