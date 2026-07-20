@@ -106,3 +106,9 @@ jobs:
       # --allow-ffi gate denies under sandbox. Zero external dependencies.
       - name: Embed / FFI bridge gate
         run: ./tests/embed.sh
+
+      # RFC-024: the 8-byte NaN-boxed Value and the 16-byte fallback (and
+      # computed-goto vs switch) must be observationally identical — differential
+      # over every golden + generated int64/boxed-int edge programs.
+      - name: Differential gate (8B vs 16B vs switch)
+        run: ./tests/differential.sh

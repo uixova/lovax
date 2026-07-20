@@ -1,0 +1,49 @@
+# Coroutine + closure + GC torture: closures captured across yields, many
+# coroutines alive at once, values (incl. big ints) surviving suspend/resume,
+# and allocation pressure interleaved with live suspended contexts.
+# spawn(fn) then resume(co, start): the first resume value is the fn's argument.
+
+fn counter():
+    set start = yield "ready"
+    set n = start
+    for i in range(5):
+        yield n
+        n = n + 1
+    return n
+
+set a = spawn(counter)
+set b = spawn(counter)
+say resume(a)                              # ready
+say resume(b)                              # ready
+say resume(a, 100)                         # 100
+say resume(b, 9007199254740993)            # boxed int survives the yield
+say resume(a)                              # 101
+say resume(b)                              # 9007199254740994
+say co_status(a)
+
+# many coroutines alive simultaneously + allocation pressure between resumes
+set coros = []
+for i in range(50):
+    set c = spawn(counter)
+    resume(c)                              # advance past the "ready" yield
+    push(coros, c)
+set junk = []
+for i in range(2000):
+    push(junk, [i, i + 1, i + 2])          # garbage to pressure the GC
+set total = 0
+for i in range(50):
+    total = total + resume(coros[i], i)    # each starts at i, first count = i
+say total
+say len(coros)
+
+# closure capturing a mutable accumulator (survives GC via the closure)
+fn accumulator():
+    set acc = 0
+    fn step(x):
+        acc = acc + x
+        return acc
+    return step
+set s = accumulator()
+say s(10)
+say s(20)
+say s(9007199254740000)

@@ -1,0 +1,77 @@
+# Closure / upvalue torture (RFC-011): per-iteration loop capture, nested
+# closures sharing state, counter factories, and upvalues holding boxed ints.
+
+# per-iteration capture: each closure must capture ITS OWN i
+set fns = []
+for i in range(5):
+    fn make():
+        return i
+    push(fns, make)
+set out = []
+for f in fns:
+    push(out, f())
+say out                            # [0, 1, 2, 3, 4], not [4,4,4,4,4]
+
+# counter factory: independent state per instance
+fn make_counter():
+    set n = 0
+    fn inc():
+        n = n + 1
+        return n
+    return inc
+set c1 = make_counter()
+set c2 = make_counter()
+say c1()
+say c1()
+say c2()
+say c1()                           # c1 and c2 are independent
+
+# two closures sharing ONE upvalue
+fn make_pair():
+    set shared = 0
+    fn add(x):
+        shared = shared + x
+        return shared
+    fn get():
+        return shared
+    return [add, get]
+set pair = make_pair()
+set add = pair[0]
+set get = pair[1]
+say add(10)
+say add(5)
+say get()                          # 15 — sees the shared mutation
+
+# upvalue holding a boxed int, mutated across calls
+fn big_accum():
+    set total = 9007199254740000
+    fn bump():
+        total = total + 1
+        return total
+    return bump
+set b = big_accum()
+say b()
+say b()
+say b()
+
+# nested closures three deep
+fn outer(a):
+    fn middle(b):
+        fn inner(c):
+            return a + b + c
+        return inner
+    return middle
+say outer(100)(20)(3)
+
+# closure capturing a loop variable used after the loop
+fn build_adders():
+    set adders = []
+    for k in range(3):
+        fn adder(x):
+            return x + k
+        push(adders, adder)
+    return adders
+set ad = build_adders()
+say ad[0](10)
+say ad[1](10)
+say ad[2](10)

@@ -1,0 +1,46 @@
+# UTF-8 / Turkish-aware string torture: multi-byte code-point counting, indexing
+# and slicing at byte boundaries, casing (Turkish i/I rules), reversal, and
+# empty/edge cases. Every byte matters — a boundary bug shows as wrong output.
+
+set s = "Merhaba Dünya"
+say len(s)                         # code points, not bytes (ü is 2 bytes)
+say s[0]
+say s[8]                           # the ü
+say s[len(s) - 1]
+
+use strings
+set tr = "İstanbul"
+say len(tr)                        # İ is 2 bytes, 1 code point
+say tr[0]
+say strings.upper("ığüşöç")
+say strings.lower("IĞÜŞÖÇ")
+say strings.upper("istanbul")      # Turkish: i -> İ
+say strings.lower("ISPARTA")
+
+# slicing across multi-byte boundaries
+set word = "çağrışım"
+say word[0:3]
+say word[2:]
+say word[:2]
+say len(word[1:5])
+
+# reverse preserves code points
+say reverse("abcçdeé")
+say strings.upper("çğıöşü")
+
+# emoji / 4-byte code points
+set emo = "a🎮b🕹c"
+say len(emo)
+say emo[1]
+say emo[3]
+
+# empty and single-char edges
+say len("")
+say len("x")
+say strings.upper("")
+say reverse("")
+
+# concatenation of mixed scripts
+set mixed = "abc" + "çöü" + "🎮"
+say len(mixed)
+say contains(mixed, "çöü")

@@ -1,0 +1,45 @@
+# Recursion torture: deep single recursion, mutual recursion, accumulator style,
+# and tree recursion — exercises the call path, frame setup, and RETURN.
+
+fn sumto(n):
+    if n == 0:
+        return 0
+    return n + sumto(n - 1)
+say sumto(400)                     # deep-ish, under the 500-frame limit
+
+fn is_even(n):
+    if n == 0:
+        return true
+    return is_odd(n - 1)
+fn is_odd(n):
+    if n == 0:
+        return false
+    return is_even(n - 1)
+say is_even(300)
+say is_odd(301)
+
+fn fact(n, acc):
+    if n <= 1:
+        return acc
+    return fact(n - 1, acc * n)
+say fact(20, 1)                    # 20! fits in int64
+say fact(25, 1)                    # 25! overflows -> two's-complement wrap (defined)
+
+fn ack(m, n):
+    if m == 0:
+        return n + 1
+    if n == 0:
+        return ack(m - 1, 1)
+    return ack(m - 1, ack(m, n - 1))
+say ack(2, 3)
+say ack(3, 3)
+
+# recursion building a list
+fn build(n):
+    if n == 0:
+        return []
+    set rest = build(n - 1)
+    push(rest, n)
+    return rest
+say len(build(100))
+say sum(build(50))

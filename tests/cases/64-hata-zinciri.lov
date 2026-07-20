@@ -1,0 +1,68 @@
+# Error-handling torture (RFC-008/RFC-022): nested try/catch/finally, propagation
+# through deep call chains, structured errors carrying maps, catch binding the
+# ORIGINAL value, finally always running, and re-throw.
+
+fn deep(n):
+    if n == 0:
+        throw error("bottom", "hit the floor")
+    return deep(n - 1)
+
+try:
+    deep(50)
+catch e:
+    say e.kind
+    say e.msg
+
+# finally runs on both the success and the error path
+fn with_finally(fail):
+    try:
+        if fail:
+            throw "boom"
+        return "ok"
+    finally:
+        say "cleanup"
+say with_finally(false)
+try:
+    with_finally(true)
+catch e:
+    say "caught: {e}"
+
+# nested try: inner catch re-throws, outer catches
+try:
+    try:
+        throw {"kind": "io", "path": "/tmp/x", "code": 42}
+    catch inner:
+        say "inner saw {inner.kind}"
+        throw inner
+catch outer:
+    say "outer saw {outer.kind} code {outer.code}"
+
+# structured error survives a deep chain intact
+fn layer3():
+    throw {"kind": "fatal", "data": [1, 2, 3]}
+fn layer2():
+    return layer3()
+fn layer1():
+    return layer2()
+try:
+    layer1()
+catch e:
+    say e.kind
+    say e.data
+    say len(e.data)
+
+# error thrown from inside a catch's own expression
+set counter = 0
+fn risky():
+    counter = counter + 1
+    if counter < 3:
+        throw "retry"
+    return counter
+set result = 0
+for attempt in range(5):
+    try:
+        result = risky()
+    catch e:
+        result = -1
+say result
+say counter
