@@ -101,6 +101,7 @@ inline void markAllRoots(Heap& h) {
     for (Object* r : h.permanentRoots) gcMarkObject(r);
     if (h.markRoots) h.markRoots();
     for (Object* r : h.tempRoots) gcMarkObject(r);
+    for (Object* r : h.hostRoots) gcMarkObject(r);   // embed host-held values (RFC-025)
 }
 
 // Processes up to `budget` gray objects. Returns true when the list drained.

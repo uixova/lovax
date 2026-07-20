@@ -150,6 +150,7 @@ struct Heap {
     std::vector<Object*> worklist;      // gray set (to-scan)
     std::vector<Object*> tempRoots;     // GcRoot stack (C++-held temporaries)
     std::vector<Object*> permanentRoots;// immortal: singletons, builtin modules
+    std::vector<Object*> hostRoots;     // embed: values the host holds across frames (RFC-025)
     std::function<void()> markRoots;    // installed by the runtime
 
     // Incremental state (RFC-023)

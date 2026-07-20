@@ -286,6 +286,18 @@ public:
         StdLib::registerHostModule(name, mod);
     }
 
+    // Read a global by name for the host (nullptr if never defined).
+    Ref<Object> getGlobal(const std::string& name) {
+        auto it = globalsTable_.index.find(name);
+        if (it == globalsTable_.index.end()) return nullptr;
+        uint16_t slot = it->second;
+        if (slot >= globals_.size() || slot >= globalDefined_.size() ||
+            !globalDefined_[slot]) return nullptr;
+        return toObject(globals_[slot]);
+    }
+    // Define/overwrite a global by name for the host.
+    void setGlobal(const std::string& name, const Ref<Object>& v) { bindGlobal(name, v); }
+
     // Compiles and runs a program. Returns NULL_OBJ_ or an ErrorObject.
     Ref<Object> interpret(const Program* program) {
         // GC stays off through compilation and frame setup: the compile-time

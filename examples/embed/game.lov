@@ -1,0 +1,20 @@
+# Script side of the embedding demo. The C++ host (host_demo.cpp) registers the
+# `engine` native module + a `log` native, then drives on_frame() each frame.
+
+use engine
+
+set frames = 0
+set player = engine.spawn("player")     # owning native handle (an Entity*)
+
+fn on_frame(dt):
+    frames = frames + 1
+    engine.move(player, dt, 0)          # pass the handle back to native code
+    engine.spawn("bullet")              # transient handle -> becomes garbage
+    if frames == 3:
+        log("three frames done")
+
+fn get_frames():
+    return frames
+
+fn player_x():
+    return engine.pos_x(player)
