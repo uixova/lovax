@@ -1343,6 +1343,11 @@ private:
                     *stackAt(frame->base) = std::move(sp_[-1]);
                     sp_ = stackAt(frame->base) + 1;
                     frames_.pop_back();
+                    // Drop any try-handlers that belonged to the returning frame:
+                    // a `return` out of a try block skips its TRY_POP, and a stale
+                    // handler would later mis-catch or swallow an unrelated throw.
+                    while (!handlers_.empty() && handlers_.back().frameDepth > frames_.size())
+                        handlers_.pop_back();
                     if (frames_.size() == exitFrameDepth) return NULL_OBJ_;
                     syncIn();
                     VM_NEXT_FAST;
