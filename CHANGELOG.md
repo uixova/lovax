@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.0.0 — embed / FFI bridge: Lovax is now hostable (RFC-025)
+
+The language can be embedded in a C++ host (a future game engine) and expose a
+native API to scripts. This is the bridge the engine is built ON; the engine
+itself is a separate application. Scope decided with the user: registration
+model (fixed-signature natives, zero-dep, what an engine needs), NOT dynamic
+C-library FFI — LuaJIT-style `ffi.cdef` needs a JIT to synthesize the call and
+lands in the v1.x JIT era.
+
+- **Native registration**: `VM::native(name, fn)` and `VM::nativeModule(name,
+  {fns})` expose C++ functions/modules to scripts, reusing `BuiltinObject` —
+  a host module is indistinguishable from a stdlib one. Host modules register
+  in a table consulted after the built-ins (can't shadow core).
+- **C++ facade** `Lovax::Embed::Host`: loadFile/loadSource, `call(fn, args)`
+  (host→script), getGlobal/setGlobal, lastError. Return-value error model — no
+  C++ exception crosses the boundary.
+- **Opaque userdata** `NativeObject`: an engine handle (void* + typeId +
+  finalizer + type name). Owning mode frees the C++ object on GC collect;
+  borrowed mode leaves lifetime to the engine.
+- **Host GC roots**: `Heap::hostRoots` + the `Persistent` RAII handle
+  (`lovax_protect`/`unprotect` in C) keep a script value alive across frames —
+  the tracing GC has no refcount.
+- **Stable C ABI** `lovax.h`: opaque `LovaxVM*`/`LovaxValue`,
+  `LOVAX_ABI_VERSION`, full register/eval/call/globals surface. C++ is primary;
+  the C ABI is the ABI-stable layer for plugins, Tier-3 bindings, other-language
+  hosts (C++ ABI is fragile; C is the stable contract).
+- **Capability** `--allow-ffi` (+ `Perms.ffi`): the sandbox slot for untrusted
+  native access; engine natives are trusted/ungated, a dangerous native
+  self-gates via `perms().ffi`.
+- **Tier 3, unblocked**: SQLite/crypto/zlib/HTTP are now bindings over this
+  bridge, shipped via `pkg` — never core VM code, zero-dep core preserved.
+
+Demos (`examples/embed/`, zero-dependency): `host_demo.cpp` proves host↔script
+both ways + an owning finalizer freeing C++ objects on GC + a Persistent
+surviving a forced collect (ASan/UBSan clean AND clean under GC_STRESS);
+`host_demo_c.c` proves the same over the C ABI only. New gate `tests/embed.sh`
+(in CI) builds/runs both and checks the --allow-ffi gate.
+
+Gates: golden 85/85 unchanged in all six build modes (the bridge adds surface,
+touches no execution path); fuzz, sandbox, unit, bench, embed all green.
+
 ## v0.18.1 — int64 overflow is now SPEC: two's-complement wrap (hardening)
 
 Pre-engine final audit findings, closed:
