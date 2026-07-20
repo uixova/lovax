@@ -1,0 +1,19 @@
+# exit: 0
+limited
+limited
+limited
+limited
+true
+2000
+hunter
+true
+["1", "22", "333", "4444"]
+_trim_me_
+["2026-07-20T13:45", "2026", "07", "20", "13", "45"]
+["one", "two", "three"]
+true
+["", "", "", ""]
+true
+error
+ok
+error
