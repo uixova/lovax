@@ -51,6 +51,40 @@ set m = {}
 for i in 0..100000: m["k{i}"] = [i, i*i, "s{i}"]
 say len(m)
 E
+# regex crashes must stay fixed: catastrophic backtracking (stack overflow) and
+# 3+-way alternation (miscompiled infinite loop). Must error cleanly, never crash.
+cat > "$tmp/a6.lov" <<'E'
+use regex
+for p in ["(a*)*b", "(a+)+$", "(a|a)+$", "(.*)*z", "(a|b|c|d|e|f|g)+x"]:
+    try:
+        regex.match("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", p)
+    catch e:
+        say "ok"
+E
+# type abuse: every builtin fed the wrong type must error, not crash.
+cat > "$tmp/a7.lov" <<'E'
+set vals = [1, 1.5, "s", true, null, [1, 2], {"k": 1}, 9007199254740993]
+set fns = [len, sum, max, min, abs, sqrt, keys, values, reverse, sort, first, last]
+for f in fns:
+    for v in vals:
+        try:
+            f(v)
+        catch e:
+            set _ = 1
+say "typed-ok"
+E
+# numeric / index / slice edges that must fault cleanly
+cat > "$tmp/a8.lov" <<'E'
+set r = []
+push(r, 1 / 0)
+push(r, 1 % 0)
+push(r, 1 << 999)
+push(r, -9223372036854775807 - 1)
+set x = [1, 2, 3]
+push(r, x[999999])
+push(r, x[-1])
+push(r, x[0:999999])
+E
 for f in "$tmp"/a*.lov; do check "$(basename "$f")" "$f"; done
 
 # --- 2) structural fuzz: deep nesting, unbalanced, truncated ------------------
