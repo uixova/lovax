@@ -342,20 +342,31 @@ inline void installBuiltins(const std::shared_ptr<Environment>& env) {
         if (args.size() < 2 && argsPtr == &rawArgs) {
             return argCountError(isMin ? "min" : "max", "at least 2 (or one list)", args.size(), line);
         }
-        bool allInt = true;
         for (const auto& a : args) {
             if (!isNumeric(a)) {
                 return makeError(std::string(isMin ? "min" : "max") + "() only works with numbers", line);
             }
-            if (a->type() == ObjectType::FLOAT) allInt = false;
         }
-        double best = asDouble(args[0]);
+        // Track the winning ELEMENT (not a recomputed double): asDouble() would
+        // round a boxed int64 (|v| >= 2^53) and return the wrong value. Compare
+        // exactly when both sides are ints (inline or boxed), else by double.
+        auto exactInt = [](const ObjPtr& o, long long& out) -> bool {
+            if (o->type() == ObjectType::INTEGER)   { out = static_cast<IntegerObject*>(o.get())->value; return true; }
+            if (o->type() == ObjectType::BOXED_INT) { out = static_cast<BoxedIntObject*>(o.get())->value; return true; }
+            return false;
+        };
+        size_t bestIdx = 0;
         for (size_t i = 1; i < args.size(); ++i) {
-            double v = asDouble(args[i]);
-            if (isMin ? (v < best) : (v > best)) best = v;
+            long long ai, bi;
+            bool better;
+            if (exactInt(args[i], ai) && exactInt(args[bestIdx], bi))
+                better = isMin ? (ai < bi) : (ai > bi);
+            else
+                better = isMin ? (asDouble(args[i]) < asDouble(args[bestIdx]))
+                               : (asDouble(args[i]) > asDouble(args[bestIdx]));
+            if (better) bestIdx = i;
         }
-        if (allInt) return makeObj<IntegerObject>((long long)best);
-        return makeObj<FloatObject>(best);
+        return args[bestIdx];   // the real element: exact value and its own type
     };
     def("min", [minMax](const Args& a, int l, const CallFn&) { return minMax(a, l, true); });
     def("max", [minMax](const Args& a, int l, const CallFn&) { return minMax(a, l, false); });
