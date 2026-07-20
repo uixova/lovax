@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.1 — test-hardening pass: four real bugs fixed
+
+A challenging-test round (torture goldens 60-69 + a differential harness +
+adversarial fuzz) uncovered four genuine bugs, now fixed:
+
+- **finally skipped on early exit + stale handler (control-flow, security).**
+  A `return`/`break`/`continue` out of a try block skipped its `finally` AND
+  left its handler on the stack, so a later throw could be silently swallowed
+  (an uncaught error exited 0). The compiler now runs each enclosing finally
+  (+ pops its handler) on every early exit; the VM also drops handlers of a
+  frame it returns from.
+- **regex 3+-way alternation miscompiled** (`a|b|c`): copied fragments kept
+  absolute jump targets, so inner branches looped — only 2-way worked.
+- **regex stack-overflow (SIGSEGV)** on zero-width loops like `(a*)*` — a
+  recursion-depth budget makes the engine crash-proof on any pattern.
+- **max/min rounded int64** beyond 2^53 (returned a rebuilt double); they now
+  return the real element, exact.
+
+New: 10 torture goldens (boxed-int, map churn, deep recursion, coroutine+GC,
+error chains, unicode, floats, closures, adversarial regex, data structures);
+`tests/differential.sh` (8B vs 16B vs switch, byte-identical over 104 programs);
+embed re-entrancy test (native→script→native + error across the boundary);
+fuzz gains type-abuse + regex-crash + numeric-edge inputs. All in CI. 95/95
+goldens across six build modes; the whole battery green.
+
 ## v1.0.0 — embed / FFI bridge: Lovax is now hostable (RFC-025)
 
 The language can be embedded in a C++ host (a future game engine) and expose a
