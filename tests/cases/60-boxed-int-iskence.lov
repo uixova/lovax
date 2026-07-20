@@ -1,0 +1,52 @@
+# Boxed-int torture (RFC-024): ints outside [-2^46, 2^46) are heap-boxed but must
+# behave IDENTICALLY to inline ints in every context. This case must produce the
+# same output under NANBOX and the 16-byte fallback.
+
+set BIG = 70368744177664          # 2^46, first boxed value
+set HUGE = 9007199254740993       # 2^53 + 1
+set MIN = -9223372036854775807 - 1
+
+# arithmetic crossing the inline/boxed boundary
+say BIG - 1                       # 2^46 - 1 = inline
+say BIG + BIG                     # stays boxed
+say HUGE * 2
+say HUGE % 1000
+say MIN / -1                      # trap-guarded
+say (BIG - 1) + 1 == BIG          # boundary identity
+
+# boxed ints as map keys (hash the UNBOXED value)
+set m = {}
+m[HUGE] = "a"
+m[HUGE + 0] = "b"                 # same key -> overwrite
+m[BIG] = "c"
+say len(m)
+say m[HUGE]
+say m[9007199254740993]
+
+# boxed ints in lists + sort
+set xs = [HUGE, 5, BIG, -HUGE, 0, MIN]
+say sort(xs)
+say max(xs)
+say min(xs)
+
+# boxed int through a closure + function
+fn adder(base):
+    fn add(x):
+        return base + x
+    return add
+set a = adder(HUGE)
+say a(7)
+
+# boxed int in a struct field
+struct Box:
+    v = 0
+set b = Box(HUGE)
+say b.v
+b.v = b.v + 1
+say b.v
+
+# equality across inline/boxed and int/float
+say HUGE == HUGE
+say BIG == 70368744177664
+say 3 == 3.0
+say HUGE > BIG

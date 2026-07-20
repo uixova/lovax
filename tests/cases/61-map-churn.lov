@@ -1,0 +1,54 @@
+# Map open-addressing torture (v0.17 index): heavy insert/delete/reinsert,
+# collisions, mixed key types, and insertion-order preservation through churn.
+
+set m = {}
+for i in range(500):
+    m["k{i}"] = i
+say len(m)
+
+# delete every other key, then check survivors + order
+for i in range(0, 500, 2):
+    remove(m, "k{i}")
+say len(m)
+say m["k1"]
+say m["k499"]
+say has(m, "k0")
+say has(m, "k1")
+
+# reinsert deleted keys with new values (index must reuse freed slots)
+for i in range(0, 500, 2):
+    m["k{i}"] = i * 10
+say len(m)
+say m["k0"]
+say m["k100"]
+
+# mixed key types in one map
+set mix = {}
+mix[1] = "int-one"
+mix["1"] = "str-one"
+mix[true] = "bool-true"
+mix[false] = "bool-false"
+mix[-9007199254740993] = "big-neg"
+say len(mix)
+say mix[1]
+say mix["1"]
+say mix[true]
+say mix[-9007199254740993]
+
+# insertion order survives churn (keys() reflects order)
+set ord = {}
+ord["c"] = 1
+ord["a"] = 2
+ord["b"] = 3
+remove(ord, "a")
+ord["a"] = 4
+say keys(ord)
+
+# collision-prone integer keys (multiples that may hash near each other)
+set big = {}
+for i in range(200):
+    big[i * 64] = i
+set total = 0
+for i in range(200):
+    total = total + big[i * 64]
+say total

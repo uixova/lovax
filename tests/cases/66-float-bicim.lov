@@ -1,0 +1,42 @@
+# Float formatting + numeric edge torture: inf/nan/-0.0, very large/small,
+# integer-valued floats keeping .0, precision, int/float boundaries, and the
+# determinism promise (nan always prints "nan", never "-nan").
+
+use math
+
+say 2.0
+say 2.5
+say 0.1 + 0.2
+say -0.0
+say 1.0 / 3.0
+say 10.0 / 2.0                     # integer-valued float keeps .0
+say math.inf
+say -math.inf
+say math.nan
+say -math.nan                      # must print "nan", not "-nan"
+say math.inf - math.inf            # nan
+say math.nan == math.nan           # false
+say math.inf > 1e308
+say 1e300 * 1e300                  # inf
+say 1e-300 * 1e-300               # underflow -> 0.0
+
+# int -> float and back at the 2^53 boundary
+say 9007199254740992.0
+say 9007199254740993               # exact as int (boxed)
+say 9007199254740993 * 1.0         # * float -> rounds to double
+
+# mixed arithmetic result types
+say 5 / 2                          # int division (language rule)
+say 2 ** 10                        # int power stays int
+say 2 ** 0.5                       # float power
+say 2.0 ** 3                       # float
+
+# formatting via strings.fmt
+use strings
+say strings.fmt(3.14159, ".2f")
+say strings.fmt(255, "x")
+say strings.fmt(42, "05d")
+say sqrt(2.0)                       # sqrt/floor/ceil/round are global builtins
+say floor(-7.5)
+say ceil(-7.5)
+say round(2.5)
