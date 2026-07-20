@@ -77,15 +77,39 @@ private:
         int continueTarget;            // byte offset to LOOP back to
         std::vector<int> breakJumps;   // JUMP operand offsets to patch at loop end
         int stackPayload;              // values the loop keeps on the stack (for: iterator)
+        size_t tryDepth;               // tryScopes.size() at loop entry (RFC-008 finally)
+    };
+    // A lexically-enclosing try, tracked so an early exit (return/break/continue)
+    // out of the try runs its 'finally' and pops its handler — otherwise finally
+    // is skipped and a stale handler mis-catches later throws (RFC-008).
+    struct TryScope {
+        const BlockStatement* finallyBlock;   // null if the try has no finally
+        bool handlerLive;                      // inside the TRY block: TRY_POP needed on exit
     };
     struct FnCtx {
         std::shared_ptr<Proto> proto;
         std::vector<Local> locals;
         std::vector<UpvalDesc> upvals;
         std::vector<LoopCtx> loops;
+        std::vector<TryScope> tryScopes;
         FnCtx* enclosing = nullptr;
         bool isScript = false;
     };
+
+    // Emit TRY_POP + finally for the try-scopes above `downTo`, innermost first.
+    // tryScopes is shrunk while each finally is compiled so a return/break inside
+    // a finally only unwinds scopes OUTSIDE it, then fully restored — the code is
+    // emitted on an exit path but the lexical scopes continue for the fall-through.
+    void emitFinallyUnwind(size_t downTo, int line) {
+        std::vector<TryScope> saved(ctx_->tryScopes.begin() + downTo, ctx_->tryScopes.end());
+        for (size_t i = saved.size(); i > 0; --i) {
+            ctx_->tryScopes.resize(downTo + i - 1);   // hide this scope + inner ones
+            const TryScope& ts = saved[i - 1];
+            if (ts.handlerLive) emitOp(Op::TRY_POP, line);
+            if (ts.finallyBlock) compileBlock(ts.finallyBlock);
+        }
+        ctx_->tryScopes.insert(ctx_->tryScopes.end(), saved.begin(), saved.end());
+    }
 
     // Constant names per compilation unit (script + each function share this set;
     // const is a compile-time contract, so a global name marked const stays const).
@@ -331,7 +355,7 @@ private:
             case NodeType::WHILE_STATEMENT: {
                 const auto* s = static_cast<const WhileStatement*>(stmt);
                 int loopStart = (int)chunk().code.size();
-                ctx_->loops.push_back({loopStart, {}, 0});
+                ctx_->loops.push_back({loopStart, {}, 0, ctx_->tryScopes.size()});
                 int exitJump = emitCondJump(s->condition.get(), s->untilForm, s->token.line);
                 compileBlock(s->body.get());
                 emitLoop(loopStart, s->token.line);
@@ -349,6 +373,7 @@ private:
                     emitRuntimeError("'break' cannot be used outside a loop", line);
                     break;
                 }
+                emitFinallyUnwind(ctx_->loops.back().tryDepth, line);  // tries inside the loop
                 for (int i = 0; i < ctx_->loops.back().stackPayload; ++i) emitOp(Op::POP, line);
                 ctx_->loops.back().breakJumps.push_back(emitJump(Op::JUMP, line));
                 break;
@@ -359,6 +384,7 @@ private:
                     emitRuntimeError("'continue' cannot be used outside a loop", line);
                     break;
                 }
+                emitFinallyUnwind(ctx_->loops.back().tryDepth, line);  // tries inside the loop
                 emitLoop(ctx_->loops.back().continueTarget, line);
                 break;
             }
@@ -370,6 +396,9 @@ private:
                 }
                 if (s->returnValue) compileExpression(s->returnValue.get());
                 else emitOp(Op::NIL, s->token.line);
+                // Run every enclosing finally (and pop its handler) before leaving
+                // the function; the return value waits on the stack meanwhile.
+                emitFinallyUnwind(0, s->token.line);
                 emitOp(Op::RETURN, s->token.line);
                 break;
             }
@@ -676,11 +705,15 @@ private:
     void compileTry(const TryStatement* t) {
         int line = t->token.line;
 
+        const BlockStatement* fin = t->finallyBlock ? t->finallyBlock.get() : nullptr;
+
         if (t->catchBlock == nullptr) {
             // try / finally (no catch): run 'finally' on the normal path, and also
             // on the throw path before re-raising so the error still propagates.
             int handlerJump = emitJump(Op::TRY_PUSH, line);
+            ctx_->tryScopes.push_back({fin, true});     // early exits run finally + TRY_POP
             compileBlock(t->tryBlock.get());
+            ctx_->tryScopes.pop_back();                  // leaving the try block
             emitOp(Op::TRY_POP, line);
             compileBlock(t->finallyBlock.get());        // normal path
             int endJump = emitJump(Op::JUMP, line);
@@ -694,13 +727,17 @@ private:
         }
 
         int handlerJump = emitJump(Op::TRY_PUSH, line); // operand = catch target
+        ctx_->tryScopes.push_back({fin, true});         // handler live during the try block
         compileBlock(t->tryBlock.get());
+        ctx_->tryScopes.back().handlerLive = false;      // after try: handler is gone (TRY_POP / caught)
         emitOp(Op::TRY_POP, line);
         int endJump = emitJump(Op::JUMP, line);
         patchJump(handlerJump);
-        // Catch entry: the VM pushed the error message string; bind it.
+        // Catch entry: the VM pushed the error message string; bind it. The finally
+        // (if any) still applies to the catch body, so the scope stays active.
         defineName(t->catchName->value, line);
         compileBlock(t->catchBlock.get());
+        ctx_->tryScopes.pop_back();                      // leaving catch, before the merge finally
         patchJump(endJump);
         // 'finally' runs on both the normal and the caught path (RFC-008).
         if (t->finallyBlock) compileBlock(t->finallyBlock.get());
@@ -799,7 +836,7 @@ private:
         emitStoreHidden(counterSlot, line);
 
         int loopStart = (int)chunk().code.size();
-        ctx_->loops.push_back({loopStart, {}, 0});
+        ctx_->loops.push_back({loopStart, {}, 0, ctx_->tryScopes.size()});
         emitLoadHidden(counterSlot, line);
         emitConst(Value::integer(0), line);
         int exitJump = emitJump(Op::GREATER_JF, line);
@@ -836,7 +873,7 @@ private:
         uint16_t v2 = f->variable2 ? declareVar(f->variable2.get()) : 0;
 
         int loopStart = (int)chunk().code.size();
-        ctx_->loops.push_back({loopStart, {}, 1});
+        ctx_->loops.push_back({loopStart, {}, 1, ctx_->tryScopes.size()});
 
         uint8_t flags = 0;
         if (f->variable2) flags |= 2;          // pair form
