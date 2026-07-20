@@ -100,3 +100,9 @@ jobs:
         run: |
           g++ -std=c++17 -O2 -o lovax src/main.cpp
           ./tests/sandbox.sh
+
+      # RFC-025: the embed bridge — C++ facade + C ABI demos build, run, and
+      # round-trip; owning userdata finalizers + Persistent roots hold; the
+      # --allow-ffi gate denies under sandbox. Zero external dependencies.
+      - name: Embed / FFI bridge gate
+        run: ./tests/embed.sh
