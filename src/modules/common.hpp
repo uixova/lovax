@@ -393,6 +393,10 @@ inline Ref<StringObject> strKey(const std::string& k) {
 // you allowed it.
 struct Perms {
     bool net = true, read = true, write = true, env = true, run = true;
+    // ffi: loading/calling untrusted native code (v1.0 FFI bridge, RFC-025).
+    // Host-registered engine natives are trusted and bypass this; only
+    // dynamically loaded plugins / ffi paths consult it.
+    bool ffi = true;
 };
 inline Perms& perms() { static Perms p; return p; }
 

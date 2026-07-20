@@ -138,20 +138,21 @@ int main(int argc, char* argv[]) {
             std::string f = argv[i];
             if (f == "--sandbox" || f == "--allow-all" || f == "--allow-net" ||
                 f == "--allow-read" || f == "--allow-write" || f == "--allow-env" ||
-                f == "--allow-run") { anyPerm = true; }
+                f == "--allow-run" || f == "--allow-ffi") { anyPerm = true; }
             else if (f == "--mem-stats") { /* not a permission flag; keep scanning */ }
             else break;
         }
-        if (anyPerm) { p.net = p.read = p.write = p.env = p.run = false; }
+        if (anyPerm) { p.net = p.read = p.write = p.env = p.run = p.ffi = false; }
         for (; scriptIdx < argc; ++scriptIdx) {
             std::string f = argv[scriptIdx];
             if (f == "--sandbox") { /* deny-all baseline already applied */ }
-            else if (f == "--allow-all") { p.net = p.read = p.write = p.env = p.run = true; }
+            else if (f == "--allow-all") { p.net = p.read = p.write = p.env = p.run = p.ffi = true; }
             else if (f == "--allow-net")   p.net = true;
             else if (f == "--allow-read")  p.read = true;
             else if (f == "--allow-write") p.write = true;
             else if (f == "--allow-env")   p.env = true;
             else if (f == "--allow-run")   p.run = true;
+            else if (f == "--allow-ffi")   p.ffi = true;
             else if (f == "--mem-stats")   memStats = true;
             else break; // first non-flag argument is the script path
         }
