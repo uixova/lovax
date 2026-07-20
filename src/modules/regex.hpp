@@ -49,6 +49,13 @@ struct CharClass {
 constexpr int MAX_PROG = 10000;      // caps {m,n} expansion bombs
 constexpr int MAX_GROUPS = 10;       // $0 (whole match) + $1..$9
 constexpr long long MAX_STEPS = 1000000; // ReDoS budget per top-level call
+// Recursion-depth budget: the matcher recurses per SPLIT/SAVE, so a zero-width
+// loop like (a*)*  recurses without bound and overflows the C++ stack BEFORE the
+// step budget bites (a SIGSEGV, not a clean error). This cap turns any such
+// pattern into the same clean "step budget exceeded" error. Sized well under an
+// 8 MB stack; a legitimately deep single-token match (e.g. \w+ over a very long
+// run) may hit it and is reported, never crashed.
+constexpr int MAX_DEPTH = 8000;
 
 struct Prog {
     std::vector<Inst> code;
@@ -102,7 +109,17 @@ struct Compiler {
             prog.code.resize(left.start);
             int split = emit({Op::SPLIT});
             int l1 = (int)prog.code.size();
-            for (auto& in : leftCode) prog.code.push_back(in);
+            // The left fragment is re-emitted shifted forward by the inserted
+            // SPLIT; its internal jump targets (SPLIT x/y, JMP x — but NOT SAVE's
+            // capture-slot x) are absolute and must move with it, or a 3+-way
+            // alternation's inner branches point at the wrong ops (an infinite
+            // loop that only the step budget stops). Only 2-way worked before.
+            int shift = l1 - left.start;
+            for (auto& in : leftCode) {
+                if (in.op == Op::SPLIT) { in.x += shift; in.y += shift; }
+                else if (in.op == Op::JMP) { in.x += shift; }
+                prog.code.push_back(in);
+            }
             if (overflow()) return false;
             int jmp = emit({Op::JMP});
             int l2 = (int)prog.code.size();
@@ -359,8 +376,9 @@ struct Matcher {
         for (auto& c : caps) c = std::string::npos;
     }
 
-    bool run(int pc, size_t sp) {
+    bool run(int pc, size_t sp, int depth = 0) {
         if (++steps > MAX_STEPS) { budgetHit = true; return false; }
+        if (depth > MAX_DEPTH) { budgetHit = true; return false; }  // stack guard
         for (;;) {
             const Inst& in = prog.code[pc];
             switch (in.op) {
@@ -381,7 +399,7 @@ struct Matcher {
                     sp++; pc++;
                     break;
                 case Op::SPLIT:
-                    if (run(in.x, sp)) return true;
+                    if (run(in.x, sp, depth + 1)) return true;
                     if (budgetHit) return false;
                     if (++steps > MAX_STEPS) { budgetHit = true; return false; }
                     pc = in.y;
@@ -392,7 +410,7 @@ struct Matcher {
                 case Op::SAVE: {
                     size_t old = caps[in.x];   // slot index rides in .x
                     caps[in.x] = sp;
-                    if (run(pc + 1, sp)) return true;
+                    if (run(pc + 1, sp, depth + 1)) return true;
                     caps[in.x] = old;
                     return false;
                 }
