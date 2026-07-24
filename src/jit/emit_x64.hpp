@@ -144,6 +144,11 @@ public:
     void movzxR8(Reg d, Reg s) {                 // zero-extend byte -> 64-bit
         rex(true, d, s); u8(0x0F); u8(0xB6); modrmReg(d, s);
     }
+    // movzx r64, BYTE PTR [base+disp] — reads exactly one byte, so it is safe
+    // on a bool / last element of a byte array (a qword load would over-read).
+    void movzxRM8(Reg d, Reg base, int32_t disp) {
+        rex(true, d, base); u8(0x0F); u8(0xB6); modrmMem(d, base, disp);
+    }
 
     // ---- branches ----
     void jmp(Label& l)          { u8(0xE9); ref(l); }
