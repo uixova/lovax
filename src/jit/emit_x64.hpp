@@ -3,7 +3,8 @@
 
 // Our own x86-64 instruction encoder (RFC-026). Zero dependencies: no DynASM,
 // no asmjit, no LLVM — the instruction set is exactly what the code generator
-// needs and grows on demand. Method studied from sljit's emit API and LuaJIT's
+// needs and grows on demand, each addition landing with a test (nothing
+// untested ships: an unexercised encoding is a latent miscompile). Method studied from sljit's emit API and LuaJIT's
 // lj_emit_x86.h; the encoding tables are written here from the Intel manual.
 //
 // Encoding shape:  [REX] opcode [ModRM] [SIB] [disp] [imm]
@@ -86,9 +87,6 @@ public:
     void movAbs(Reg d, uint64_t imm) {                  // movabs d, imm64
         rex(true, 0, d); u8((uint8_t)(0xB8 + (d & 7))); u64(imm);
     }
-    void movRI32(Reg d, int32_t imm) {                  // sign-extended imm32
-        rex(true, 0, d); u8(0xC7); modrmReg(0, d); u32((uint32_t)imm);
-    }
 
     // ---- ALU (reg, reg) ----
     void aluRR(uint8_t op, Reg d, Reg s) { rex(true, s, d); u8(op); modrmReg(s, d); }
@@ -98,7 +96,6 @@ public:
     void orRR (Reg d, Reg s)  { aluRR(0x09, d, s); }
     void xorRR(Reg d, Reg s)  { aluRR(0x31, d, s); }
     void cmpRR(Reg d, Reg s)  { aluRR(0x39, d, s); }
-    void testRR(Reg d, Reg s) { aluRR(0x85, d, s); }
     void imulRR(Reg d, Reg s) { rex(true, d, s); u8(0x0F); u8(0xAF); modrmReg(d, s); }
 
     // ---- ALU (reg, imm32) — /digit selects the operation ----
@@ -106,10 +103,8 @@ public:
         rex(true, 0, d); u8(0x81); modrmReg(digit, d); u32((uint32_t)imm);
     }
     void addRI(Reg d, int32_t i) { aluRI(0, d, i); }
-    void orRI (Reg d, int32_t i) { aluRI(1, d, i); }
     void andRI(Reg d, int32_t i) { aluRI(4, d, i); }
     void subRI(Reg d, int32_t i) { aluRI(5, d, i); }
-    void xorRI(Reg d, int32_t i) { aluRI(6, d, i); }
     void cmpRI(Reg d, int32_t i) { aluRI(7, d, i); }
 
     // ---- shifts (imm8) ----
@@ -119,10 +114,6 @@ public:
     void shlRI(Reg d, uint8_t n) { shiftRI(4, d, n); }
     void shrRI(Reg d, uint8_t n) { shiftRI(5, d, n); }
     void sarRI(Reg d, uint8_t n) { shiftRI(7, d, n); }
-    // variable shifts use CL
-    void shlCL(Reg d) { rex(true, 0, d); u8(0xD3); modrmReg(4, d); }
-    void shrCL(Reg d) { rex(true, 0, d); u8(0xD3); modrmReg(5, d); }
-    void sarCL(Reg d) { rex(true, 0, d); u8(0xD3); modrmReg(7, d); }
 
     void negR(Reg d) { rex(true, 0, d); u8(0xF7); modrmReg(3, d); }
     void notR(Reg d) { rex(true, 0, d); u8(0xF7); modrmReg(2, d); }
@@ -160,11 +151,6 @@ public:
     }
 
     // ---- SSE2 (doubles) ----
-    void sse(uint8_t pfx, uint8_t op, int reg, int rm, bool w = false) {
-        if (pfx) u8(pfx);
-        rex(w, reg, rm);
-        u8(0x0F); u8(op);
-    }
     void movsdXM(Xmm d, Reg base, int32_t disp) {          // d = [base+disp]
         u8(0xF2); rex(false, d, base); u8(0x0F); u8(0x10); modrmMem(d, base, disp);
     }
@@ -175,20 +161,8 @@ public:
         u8(0xF2); rex(false, d, s); u8(0x0F); u8(op); modrmReg(d, s);
     }
     void addsd(Xmm d, Xmm s) { sseRR(0x58, d, s); }
-    void subsd(Xmm d, Xmm s) { sseRR(0x5C, d, s); }
-    void mulsd(Xmm d, Xmm s) { sseRR(0x59, d, s); }
-    void divsd(Xmm d, Xmm s) { sseRR(0x5E, d, s); }
-    void ucomisd(Xmm d, Xmm s) {                            // 66 0F 2E /r
-        u8(0x66); rex(false, d, s); u8(0x0F); u8(0x2E); modrmReg(d, s);
-    }
     void cvtsi2sd(Xmm d, Reg s) {                           // F2 REX.W 0F 2A /r
         u8(0xF2); rex(true, d, s); u8(0x0F); u8(0x2A); modrmReg(d, s);
-    }
-    void cvttsd2si(Reg d, Xmm s) {                          // F2 REX.W 0F 2C /r
-        u8(0xF2); rex(true, d, s); u8(0x0F); u8(0x2C); modrmReg(d, s);
-    }
-    void movqXR(Xmm d, Reg s) {                             // 66 REX.W 0F 6E /r
-        u8(0x66); rex(true, d, s); u8(0x0F); u8(0x6E); modrmReg(d, s);
     }
     void movqRX(Reg d, Xmm s) {                             // 66 REX.W 0F 7E /r
         u8(0x66); rex(true, s, d); u8(0x0F); u8(0x7E); modrmReg(s, d);

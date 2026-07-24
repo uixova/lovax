@@ -16,7 +16,6 @@
 #include "runtime.hpp"
 #include "../lexer/lexer.hpp"
 #include "../parser/parser.hpp"
-#include "../object/environment.hpp"
 #include "../evaluator/builtins.hpp"
 #include "../evaluator/stdlib.hpp"
 #include "../utils/colors.hpp"
@@ -553,9 +552,9 @@ private:
     static const std::unordered_map<std::string, int>& builtinNames() {
         static std::unordered_map<std::string, int> names = [] {
             std::unordered_map<std::string, int> m;
-            auto env = std::make_shared<Environment>();
-            Builtins::installBuiltins(env);
-            for (const auto& [k, v] : env->entries()) m[k] = 1;
+            Builtins::BuiltinTable t;
+            Builtins::installBuiltins(t);
+            for (const auto& [k, v] : t) m[k] = 1;
             // VM-bound coroutine builtins (installed separately) count as core too,
             // so a file module doesn't re-export them.
             for (const char* n : {"spawn", "resume", "co_status", "co_done"}) m[n] = 1;
@@ -565,9 +564,9 @@ private:
     }
 
     void installBuiltinGlobals() {
-        auto env = std::make_shared<Environment>();
-        Builtins::installBuiltins(env);
-        for (const auto& [name, obj] : env->entries()) {
+        Builtins::BuiltinTable t;
+        Builtins::installBuiltins(t);
+        for (const auto& [name, obj] : t) {
             bindGlobal(name, obj);
         }
         installCoroutineBuiltins();
@@ -2017,11 +2016,15 @@ private:
                         *pa = Value::real(pa->asDouble() + pb->asDouble()); --sp_; VM_NEXT_FAST;
                     }
                     if (pa->isObjType(ObjectType::STRING) && pb->isObjType(ObjectType::STRING)) {
-                        // Under a tracing GC there is no cheap uniqueness check, so
-                        // always build a fresh string (correct — never mutates a
-                        // possibly-shared one). makeObj can't collect mid-instruction
-                        // (deferred to the next safepoint), so ls/rs stay valid.
-                        // TODO(v0.11-perf): restore in-place append with a builder flag.
+                        // Always builds a fresh string. Appending in place would
+                        // need proof that nothing else references this one, and a
+                        // tracing GC has no refcount to ask: `s = s + x` keeps the
+                        // old string in its slot, which is indistinguishable from a
+                        // real alias (`t = s`) without escape analysis. That belongs
+                        // to the JIT's alias analysis (RFC-026), so the copy stays —
+                        // it is O(n^2) for accumulation loops, same as Lua.
+                        // makeObj cannot collect mid-instruction (collection is
+                        // deferred to the next safepoint), so ls/rs stay valid.
                         auto* ls = static_cast<StringObject*>(pa->asObj());
                         const std::string& rs = static_cast<StringObject*>(pb->asObj())->value;
                         auto out = makeObj<StringObject>(std::string());

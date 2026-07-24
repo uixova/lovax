@@ -16,10 +16,10 @@ namespace Builtins {
 
 // ===== Builtin registration =====
 
-inline void installBuiltins(const std::shared_ptr<Environment>& env) {
+inline void installBuiltins(BuiltinTable& out) {
 
     auto def = [&](const std::string& name, BuiltinObject::BuiltinFn fn) {
-        env->define(name, makeObj<BuiltinObject>(name, std::move(fn)));
+        out[name] = makeObj<BuiltinObject>(name, std::move(fn));
     };
 
     // --- len(x): length. Counts UTF-8 code points for strings ("şey" -> 3) ---
