@@ -1,0 +1,16 @@
+# Sieve of Eratosthenes: integer + list indexing
+set N = 2000000
+set flags = []
+for i in range(N + 1):
+    push(flags, true)
+set count = 0
+set i = 2
+while i <= N:
+    if flags[i]:
+        count = count + 1
+        set j = i * i
+        while j <= N:
+            flags[j] = false
+            j = j + i
+    i = i + 1
+say count

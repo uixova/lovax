@@ -26,7 +26,7 @@ declare -A CMD=(
 declare -A EXT=(
   [lovax]="lov" [lua54]="lua" [lua55]="lua" [luajit]="lua" [python]="py" [node]="js"
 )
-BENCHES=(fib strcat hashmap btree gc regex jsonb)
+BENCHES=(fib strcat hashmap btree gc regex jsonb mandel sieve qsort)
 
 have() { command -v "$1" >/dev/null 2>&1; }
 # best-of-REPS wall-clock in ms for: runner file
@@ -67,9 +67,18 @@ echo
 
 for b in "${BENCHES[@]}"; do
   printf "%-10s" "$b"
+  # Reference answer = Lovax's. A runner that errors out exits instantly and
+  # would otherwise look like the fastest language in the table (a LuaJIT
+  # syntax error once "won" qsort at 3.3 ms), so every runner must produce the
+  # SAME output before its time is reported.
+  ref=""
+  [ -f "$P/$b.lov" ] && ref="$("$LOVAX" "$P/$b.lov" 2>/dev/null)"
   for L in "${active[@]}"; do
     f="$P/$b.${EXT[$L]}"
-    if [ -f "$f" ]; then printf "%12s" "$(best_ms "${CMD[$L]}" "$f")"
+    if [ -f "$f" ]; then
+      got="$("${CMD[$L]}" "$f" 2>/dev/null)"
+      if [ -n "$ref" ] && [ "$got" != "$ref" ]; then printf "%12s" "MISMATCH"
+      else printf "%12s" "$(best_ms "${CMD[$L]}" "$f")"; fi
     else printf "%12s" "n/a"; fi
   done
   echo

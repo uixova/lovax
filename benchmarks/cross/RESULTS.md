@@ -1,5 +1,75 @@
 # Cross-language benchmark
 
+## v1.0.1 — 10 workloads, 6 runtimes (2026-07-24)
+
+Best of 5, external wall-clock (startup included), same machine. **Every
+runner's output is verified against Lovax's before its time is reported** —
+a runner that errors out exits instantly and would otherwise look like the
+fastest language in the table (a LuaJIT syntax error once "won" qsort at
+3.3 ms). Three new, harder workloads this round: `mandel` (float compute
+loop), `sieve` (integer + list indexing, 2M), `qsort` (hand-written
+quicksort — recursion + array indexing + swaps, 300k).
+
+**JIT is NOT active in these numbers.** The code generator exists and is
+proven (2.7× on a hot loop in isolation) but is not yet wired into the VM.
+This is the honest pre-JIT baseline.
+
+| bench   | lovax | lua 5.4 | lua 5.5 | luajit | python | node |
+|---------|------:|--------:|--------:|-------:|-------:|-----:|
+| fib     | 313   | 192     | 195     | **30** | 302    | 74   |
+| strcat  | 99    | **22**  | 24      | 29     | 27     | 49   |
+| hashmap | 133   | 291     | 288     | **95** | 175    | 371  |
+| btree   | 189   | 182     | 162     | **85** | 115    | 76   |
+| gc      | 53    | 46      | 42      | **4**  | 103    | 73   |
+| regex   | **15**| n/a     | n/a     | n/a    | 52     | 53   |
+| jsonb   | **63**| n/a     | n/a     | n/a    | 93     | 83   |
+| mandel  | 128   | 42      | 46      | **8**  | 351    | 64   |
+| sieve   | 438   | 154     | 126     | **59** | 810    | 82   |
+| qsort   | 1215  | 227     | 227     | 98     | 631    | **121** |
+| startup | 5.1   | 3.7     | 4.0     | 3.7    | 24     | 59   |
+
+Peak RSS (MB): gc 15.3 (tied best) · btree 34 (Lua 24, LuaJIT 40, Node 71) ·
+hashmap 56 (Lua 31, LuaJIT 19, Node 113).
+
+### Nerede iyiyiz
+- **hashmap 133** — Lua 5.4/5.5 (291/288), Python (175) ve Node (371) hepsini
+  geçiyor; sadece LuaJIT önde. v0.17'nin open-addressing + cached-hash index'i
+  işini yapıyor.
+- **regex 15** — Python `re` ve Node regex'inden **3.5× hızlı** (kendi motorumuz).
+- **jsonb 63** — Python (93) ve Node'u (83) geçiyor.
+- **startup 5.1 ms** — Python 24, Node 59. Lua ile aynı ligde.
+- **Bellek** gc'de en iyilerle eşit.
+
+### Nerede geriyiz — ve fark ne kadar
+| bench | Lua'ya göre | Neden |
+|---|---|---|
+| qsort | **5.4× geri** | dizi indeks get/set + recursion |
+| sieve | 3.5× geri | dizi indeks, sıkı döngü |
+| mandel | 3.0× geri | float aritmetik döngüsü |
+| fib | 1.6× geri | çağrı maliyeti |
+| strcat | 4.6× geri | `s = s + x` O(n²) kopya (Lua'da da öyle ama bizde per-op yük fazla) |
+
+Python'u mandel'de 2.7×, sieve'de 1.8× geçiyoruz; Node/LuaJIT gibi JIT'li
+runtime'larla saf compute farkı duruyor.
+
+### Farkı kapatacak iki kaldıraç (ölçüm bunu söylüyor)
+
+**1. JIT (devam ediyor).** Dispatch + aritmetik maliyetini siler. İzole
+ölçümde sıcak int döngüsünde 2.7× alındı. mandel/sieve/fib doğrudan bunun
+hedefi.
+
+**2. Listelerde kutusuz depolama (yeni bulgu, JIT'ten bağımsız).**
+`ListObject::elements` şu an `std::vector<Ref<Object>>` — yani listedeki her
+tamsayı ayrı bir heap nesnesi. Her erişim bir pointer dolaylaması, 300k
+elemanlı dizi 300k ayrı nesne demek. Lua array part'ta değerleri **inline**
+tutuyor, farkın büyük kısmı burada. `std::vector<Value>` (8 byte, kutusuz)
+yapmak qsort/sieve/btree'yi ve belleği doğrudan iyileştirir — map index'inde
+(%46 kazanç) işe yarayan aynı sınıf kalıcı veri-yapısı düzeltmesi.
+
+qsort'un neden en kötümüz olduğu (5.4×) bununla açıklanıyor: hem indeks
+dolaylaması hem çağrı maliyeti aynı anda çarpıyor.
+
+
 ## v0.18 8-byte NaN-boxed Value — Lovax before/after (2026-07-19)
 
 RFC-024 landed: value = one register, exact int64 kept via transparent
