@@ -423,6 +423,17 @@ private:
     // 'set' semantics: define a global at top level, a (pre-allocated) local in functions.
     void defineName(const std::string& name, int line) {
         if (ctx_->isScript) {
+            // The script frame does hold locals — a for-loop variable lives in
+            // one. If this name is already such a local, `set` MUST write to it,
+            // because every read (emitNameGet) resolves locals before globals.
+            // Defining a global here instead made `set i = 2` after `for i in ...`
+            // a silent no-op: the write landed on a global the reads never saw.
+            int local = resolveLocal(ctx_, name);
+            if (local != -1) {
+                emitOp(Op::SET_LOCAL, line);
+                emitU16((uint16_t)local, line);
+                return;
+            }
             emitOp(Op::DEFINE_GLOBAL, line);
             emitU16(globals_.slot(name), line);
         } else {
