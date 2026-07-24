@@ -1,0 +1,24 @@
+# Mandelbrot: pure float compute in a nested loop
+set W = 200
+set H = 200
+set MAXI = 60
+set total = 0
+for py in range(H):
+    set y0 = py * 2.5 / H - 1.25
+    for px in range(W):
+        set x0 = px * 3.0 / W - 2.0
+        set x = 0.0
+        set y = 0.0
+        set i = 0
+        while i < MAXI:
+            set xx = x * x
+            set yy = y * y
+            if xx + yy > 4.0:
+                i = MAXI
+            else:
+                set xt = xx - yy + x0
+                y = 2.0 * x * y + y0
+                x = xt
+                i = i + 1
+                total = total + 1
+say total
