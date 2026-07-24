@@ -20,7 +20,6 @@
 #include <unordered_map>
 #include <cstring>
 #include "../object/object.hpp"
-#include "../object/environment.hpp"
 
 // Shared plumbing for every Lovax builtin/stdlib module: argument helpers, the
 // deterministic RNG, deep clone, module-map construction, capability gates and
@@ -32,6 +31,11 @@ namespace Builtins {
 using Args = std::vector<Ref<Object>>;
 using ObjPtr = Ref<Object>;
 using CallFn = BuiltinObject::CallFn;
+
+// Where installBuiltins() drops the global builtins. The VM copies them into
+// its global slots; it is a plain name->object bag, not a scope (the VM
+// resolves names to slots at compile time).
+using BuiltinTable = std::unordered_map<std::string, Ref<Object>>;
 
 inline ObjPtr argCountError(const std::string& fname, const std::string& expected, size_t got, int line) {
     return makeError(fname + "() expects " + expected + " argument(s), got " + std::to_string(got) + "", line);

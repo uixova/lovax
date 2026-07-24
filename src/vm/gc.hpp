@@ -53,10 +53,6 @@ struct Ref {
     T& operator*() const { return *p; }
     explicit operator bool() const { return p != nullptr; }
     void reset() { p = nullptr; }
-    // No refcount under a tracing GC. Returns 0 so the ADD_INPLACE fast path
-    // (which asked use_count()==2 for uniqueness) takes the safe copy branch.
-    // TODO(v0.11-perf): restore in-place string append with a GC-aware check.
-    long use_count() const { return 0; }
 };
 template <class T, class U> bool operator==(const Ref<T>& a, const Ref<U>& b) { return a.p == b.p; }
 template <class T, class U> bool operator!=(const Ref<T>& a, const Ref<U>& b) { return a.p != b.p; }

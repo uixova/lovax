@@ -29,7 +29,6 @@ tests/tmp/
 
 # Local research notes (not part of the repo)
 terms.txt
-gemini.txt
 
 # GC/dispatch test binaries + scratch
 lovax_gcstress
@@ -46,3 +45,6 @@ ANALYSIS_STDLIB.md
 COMPREHENSIVE_ANALYSIS.md
 /memories/session/
 lovax_16b_backup
+
+# yerel proje haritasi (kisisel not, paylasilmaz)
+q7x4m2-proje-haritasi.md
