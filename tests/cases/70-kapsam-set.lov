@@ -1,0 +1,39 @@
+# A for-loop variable lives in a script-frame LOCAL slot, but `set` used to
+# define a GLOBAL there — so `set i = 2` after `for i in ...` silently did
+# nothing (the write went to a global every read shadowed). Writes must resolve
+# names the same way reads do.
+
+set xs = []
+for i in range(5):
+    push(xs, i)
+say i                      # 4 — the loop variable survives
+set i = 2                  # must rebind the SAME i
+say i
+i = 7                      # bare assignment too
+say i
+
+# the loop it broke: a sieve counts primes correctly now
+set N = 50
+set flags = []
+for k in range(N + 1):
+    push(flags, true)
+set count = 0
+set k = 2
+while k <= N:
+    if flags[k]:
+        count = count + 1
+        set j = k * k
+        while j <= N:
+            flags[j] = false
+            j = j + k
+    k = k + 1
+say count                  # 15 primes below 50
+
+# same shape inside a function (locals path was always correct)
+fn f():
+    set total = 0
+    for i in range(4):
+        total = total + i
+    set i = 100
+    return total + i
+say f()
