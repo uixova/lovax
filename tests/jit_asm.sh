@@ -58,4 +58,12 @@ else
 fi
 
 echo
-if [ "$fail" = 0 ]; then echo "JIT ASM GATE PASSED"; else echo "JIT ASM GATE FAILED"; exit 1; fi
+echo "== baseline code generator (isolated) =="
+if g++ -std=c++17 -I. -O2 -o "$TMP/codegen_tests" tests/jit/codegen_tests.cpp 2>"$TMP/cg.err"; then
+    if "$TMP/codegen_tests"; then :; else fail=1; fi
+else
+    echo "  FAIL: codegen test build"; cat "$TMP/cg.err"; fail=1
+fi
+
+echo
+if [ "$fail" = 0 ]; then echo "JIT GATE PASSED"; else echo "JIT GATE FAILED"; exit 1; fi
