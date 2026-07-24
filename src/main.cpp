@@ -8,6 +8,7 @@
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
 #include "vm/vm.hpp"
+#include "jit/disasm.hpp"
 #include "utils/colors.hpp"
 #include "pkg.hpp"
 
@@ -131,6 +132,7 @@ int main(int argc, char* argv[]) {
     int scriptIdx = 1;
     bool anyPerm = false;
     bool memStats = false;
+    bool dumpBytecode = false;
     {
         auto& p = Lovax::StdLib::perms();
         // First pass: does any permission flag appear before the script?
@@ -154,6 +156,7 @@ int main(int argc, char* argv[]) {
             else if (f == "--allow-run")   p.run = true;
             else if (f == "--allow-ffi")   p.ffi = true;
             else if (f == "--mem-stats")   memStats = true;
+            else if (f == "--dump-bytecode") dumpBytecode = true;
             else break; // first non-flag argument is the script path
         }
     }
@@ -188,6 +191,33 @@ int main(int argc, char* argv[]) {
         std::cerr << parser.errors().size() << " syntax error(s) found; the program was not run."
                   << std::endl;
         return 65; // EX_DATAERR
+    }
+
+    // --dump-bytecode: compile only and print the bytecode (JIT development
+    // tooling, RFC-026). Recurses into nested function protos.
+    if (dumpBytecode) {
+        Lovax::GlobalTable gt;
+        Lovax::Compiler comp(gt);
+        try {
+            auto proto = comp.compileProgram(program.get());
+            std::function<void(const std::shared_ptr<Lovax::Proto>&, const std::string&)> dump =
+                [&](const std::shared_ptr<Lovax::Proto>& p, const std::string& name) {
+                    Lovax::Jit::disassemble(p->chunk, name);
+                    for (const auto& k : p->chunk.consts) {
+                        if (k.isObj() && k.asObj() &&
+                            k.asObj()->type() == Lovax::ObjectType::RETURN_VALUE) {
+                            auto* po = dynamic_cast<Lovax::ProtoObject*>(k.asObj());
+                            if (po) dump(po->proto, "fn " + (po->proto->name.empty()
+                                                             ? "?" : po->proto->name));
+                        }
+                    }
+                };
+            dump(proto, "<script>");
+        } catch (const Lovax::CompileError& ce) {
+            std::cerr << "[Compile Error] line " << ce.line << ": " << ce.message << "\n";
+            return 65;
+        }
+        return 0;
     }
 
     // Relative module paths resolve from the entry script's directory.
