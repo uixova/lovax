@@ -22,7 +22,7 @@ inline ObjPtr makeItersModule() {
     auto isSeq = [](const ObjPtr& o) {
         return o->type() == ObjectType::LIST || o->type() == ObjectType::TUPLE;
     };
-    auto els = [](const ObjPtr& o) -> const std::vector<Ref<Object>>& {
+    auto els = [](const ObjPtr& o) -> const std::vector<Value>& {
         return static_cast<ListObject*>(o.get())->elements;
     };
     auto isFn = [](const ObjPtr& o) {
@@ -59,7 +59,7 @@ inline ObjPtr makeItersModule() {
                 GcRoot _pr(pair.get());
                 pair->elements.push_back(x);
                 pair->elements.push_back(y);
-                out->elements.push_back(pair);
+                out->elements.push_back(Value::object(pair));
             }
         }
         return out;
@@ -86,7 +86,7 @@ inline ObjPtr makeItersModule() {
             auto combo = makeObj<ListObject>();
             GcRoot _cr(combo.get());
             for (long long i2 = 0; i2 < k; ++i2) combo->elements.push_back(src[idx[i2]]);
-            out->elements.push_back(combo);
+            out->elements.push_back(Value::object(combo));
             long long i2 = k - 1;
             while (i2 >= 0 && idx[i2] == n - k + i2) i2--;
             if (i2 < 0) break;
@@ -121,7 +121,7 @@ inline ObjPtr makeItersModule() {
                 auto perm = makeObj<ListObject>();
                 GcRoot _pr(perm.get());
                 for (long long ix : cur) perm->elements.push_back(src[ix]);
-                out->elements.push_back(perm);
+                out->elements.push_back(Value::object(perm));
                 return;
             }
             for (long long i2 = 0; i2 < n; ++i2) {
@@ -146,22 +146,19 @@ inline ObjPtr makeItersModule() {
         const auto& src = els(args[0]);
         auto out = makeObj<ListObject>();
         GcRoot _gr(out.get());
-        ObjPtr acc = nullptr;
+        Value acc; bool has = false;
         for (const auto& e : src) {
-            if (acc == nullptr) acc = e;
+            if (!has) { acc = e; has = true; }
             else if (args.size() == 2) {
-                acc = call(args[1], {acc, e}, line);
-                if (isError(acc)) return acc;
+                ObjPtr r = call(args[1], {toObject(acc), toObject(e)}, line);
+                if (isError(r)) return r;
+                acc = fromObject(r);
             } else {
-                if (!isNumeric(acc) || !isNumeric(e)) {
+                if (!acc.isNumber() || !e.isNumber()) {
                     return makeError("iters.accumulate() without fn needs numbers", line);
                 }
-                if (acc->type() == ObjectType::INTEGER && e->type() == ObjectType::INTEGER) {
-                    acc = makeObj<IntegerObject>(static_cast<IntegerObject*>(acc.get())->value +
-                                                 static_cast<IntegerObject*>(e.get())->value);
-                } else {
-                    acc = makeObj<FloatObject>(asDouble(acc) + asDouble(e));
-                }
+                if (acc.isInt() && e.isInt()) acc = Value::integer(acc.asInt() + e.asInt());
+                else acc = Value::real(acc.asDouble() + e.asDouble());
             }
             out->elements.push_back(acc);
         }
@@ -176,7 +173,7 @@ inline ObjPtr makeItersModule() {
         auto out = makeObj<ListObject>();
         GcRoot _gr(out.get());
         for (const auto& e : els(args[0])) {
-            auto r = call(args[1], {e}, line);
+            auto r = call(args[1], {toObject(e)}, line);
             if (isError(r)) return r;
             if (!objectTruthy(r)) break;
             out->elements.push_back(e);
@@ -192,7 +189,7 @@ inline ObjPtr makeItersModule() {
         bool dropping = true;
         for (const auto& e : els(args[0])) {
             if (dropping) {
-                auto r = call(args[1], {e}, line);
+                auto r = call(args[1], {toObject(e)}, line);
                 if (isError(r)) return r;
                 if (objectTruthy(r)) continue;
                 dropping = false;
@@ -212,15 +209,15 @@ inline ObjPtr makeItersModule() {
         ObjPtr curKey = nullptr;
         Ref<ListObject> curGroup = nullptr;
         for (const auto& e : els(args[0])) {
-            auto key = call(args[1], {e}, line);
+            auto key = call(args[1], {toObject(e)}, line);
             if (isError(key)) return key;
             if (curKey == nullptr || !objectEquals(key, curKey)) {
                 auto pair = makeObj<ListObject>();
                 GcRoot _pr(pair.get());
                 curGroup = makeObj<ListObject>();
-                pair->elements.push_back(key);
-                pair->elements.push_back(curGroup);
-                out->elements.push_back(pair);
+                pair->elements.push_back(fromObject(key));
+                pair->elements.push_back(Value::object(curGroup));
+                out->elements.push_back(Value::object(pair));
                 curKey = key;
             }
             curGroup->elements.push_back(e);
@@ -238,7 +235,8 @@ inline ObjPtr makeItersModule() {
         auto out = makeObj<ListObject>();
         GcRoot _gr(out.get());
         out->elements.reserve((size_t)n);
-        for (long long i2 = 0; i2 < n; ++i2) out->elements.push_back(args[0]);
+        Value fill = fromObject(args[0]);
+        for (long long i2 = 0; i2 < n; ++i2) out->elements.push_back(fill);
         return out;
     });
 
@@ -255,9 +253,10 @@ inline ObjPtr makeItersModule() {
         for (size_t i2 = 0; i2 < n; ++i2) {
             auto pair = makeObj<ListObject>();
             GcRoot _pr(pair.get());
-            pair->elements.push_back(i2 < la.size() ? la[i2] : args[2]);
-            pair->elements.push_back(i2 < lb.size() ? lb[i2] : args[2]);
-            out->elements.push_back(pair);
+            Value fill = fromObject(args[2]);
+            pair->elements.push_back(i2 < la.size() ? la[i2] : fill);
+            pair->elements.push_back(i2 < lb.size() ? lb[i2] : fill);
+            out->elements.push_back(Value::object(pair));
         }
         return out;
     });

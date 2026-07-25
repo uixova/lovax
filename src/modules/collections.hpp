@@ -27,13 +27,14 @@ inline ObjPtr makeCollectionsModule() {
         auto out = makeObj<MapObject>();
         GcRoot _gr(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            if (e->type() != ObjectType::STRING && e->type() != ObjectType::INTEGER &&
-                e->type() != ObjectType::BOOLEAN) {
+            ObjPtr eo = toObject(e);   // used as a map key (boxed anyway)
+            if (eo->type() != ObjectType::STRING && eo->type() != ObjectType::INTEGER &&
+                eo->type() != ObjectType::BOOLEAN) {
                 return makeError("collections.counter() elements must be string, int or bool", line);
             }
-            auto cur = out->get(e);
+            auto cur = out->get(eo);
             long long n = cur ? static_cast<IntegerObject*>(cur.get())->value : 0;
-            out->set(e, makeObj<IntegerObject>(n + 1));
+            out->set(eo, makeObj<IntegerObject>(n + 1));
         }
         return out;
     });
@@ -68,7 +69,7 @@ inline ObjPtr makeCollectionsModule() {
                 return makeError("collections.deque(list) expects a list or tuple", line);
             }
             for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-                out->items.push_back(e);
+                out->items.push_back(toObject(e));   // deque stays boxed
             }
         }
         return out;
@@ -116,18 +117,19 @@ inline ObjPtr makeCollectionsModule() {
         auto* d = static_cast<DequeObject*>(args[0].get());
         auto out = makeObj<ListObject>();
         GcRoot _gr(out.get());
-        for (const auto& e2 : d->items) out->elements.push_back(e2);
+        for (const auto& e2 : d->items) out->elements.push_back(fromObject(e2));
         return out;
     });
 
     // ---- Heap (priority queue) + bisect: the last P1 gap-analysis items. ----
     // A heap is a plain list kept in min-heap order by these functions.
     // Elements: numbers, or [priority, payload] lists compared by priority.
-    auto heapKey = [](const ObjPtr& e, double& out) -> bool {
-        if (isNumeric(e)) { out = asDouble(e); return true; }
-        if (e->type() == ObjectType::LIST || e->type() == ObjectType::TUPLE) {
-            const auto& els = static_cast<ListObject*>(e.get())->elements;
-            if (!els.empty() && isNumeric(els[0])) { out = asDouble(els[0]); return true; }
+    auto heapKey = [](const Value& e, double& out) -> bool {
+        if (e.isNumber()) { out = e.asDouble(); return true; }
+        if (e.isObj() && (e.asObj()->type() == ObjectType::LIST ||
+                          e.asObj()->type() == ObjectType::TUPLE)) {
+            const auto& els = static_cast<ListObject*>(e.asObj())->elements;
+            if (!els.empty() && els[0].isNumber()) { out = els[0].asDouble(); return true; }
         }
         return false;
     };
@@ -138,12 +140,12 @@ inline ObjPtr makeCollectionsModule() {
             return makeError("collections.heap_push(heap, x) expects a list and a value", line);
         }
         double kx;
-        if (!heapKey(args[1], kx)) {
+        if (!heapKey(fromObject(args[1]), kx)) {
             return makeError("heap elements must be numbers or [priority, ...] lists", line);
         }
         gcShade(args[1].get());   // write barrier (RFC-023)
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
-        els.push_back(args[1]);
+        els.push_back(fromObject(args[1]));
         size_t i = els.size() - 1;
         while (i > 0) {           // sift up
             size_t parent = (i - 1) / 2;
@@ -165,7 +167,7 @@ inline ObjPtr makeCollectionsModule() {
         }
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError("heap_pop() on an empty heap", line);
-        auto top = els[0];
+        Value top = els[0];
         els[0] = els.back();
         els.pop_back();
         size_t i = 0, n = els.size();
@@ -179,7 +181,7 @@ inline ObjPtr makeCollectionsModule() {
             std::swap(els[i], els[smallest]);
             i = smallest;
         }
-        return top;
+        return toObject(top);
     });
 
     // heapify(list): reorders a list into min-heap order, in place
@@ -194,13 +196,13 @@ inline ObjPtr makeCollectionsModule() {
                 return makeError("heap elements must be numbers or [priority, ...] lists", line);
             }
         }
-        auto lt = [heapKey](const ObjPtr& a, const ObjPtr& b) {
+        auto lt = [heapKey](const Value& a, const Value& b) {
             double ka = 0, kb = 0;
             heapKey(a, ka); heapKey(b, kb);
             return ka < kb;
         };
         std::make_heap(els.begin(), els.end(),
-                       [lt](const ObjPtr& a, const ObjPtr& b) { return lt(b, a); });
+                       [lt](const Value& a, const Value& b) { return lt(b, a); });
         return args[0];
     });
 
@@ -222,11 +224,11 @@ inline ObjPtr makeCollectionsModule() {
             size_t mid = (lo + hi) / 2;
             bool less;
             if (numeric) {
-                if (!isNumeric(els[mid])) return makeError("bisect() needs a uniformly typed sorted list", line);
-                less = asDouble(els[mid]) < asDouble(args[1]);
+                if (!els[mid].isNumber()) return makeError("bisect() needs a uniformly typed sorted list", line);
+                less = els[mid].asDouble() < asDouble(args[1]);
             } else {
-                if (els[mid]->type() != ObjectType::STRING) return makeError("bisect() needs a uniformly typed sorted list", line);
-                less = static_cast<StringObject*>(els[mid].get())->value <
+                if (!(els[mid].isObj() && els[mid].asObj()->type() == ObjectType::STRING)) return makeError("bisect() needs a uniformly typed sorted list", line);
+                less = static_cast<StringObject*>(els[mid].asObj())->value <
                        static_cast<StringObject*>(args[1].get())->value;
             }
             if (less) lo = mid + 1; else hi = mid;

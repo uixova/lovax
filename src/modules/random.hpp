@@ -170,7 +170,7 @@ inline ObjPtr makeRandomModule() {
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError("random.choice() of an empty list", line);
-        return els[(size_t)rngBounded(els.size())];
+        return toObject(els[(size_t)rngBounded(els.size())]);
     });
 
     // shuffle(list): in-place Fisher-Yates, returns the list
@@ -200,7 +200,7 @@ inline ObjPtr makeRandomModule() {
         }
         auto out = makeObj<ListObject>();
         GcRoot _gr(out.get());
-        std::vector<Ref<Object>> pool = els;   // partial Fisher-Yates on a copy
+        std::vector<Value> pool = els;   // partial Fisher-Yates on a copy
         for (long long i = 0; i < k; ++i) {
             size_t j = (size_t)i + (size_t)rngBounded(pool.size() - (size_t)i);
             std::swap(pool[(size_t)i], pool[j]);
@@ -226,8 +226,8 @@ inline ObjPtr makeRandomModule() {
         cum.reserve(ws.size());
         double total = 0;
         for (const auto& w : ws) {
-            if (!isNumeric(w)) return makeError("random.choices() weights must be numbers", line);
-            double d = asDouble(w);
+            if (!w.isNumber()) return makeError("random.choices() weights must be numbers", line);
+            double d = w.asDouble();
             if (d < 0) return makeError("random.choices() weights must be >= 0", line);
             total += d;
             cum.push_back(total);

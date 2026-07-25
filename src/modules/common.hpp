@@ -75,9 +75,9 @@ inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
         auto out = makeObj<ListObject>();
         GcRoot _gr56(out.get());
         for (const auto& e : static_cast<ListObject*>(v.get())->elements) {
-            auto c = deepClone(e, line, depth + 1);
+            auto c = deepClone(toObject(e), line, depth + 1);
             if (isError(c)) return c;
-            out->elements.push_back(c);
+            out->elements.push_back(fromObject(c));
         }
         return out;
     }
@@ -171,7 +171,7 @@ inline bool jsonWrite(const ObjPtr& v, std::string& out, std::string& err, int d
             auto* l = static_cast<ListObject*>(v.get());
             for (size_t i = 0; i < l->elements.size(); ++i) {
                 if (i > 0) out += ", ";
-                if (!jsonWrite(l->elements[i], out, err, depth + 1)) return false;
+                if (!jsonWrite(toObject(l->elements[i]), out, err, depth + 1)) return false;
             }
             out += ']';
             return true;
@@ -346,7 +346,7 @@ struct JsonParser {
         while (true) {
             ObjPtr v;
             if (!parseValue(v, depth + 1)) return false;
-            list->elements.push_back(v);
+            list->elements.push_back(fromObject(v));
             skipWs();
             if (i < s.size() && s[i] == ',') { i++; continue; }
             if (i < s.size() && s[i] == ']') { i++; break; }

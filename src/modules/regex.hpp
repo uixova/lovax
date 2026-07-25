@@ -520,9 +520,9 @@ inline ObjPtr makeRegexModule() {
                 for (int g = 0; g < prog->groupCount; ++g) {
                     size_t a = m.caps[g * 2], b = m.caps[g * 2 + 1];
                     if (a == std::string::npos || b == std::string::npos) {
-                        out->elements.push_back(NULL_OBJ_);
+                        out->elements.push_back(Value::nil());
                     } else {
-                        out->elements.push_back(makeObj<StringObject>(t->substr(a, b - a)));
+                        out->elements.push_back(Value::object(makeObj<StringObject>(t->substr(a, b - a))));
                     }
                 }
                 return out;
@@ -546,7 +546,7 @@ inline ObjPtr makeRegexModule() {
         while (from <= t->size()) {
             if (m.matchAt(from)) {
                 size_t a = m.caps[0], b = m.caps[1];
-                out->elements.push_back(makeObj<StringObject>(t->substr(a, b - a)));
+                out->elements.push_back(Value::object(makeObj<StringObject>(t->substr(a, b - a))));
                 from = (b > a) ? b : b + 1;   // advance past empty matches
             } else {
                 if (m.budgetHit) return stepError(line);
@@ -618,7 +618,7 @@ inline ObjPtr makeRegexModule() {
             if (m.matchAt(from)) {
                 size_t a = m.caps[0], b = m.caps[1];
                 if (b > a) {
-                    out->elements.push_back(makeObj<StringObject>(t->substr(pieceStart, a - pieceStart)));
+                    out->elements.push_back(Value::object(makeObj<StringObject>(t->substr(pieceStart, a - pieceStart))));
                     pieceStart = b;
                     from = b;
                 } else {
@@ -629,7 +629,7 @@ inline ObjPtr makeRegexModule() {
                 from++;
             }
         }
-        out->elements.push_back(makeObj<StringObject>(t->substr(pieceStart)));
+        out->elements.push_back(Value::object(makeObj<StringObject>(t->substr(pieceStart))));
         return out;
     });
 

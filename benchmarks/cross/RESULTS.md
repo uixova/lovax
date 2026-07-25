@@ -1,5 +1,37 @@
 # Cross-language benchmark
 
+## Unboxed list storage — Lovax before/after (2026-07-25)
+
+`ListObject::elements` changed from `std::vector<Ref<Object>>` (one heap object
+per element) to `std::vector<Value>` (the 8-byte NaN-boxed value stored inline).
+An int/float element is now the inline word; the VM's INDEX_GET/SET, list build,
+iteration and unpack read/write the `Value` directly — no per-element boxing.
+`Value` was hoisted into object.hpp (ahead of the containers) to make this
+possible; builtins convert at their boundary (`toObject`/`fromObject`), the hot
+VM opcodes do not.
+
+Same machine/day, best-of-4, external wall-clock (startup included), old =
+git HEAD before the change, new = this change. JIT for/index NOT active yet
+(that is Stage-2 expansion) — this is a **pure interpreter** win:
+
+| bench   | old (boxed) | new (unboxed) | change |
+|---------|------:|------:|--------|
+| qsort   | 936   | **343** | **−63% (2.7×)** |
+| sieve   | 315   | 313   | flat |
+| btree   | 114   | 118   | flat |
+| hashmap | 106   | 108   | flat |
+
+**Honest reading:** the win lands exactly where elements are **numbers**. qsort
+sorts an int array — every swap/partition write used to allocate a fresh
+IntegerObject (`toObject(int)`); unboxing deletes millions of allocations →
+2.7×. sieve is **flat because it stores `true`/`false`**, and booleans were
+already shared singletons (TRUE_OBJ/FALSE_OBJ) — no per-element allocation
+existed to remove. btree/hashmap don't use list indexing (structs/maps), so
+flat as expected. All outputs verified bit-identical to the boxed build and to
+the 16-byte fallback; golden 97/97, GC_STRESS+ASan and incremental-barrier
+gates clean. Next: Stage-2 JIT (for/index/if/float) turns index access into a
+direct machine-code load on this unboxed storage — that is where sieve moves.
+
 ## JIT is LIVE (RFC-026 Stage 2) — 2026-07-25
 
 The baseline JIT is now wired into the VM: a hot loop (≥50 back-edges) is

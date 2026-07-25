@@ -288,10 +288,10 @@ inline ObjPtr makeMathModule() {
         double total = 1;
         long long totalInt = 1;
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            if (!isNumeric(e)) return makeError("prod() only works with numbers", line);
-            if (e->type() == ObjectType::FLOAT) allInt = false;
-            total *= asDouble(e);
-            if (e->type() == ObjectType::INTEGER) totalInt *= static_cast<IntegerObject*>(e.get())->value;
+            if (!e.isNumber()) return makeError("prod() only works with numbers", line);
+            if (e.isFloat()) allInt = false;
+            total *= e.asDouble();
+            if (e.isInt()) totalInt *= e.asInt();   // exact int64 (boxed or inline)
         }
         if (allInt) return makeObj<IntegerObject>(totalInt);
         return makeObj<FloatObject>(total);

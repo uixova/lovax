@@ -59,8 +59,8 @@ inline ObjPtr makeCanvasModule() {
         auto b = makeObj<ListObject>();
         auto col = makeObj<ListObject>();
         for (long long i = 0; i < w * h; ++i) {
-            b->elements.push_back(makeObj<StringObject>(" "));
-            col->elements.push_back(makeObj<StringObject>("white"));
+            b->elements.push_back(Value::object(makeObj<StringObject>(" ")));
+            col->elements.push_back(Value::object(makeObj<StringObject>("white")));
         }
         c->set(strKey("buf"), b);
         c->set(strKey("col"), col);
@@ -70,8 +70,8 @@ inline ObjPtr makeCanvasModule() {
         long long w = CanvasImpl::dim(c, "w"), h = CanvasImpl::dim(c, "h");
         if (x < 0 || y < 0 || x >= w || y >= h) return;
         long long idx = y * w + x;
-        static_cast<StringObject*>(CanvasImpl::cbuf(c)->elements[idx].get())->value = ch;
-        static_cast<StringObject*>(CanvasImpl::ccol(c)->elements[idx].get())->value = color;
+        static_cast<StringObject*>(CanvasImpl::cbuf(c)->elements[idx].asObj())->value = ch;
+        static_cast<StringObject*>(CanvasImpl::ccol(c)->elements[idx].asObj())->value = color;
     };
     // put(canvas, x, y, char[, color])
     def("put", [putCell](const Args& args, int line, const CallFn&) -> ObjPtr {
@@ -201,9 +201,9 @@ inline ObjPtr makeCanvasModule() {
         for (long long y = 0; y < h; ++y) {
             for (long long x = 0; x < w; ++x) {
                 long long i = y * w + x;
-                const std::string& ch = static_cast<StringObject*>(b->elements[i].get())->value;
+                const std::string& ch = static_cast<StringObject*>(b->elements[i].asObj())->value;
                 if (tty) {
-                    const std::string& cn = static_cast<StringObject*>(col->elements[i].get())->value;
+                    const std::string& cn = static_cast<StringObject*>(col->elements[i].asObj())->value;
                     auto it = CanvasImpl::colorCodes().find(cn);
                     if (it != CanvasImpl::colorCodes().end()) out += "\033[1;" + it->second + "m" + ch + "\033[0m";
                     else out += ch;
