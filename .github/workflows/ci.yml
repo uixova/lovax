@@ -107,8 +107,14 @@ jobs:
       - name: Embed / FFI bridge gate
         run: ./tests/embed.sh
 
-      # RFC-024: the 8-byte NaN-boxed Value and the 16-byte fallback (and
-      # computed-goto vs switch) must be observationally identical — differential
-      # over every golden + generated int64/boxed-int edge programs.
-      - name: Differential gate (8B vs 16B vs switch)
+      # RFC-024/026: the 8-byte NaN-boxed Value, the 16-byte fallback, switch
+      # dispatch, AND the JIT-on/JIT-off pair must all be observationally
+      # identical — differential over every golden + generated int64/boxed-int
+      # edge programs + JIT-targeted integer while-loops.
+      - name: Differential gate (8B vs 16B vs switch vs JIT)
         run: ./tests/differential.sh
+
+      # RFC-026: the x86-64 encoder (behavioural + objdump) and the baseline
+      # region code generator, proven in isolation.
+      - name: JIT gate (assembler + codegen)
+        run: ./tests/jit_asm.sh

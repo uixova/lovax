@@ -1,5 +1,35 @@
 # Cross-language benchmark
 
+## JIT is LIVE (RFC-026 Stage 2) — 2026-07-25
+
+The baseline JIT is now wired into the VM: a hot loop (≥50 back-edges) is
+compiled to x86-64 and run in machine code. Default on where it is compiled in
+(NaN-box + x86-64); `--no-jit` disables it, `--jit-stats` reports activity.
+
+Correctness contract, proven: golden 97/97 with JIT ON is bit-identical to the
+interpreter, and the differential harness runs every program JIT-on vs JIT-off
+(110 programs) with identical output.
+
+Measured on an all-integer `while` loop (1,000,000 iterations):
+
+| | time |
+|---|---:|
+| interpreter (`--no-jit`) | 67 ms |
+| **JIT** | **22 ms** |
+
+**3.0× end-to-end** (includes startup + the interpreted warm-up before the
+threshold), same result.
+
+**Honest scope:** this Stage-2 JIT compiles integer `while`-loops (locals,
+globals, int arithmetic, comparisons, jumps). It does NOT yet handle `for`
+loops (iterator opcodes), array indexing, `if/else` branches, floats or calls —
+those regions fall back to the interpreter cleanly (a float loop bails and is
+blacklisted; an unsupported opcode simply is never compiled). So the
+cross-language table below — whose workloads use `for`, indexing and floats —
+is UNCHANGED by the JIT for now. Closing that gap is Stage 2 expansion
+(if/index/for) and Stage 3 (calls, for fib), plus the separately-identified
+unboxed-list-storage work.
+
 ## v1.0.1 — 10 workloads, 6 runtimes (2026-07-24)
 
 Best of 5, external wall-clock (startup included), same machine. **Every

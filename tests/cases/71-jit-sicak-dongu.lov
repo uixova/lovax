@@ -1,0 +1,34 @@
+# A hot integer while-loop the baseline JIT compiles and runs in machine code.
+# Output must be bit-identical to the interpreter (the JIT correctness contract);
+# run under --no-jit it must produce the same lines.
+fn compute(n):
+    set acc = 0
+    set i = 0
+    while i < n:
+        acc = acc + (i * 7 + 3) % 101
+        acc = acc & 16777215
+        i = i + 1
+    return acc
+say compute(100)
+say compute(1000)
+say compute(100000)
+
+# nested hot loops + bit ops
+set total = 0
+set y = 0
+while y < 400:
+    set x = 0
+    while x < 400:
+        total = total + ((x ^ y) & 255) - (x % 7)
+        x = x + 1
+    y = y + 1
+say total
+
+# a loop that occasionally overflows the 47-bit inline range (boxing path bails
+# to the interpreter, result still exact)
+set big = 70000000000000
+set k = 0
+while k < 50:
+    big = big + big % 1000
+    k = k + 1
+say big

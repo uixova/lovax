@@ -24,10 +24,12 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 #include <unordered_map>
 #include "emit_x64.hpp"
 #include "mcode.hpp"
+#include "disasm.hpp"          // instrLength / opOperands (shared bytecode walk)
 #include "../vm/chunk.hpp"
 
 namespace Lovax {
@@ -49,6 +51,7 @@ struct Region {
     JitFn fn = nullptr;
     void* code = nullptr;
     size_t codeSize = 0;
+    size_t startOff = 0, endOff = 0;   // the bytecode range this covers
 };
 
 // ---- NaN-box constants mirrored for codegen (must match src/vm/value.hpp) ----
@@ -365,6 +368,22 @@ inline bool RegionCompiler::compile() {
     a.jmp(epilogue);
     emitEpilogue();
     return true;
+}
+
+// Compile [start,end) and finalize it into callable, W^X-safe machine code.
+// Returns a Region with fn==nullptr if the range is not compilable.
+inline Region compileRegion(const Chunk& c, size_t start, size_t end) {
+    Region r;
+    RegionCompiler rc(c, start, end);
+    if (!rc.compile()) return r;
+    void* p = mcodeAlloc(rc.a.size());
+    if (!p) return r;
+    std::memcpy(p, rc.a.data(), rc.a.size());
+    if (!mcodeFinalize(p, rc.a.size())) { mcodeRelease(p, rc.a.size()); return r; }
+    r.fn = reinterpret_cast<JitFn>(p);
+    r.code = p; r.codeSize = rc.a.size();
+    r.startOff = start; r.endOff = end;
+    return r;
 }
 
 } // namespace Jit
