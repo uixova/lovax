@@ -71,7 +71,7 @@ inline ObjPtr makeTextModule() {
             size_t i = 0;
             while (i < s.size()) {
                 int len = utf8CharLen(static_cast<unsigned char>(s[i]));
-                list->elements.push_back(makeObj<StringObject>(s.substr(i, len)));
+                list->elements.push_back(Value::object(makeObj<StringObject>(s.substr(i, len))));
                 i += len;
             }
             return list;
@@ -80,10 +80,10 @@ inline ObjPtr makeTextModule() {
         while (true) {
             size_t found = s.find(sep, pos);
             if (found == std::string::npos) {
-                list->elements.push_back(makeObj<StringObject>(s.substr(pos)));
+                list->elements.push_back(Value::object(makeObj<StringObject>(s.substr(pos))));
                 break;
             }
-            list->elements.push_back(makeObj<StringObject>(s.substr(pos, found - pos)));
+            list->elements.push_back(Value::object(makeObj<StringObject>(s.substr(pos, found - pos))));
             pos = found + sep.size();
         }
         return list;
@@ -100,7 +100,7 @@ inline ObjPtr makeTextModule() {
         std::string out;
         for (size_t i = 0; i < els.size(); ++i) {
             if (i > 0) out += sep;
-            out += els[i]->inspect();
+            out += valueInspect(els[i]);
         }
         return makeObj<StringObject>(out);
     });
@@ -293,11 +293,11 @@ inline ObjPtr makeTextModule() {
         auto out = makeObj<ListObject>();
         std::string cur;
         for (size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == '\n') { out->elements.push_back(makeObj<StringObject>(cur)); cur.clear(); }
+            if (s[i] == '\n') { out->elements.push_back(Value::object(makeObj<StringObject>(cur))); cur.clear(); }
             else if (s[i] == '\r') { /* skip */ }
             else cur += s[i];
         }
-        out->elements.push_back(makeObj<StringObject>(cur));
+        out->elements.push_back(Value::object(makeObj<StringObject>(cur)));
         return out;
     });
     // capitalize(text): first letter upper, rest lower (Turkish-aware)
@@ -349,13 +349,13 @@ inline ObjPtr makeTextModule() {
         GcRoot _gr(out.get());
         size_t pos = sep.empty() ? std::string::npos : t.find(sep);
         if (pos == std::string::npos) {
-            out->elements.push_back(makeObj<StringObject>(t));
-            out->elements.push_back(makeObj<StringObject>(""));
-            out->elements.push_back(makeObj<StringObject>(""));
+            out->elements.push_back(Value::object(makeObj<StringObject>(t)));
+            out->elements.push_back(Value::object(makeObj<StringObject>("")));
+            out->elements.push_back(Value::object(makeObj<StringObject>("")));
         } else {
-            out->elements.push_back(makeObj<StringObject>(t.substr(0, pos)));
-            out->elements.push_back(makeObj<StringObject>(sep));
-            out->elements.push_back(makeObj<StringObject>(t.substr(pos + sep.size())));
+            out->elements.push_back(Value::object(makeObj<StringObject>(t.substr(0, pos))));
+            out->elements.push_back(Value::object(makeObj<StringObject>(sep)));
+            out->elements.push_back(Value::object(makeObj<StringObject>(t.substr(pos + sep.size()))));
         }
         return out;
     });

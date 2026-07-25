@@ -97,12 +97,13 @@ inline void installBuiltins(BuiltinTable& out) {
                                  typeName(args[0]->type()) + "", line);
             }
             for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-                if (e->type() != ObjectType::STRING && e->type() != ObjectType::INTEGER &&
-                    e->type() != ObjectType::BOOLEAN) {
+                ObjPtr eo = toObject(e);   // element goes INTO the set (boxed anyway)
+                if (eo->type() != ObjectType::STRING && eo->type() != ObjectType::INTEGER &&
+                    eo->type() != ObjectType::BOOLEAN) {
                     return makeError("Set elements must be string, int or bool; got " +
-                                     typeName(e->type()) + "", line);
+                                     typeName(eo->type()) + "", line);
                 }
-                out->set(e, TRUE_OBJ);
+                out->set(eo, TRUE_OBJ);
             }
         }
         return out;
@@ -136,11 +137,11 @@ inline void installBuiltins(BuiltinTable& out) {
             const auto& els = static_cast<ListObject*>(args[0].get())->elements;
             data.reserve(els.size());
             for (const auto& e : els) {
-                if (e->type() != ObjectType::INTEGER) {
+                if (!e.isInt()) {   // read-only: use the unboxed Value directly, no alloc
                     return makeError("bytes() list elements must be integers 0-255, got " +
-                                     typeName(e->type()) + "", line);
+                                     valueTypeName(e) + "", line);
                 }
-                long long v = static_cast<IntegerObject*>(e.get())->value;
+                long long v = e.asInt();
                 if (v < 0 || v > 255) {
                     return makeError("bytes() values must be 0-255, got " + std::to_string(v), line);
                 }
@@ -178,8 +179,8 @@ inline void installBuiltins(BuiltinTable& out) {
         if (args[0]->type() != ObjectType::LIST) {
             return makeError("push() expects a list as its first argument, got " + typeName(args[0]->type()) + "", line);
         }
-        gcShade(args[1].get());   // write barrier (RFC-023)
-        static_cast<ListObject*>(args[0].get())->elements.push_back(args[1]);
+        gcShade(args[1].get());   // write barrier (RFC-023): the stored value
+        static_cast<ListObject*>(args[0].get())->elements.push_back(fromObject(args[1]));
         return args[0];
     });
 
@@ -191,9 +192,9 @@ inline void installBuiltins(BuiltinTable& out) {
         }
         auto* list = static_cast<ListObject*>(args[0].get());
         if (list->elements.empty()) return makeError("pop() cannot be called on an empty list", line);
-        auto last = list->elements.back();
+        Value last = list->elements.back();
         list->elements.pop_back();
-        return last;
+        return toObject(last);   // returned to the builtin world -> box
     });
 
     // --- remove(list, index) or remove(map, key): deletes the element ---
@@ -210,9 +211,9 @@ inline void installBuiltins(BuiltinTable& out) {
             if (idx < 0 || idx >= n) {
                 return makeError("remove() index out of range: " + std::to_string(idx) + " (length " + std::to_string(n) + ")", line);
             }
-            auto removed = list->elements[idx];
+            Value removed = list->elements[idx];
             list->elements.erase(list->elements.begin() + idx);
-            return removed;
+            return toObject(removed);   // returned to the builtin world -> box
         }
         if (args[0]->type() == ObjectType::MAP || args[0]->type() == ObjectType::SET) {
             auto* map = static_cast<MapObject*>(args[0].get());
@@ -234,7 +235,7 @@ inline void installBuiltins(BuiltinTable& out) {
             auto* si = static_cast<StructInstanceObject*>(args[0].get());
             auto list = makeObj<ListObject>();
             GcRoot _grsk(list.get());
-            for (const auto& f : si->shape->fieldNames) list->elements.push_back(f);
+            for (const auto& f : si->shape->fieldNames) list->elements.push_back(Value::object(f));
             return list;
         }
         if (args[0]->type() != ObjectType::MAP) {
@@ -243,7 +244,7 @@ inline void installBuiltins(BuiltinTable& out) {
         auto list = makeObj<ListObject>();
         GcRoot _gr202(list.get());
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
-            list->elements.push_back(e.first);
+            list->elements.push_back(fromObject(e.first));
         }
         return list;
     });
@@ -255,14 +256,14 @@ inline void installBuiltins(BuiltinTable& out) {
             auto* si = static_cast<StructInstanceObject*>(args[0].get());
             auto list = makeObj<ListObject>();
             GcRoot _grsv(list.get());
-            for (const auto& s : si->slots) list->elements.push_back(s);
+            for (const auto& s : si->slots) list->elements.push_back(fromObject(s));
             return list;
         }
         if (args[0]->type() == ObjectType::SET) {
             auto list = makeObj<ListObject>();
             GcRoot _grsetv(list.get());
             for (const auto& e : static_cast<SetObject*>(args[0].get())->entries) {
-                list->elements.push_back(e.first);
+                list->elements.push_back(fromObject(e.first));
             }
             return list;
         }
@@ -272,7 +273,7 @@ inline void installBuiltins(BuiltinTable& out) {
         auto list = makeObj<ListObject>();
         GcRoot _gr215(list.get());
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
-            list->elements.push_back(e.second);
+            list->elements.push_back(fromObject(e.second));
         }
         return list;
     });
@@ -332,7 +333,8 @@ inline void installBuiltins(BuiltinTable& out) {
         const Args* argsPtr = &rawArgs;
         Args expanded;
         if (rawArgs.size() == 1 && rawArgs[0]->type() == ObjectType::LIST) {
-            expanded = static_cast<ListObject*>(rawArgs[0].get())->elements;
+            for (const auto& e : static_cast<ListObject*>(rawArgs[0].get())->elements)
+                expanded.push_back(toObject(e));   // reuse the ObjPtr min/max logic below
             if (expanded.empty()) {
                 return makeError(std::string(isMin ? "min" : "max") + "() cannot be called with an empty list", line);
             }
@@ -467,8 +469,9 @@ inline void installBuiltins(BuiltinTable& out) {
             return boolObj(s.find(sub) != std::string::npos);
         }
         if (args[0]->type() == ObjectType::LIST || args[0]->type() == ObjectType::TUPLE) {
+            Value needle = fromObject(args[1]);
             for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-                if (objectEquals(e, args[1])) return TRUE_OBJ;
+                if (valueEquals(e, needle)) return TRUE_OBJ;
             }
             return FALSE_OBJ;
         }
@@ -493,8 +496,9 @@ inline void installBuiltins(BuiltinTable& out) {
         }
         if (args[0]->type() == ObjectType::LIST || args[0]->type() == ObjectType::TUPLE) {
             const auto& els = static_cast<ListObject*>(args[0].get())->elements;
+            Value needle = fromObject(args[1]);
             for (size_t i = 0; i < els.size(); ++i) {
-                if (objectEquals(els[i], args[1])) return makeObj<IntegerObject>((long long)i);
+                if (valueEquals(els[i], needle)) return makeObj<IntegerObject>((long long)i);
             }
             return makeObj<IntegerObject>(-1);
         }
@@ -571,17 +575,17 @@ inline void installBuiltins(BuiltinTable& out) {
         if (els.empty()) return args[0];
         bool allNum = true, allStr = true;
         for (const auto& e : els) {
-            if (!isNumeric(e)) allNum = false;
-            if (e->type() != ObjectType::STRING) allStr = false;
+            if (!e.isNumber()) allNum = false;
+            if (!(e.isObj() && e.asObj()->type() == ObjectType::STRING)) allStr = false;
         }
         if (allNum) {
-            std::stable_sort(els.begin(), els.end(), [](const ObjPtr& a, const ObjPtr& b) {
-                return asDouble(a) < asDouble(b);
+            std::stable_sort(els.begin(), els.end(), [](const Value& a, const Value& b) {
+                return a.asDouble() < b.asDouble();
             });
         } else if (allStr) {
-            std::stable_sort(els.begin(), els.end(), [](const ObjPtr& a, const ObjPtr& b) {
-                return static_cast<StringObject*>(a.get())->value <
-                       static_cast<StringObject*>(b.get())->value;
+            std::stable_sort(els.begin(), els.end(), [](const Value& a, const Value& b) {
+                return static_cast<StringObject*>(a.asObj())->value <
+                       static_cast<StringObject*>(b.asObj())->value;
             });
         } else {
             return makeError("sort() cannot sort mixed types (all numbers or all strings; "
@@ -600,15 +604,16 @@ inline void installBuiltins(BuiltinTable& out) {
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return args[0];
 
-        std::vector<std::pair<ObjPtr, ObjPtr>> keyed; // (key, element)
+        std::vector<std::pair<ObjPtr, Value>> keyed; // (key, element) — element stays unboxed
         keyed.reserve(els.size());
         bool allNum = true, allStr = true;
         // Keys computed by the callback aren't on the value stack; root them so a
-        // collection during a later callback can't free earlier keys.
+        // collection during a later callback can't free earlier keys. (The elements
+        // themselves stay reachable via els, which is args[0] on the arg stack.)
         Heap& h = Heap::get();
         size_t rb = h.tempRoots.size();
         for (const auto& e : els) {
-            auto key = call(args[1], {e}, line);
+            auto key = call(args[1], {toObject(e)}, line);
             if (isError(key)) { h.tempRoots.resize(rb); return key; }
             h.tempRoots.push_back(key.get());
             if (!isNumeric(key)) allNum = false;
@@ -620,7 +625,7 @@ inline void installBuiltins(BuiltinTable& out) {
             return makeError("sort_by() keys must be all numbers or all strings", line);
         }
         std::stable_sort(keyed.begin(), keyed.end(),
-            [allNum](const std::pair<ObjPtr, ObjPtr>& a, const std::pair<ObjPtr, ObjPtr>& b) {
+            [allNum](const std::pair<ObjPtr, Value>& a, const std::pair<ObjPtr, Value>& b) {
                 if (allNum) return asDouble(a.first) < asDouble(b.first);
                 return static_cast<StringObject*>(a.first.get())->value <
                        static_cast<StringObject*>(b.first.get())->value;
@@ -645,10 +650,10 @@ inline void installBuiltins(BuiltinTable& out) {
         double total = 0;
         long long totalInt = 0;
         for (const auto& e : els) {
-            if (!isNumeric(e)) return makeError("sum() only works with a list of numbers", line);
-            if (e->type() == ObjectType::FLOAT) allInt = false;
-            total += asDouble(e);
-            if (e->type() == ObjectType::INTEGER) totalInt += static_cast<IntegerObject*>(e.get())->value;
+            if (!e.isNumber()) return makeError("sum() only works with a list of numbers", line);
+            if (e.isFloat()) allInt = false;
+            total += e.asDouble();
+            if (e.isInt()) totalInt += e.asInt();   // exact int64 (boxed or inline)
         }
         if (allInt) return makeObj<IntegerObject>(totalInt);
         return makeObj<FloatObject>(total);
@@ -663,7 +668,7 @@ inline void installBuiltins(BuiltinTable& out) {
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         for (size_t i = 0; i < els.size(); ++i) {
-            auto r = call(args[1], {els[i]}, line);
+            auto r = call(args[1], {toObject(els[i])}, line);
             if (isError(r)) return r;
         }
         return NULL_OBJ_;
@@ -680,9 +685,9 @@ inline void installBuiltins(BuiltinTable& out) {
         auto out = makeObj<ListObject>();
         GcRoot _gr592(out.get());
         for (const auto& e : els) {
-            auto r = call(args[1], {e}, line);
+            auto r = call(args[1], {toObject(e)}, line);
             if (isError(r)) return r;
-            if (objectTruthy(r)) out->elements.push_back(e);
+            if (objectTruthy(r)) out->elements.push_back(e);   // keep original unboxed element
         }
         return out;
     });
@@ -699,9 +704,9 @@ inline void installBuiltins(BuiltinTable& out) {
         GcRoot _gr609(out.get());
         out->elements.reserve(els.size());
         for (const auto& e : els) {
-            auto r = call(args[1], {e}, line);
+            auto r = call(args[1], {toObject(e)}, line);
             if (isError(r)) return r;
-            out->elements.push_back(r);
+            out->elements.push_back(fromObject(r));
         }
         return out;
     });
@@ -779,7 +784,7 @@ inline void installBuiltins(BuiltinTable& out) {
                              " (length " + std::to_string(n) + ")", line);
         }
         gcShade(args[2].get());   // write barrier (RFC-023)
-        els.insert(els.begin() + idx, args[2]);
+        els.insert(els.begin() + idx, fromObject(args[2]));
         return args[0];
     });
 
@@ -828,9 +833,9 @@ inline void installBuiltins(BuiltinTable& out) {
         for (size_t i = 0; i < els.size(); ++i) {
             auto pair = makeObj<ListObject>();
             GcRoot _gr726(pair.get());
-            pair->elements.push_back(makeObj<IntegerObject>((long long)i));
+            pair->elements.push_back(Value::integer((long long)i));
             pair->elements.push_back(els[i]);
-            out->elements.push_back(pair);
+            out->elements.push_back(Value::object(pair));
         }
         return out;
     });
@@ -851,7 +856,7 @@ inline void installBuiltins(BuiltinTable& out) {
             GcRoot _gr745(pair.get());
             pair->elements.push_back(la[i]);
             pair->elements.push_back(lb[i]);
-            out->elements.push_back(pair);
+            out->elements.push_back(Value::object(pair));
         }
         return out;
     });
@@ -862,7 +867,7 @@ inline void installBuiltins(BuiltinTable& out) {
             return makeError("all() expects a list", line);
         }
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            if (!objectTruthy(e)) return FALSE_OBJ;
+            if (!valueTruthy(e)) return FALSE_OBJ;
         }
         return TRUE_OBJ;
     });
@@ -873,7 +878,7 @@ inline void installBuiltins(BuiltinTable& out) {
             return makeError("any() expects a list", line);
         }
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            if (objectTruthy(e)) return TRUE_OBJ;
+            if (valueTruthy(e)) return TRUE_OBJ;
         }
         return FALSE_OBJ;
     });
@@ -891,15 +896,15 @@ inline void installBuiltins(BuiltinTable& out) {
         if (els.empty()) return copy;
         bool allNum = true, allStr = true;
         for (const auto& e : els) {
-            if (!isNumeric(e)) allNum = false;
-            if (e->type() != ObjectType::STRING) allStr = false;
+            if (!e.isNumber()) allNum = false;
+            if (!(e.isObj() && e.asObj()->type() == ObjectType::STRING)) allStr = false;
         }
         if (allNum) std::stable_sort(els.begin(), els.end(),
-            [](const ObjPtr& a, const ObjPtr& b) { return asDouble(a) < asDouble(b); });
+            [](const Value& a, const Value& b) { return a.asDouble() < b.asDouble(); });
         else if (allStr) std::stable_sort(els.begin(), els.end(),
-            [](const ObjPtr& a, const ObjPtr& b) {
-                return static_cast<StringObject*>(a.get())->value <
-                       static_cast<StringObject*>(b.get())->value; });
+            [](const Value& a, const Value& b) {
+                return static_cast<StringObject*>(a.asObj())->value <
+                       static_cast<StringObject*>(b.asObj())->value; });
         else return makeError("sorted() cannot sort mixed types (all numbers or all strings)", line);
         return copy;
     });
@@ -916,10 +921,10 @@ inline void installBuiltins(BuiltinTable& out) {
         if (args.size() == 3) { acc = args[2]; }
         else {
             if (els.empty()) return makeError("reduce() of an empty list needs an initial value", line);
-            acc = els[0]; start = 1;
+            acc = toObject(els[0]); start = 1;
         }
         for (size_t i = start; i < els.size(); ++i) {
-            acc = call(args[1], {acc, els[i]}, line);
+            acc = call(args[1], {acc, toObject(els[i])}, line);
             if (isError(acc)) return acc;
         }
         return acc;
@@ -930,13 +935,13 @@ inline void installBuiltins(BuiltinTable& out) {
         if (args.size() != 1 || (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE)) return makeError("first() expects a list", line);
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError("first() of an empty list", line);
-        return els.front();
+        return toObject(els.front());
     });
     def("last", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || (args[0]->type() != ObjectType::LIST && args[0]->type() != ObjectType::TUPLE)) return makeError("last() expects a list", line);
         auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError("last() of an empty list", line);
-        return els.back();
+        return toObject(els.back());
     });
 
     // flat(list): flattens one level of nesting
@@ -945,8 +950,8 @@ inline void installBuiltins(BuiltinTable& out) {
         auto out = makeObj<ListObject>();
         GcRoot _gr838(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            if (e->type() == ObjectType::LIST) {
-                for (const auto& inner : static_cast<ListObject*>(e.get())->elements)
+            if (e.isObj() && e.asObj()->type() == ObjectType::LIST) {
+                for (const auto& inner : static_cast<ListObject*>(e.asObj())->elements)
                     out->elements.push_back(inner);
             } else out->elements.push_back(e);
         }
@@ -960,7 +965,7 @@ inline void installBuiltins(BuiltinTable& out) {
         GcRoot _gr851(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
             bool seen = false;
-            for (const auto& k : out->elements) if (objectEquals(k, e)) { seen = true; break; }
+            for (const auto& k : out->elements) if (valueEquals(k, e)) { seen = true; break; }
             if (!seen) out->elements.push_back(e);
         }
         return out;
@@ -998,9 +1003,9 @@ inline void installBuiltins(BuiltinTable& out) {
         for (const auto& e : static_cast<MapObject*>(args[0].get())->entries) {
             auto pair = makeObj<ListObject>();
             GcRoot _gr881(pair.get());
-            pair->elements.push_back(e.first);
-            pair->elements.push_back(e.second);
-            out->elements.push_back(pair);
+            pair->elements.push_back(fromObject(e.first));
+            pair->elements.push_back(fromObject(e.second));
+            out->elements.push_back(Value::object(pair));
         }
         return out;
     });
@@ -1011,16 +1016,17 @@ inline void installBuiltins(BuiltinTable& out) {
         auto out = makeObj<MapObject>();
         GcRoot _gr892(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            if (e->type() != ObjectType::LIST ||
-                static_cast<ListObject*>(e.get())->elements.size() != 2) {
+            if (!(e.isObj() && e.asObj()->type() == ObjectType::LIST) ||
+                static_cast<ListObject*>(e.asObj())->elements.size() != 2) {
                 return makeError("to_map() expects each entry to be a [key, value] pair", line);
             }
-            auto& p = static_cast<ListObject*>(e.get())->elements;
-            if (p[0]->type() != ObjectType::STRING && p[0]->type() != ObjectType::INTEGER &&
-                p[0]->type() != ObjectType::BOOLEAN) {
+            auto& p = static_cast<ListObject*>(e.asObj())->elements;
+            ObjPtr k = toObject(p[0]);   // key goes into the map (boxed anyway)
+            if (k->type() != ObjectType::STRING && k->type() != ObjectType::INTEGER &&
+                k->type() != ObjectType::BOOLEAN) {
                 return makeError("to_map() keys must be string, int or bool", line);
             }
-            out->set(p[0], p[1]);
+            out->set(k, toObject(p[1]));
         }
         return out;
     });
@@ -1034,15 +1040,16 @@ inline void installBuiltins(BuiltinTable& out) {
         }
         const auto& els = static_cast<ListObject*>(args[0].get())->elements;
         if (els.empty()) return makeError(fname + "() of an empty list", line);
-        ObjPtr best = els[0];
-        auto bestKey = call(args[1], {els[0]}, line);
+        ObjPtr best = toObject(els[0]);
+        auto bestKey = call(args[1], {best}, line);
         if (isError(bestKey)) return bestKey;
         for (size_t i = 1; i < els.size(); ++i) {
-            auto key = call(args[1], {els[i]}, line);
+            ObjPtr elem = toObject(els[i]);
+            auto key = call(args[1], {elem}, line);
             if (isError(key)) return key;
             if (!isNumeric(key) || !isNumeric(bestKey)) return makeError(fname + "() keys must be numbers", line);
             bool better = wantMin ? (asDouble(key) < asDouble(bestKey)) : (asDouble(key) > asDouble(bestKey));
-            if (better) { best = els[i]; bestKey = key; }
+            if (better) { best = elem; bestKey = key; }
         }
         return best;
     };
@@ -1058,7 +1065,7 @@ inline void installBuiltins(BuiltinTable& out) {
         auto out = makeObj<MapObject>();
         GcRoot _gr938(out.get());
         for (const auto& e : static_cast<ListObject*>(args[0].get())->elements) {
-            auto key = call(args[1], {e}, line);
+            auto key = call(args[1], {toObject(e)}, line);
             if (isError(key)) return key;
             if (key->type() != ObjectType::STRING && key->type() != ObjectType::INTEGER &&
                 key->type() != ObjectType::BOOLEAN) {
@@ -1090,7 +1097,7 @@ inline void installBuiltins(BuiltinTable& out) {
         while (lo <= hi) {
             long long mid = (lo + hi) / 2;
             int c;
-            if (!cmp(els[mid], args[1], c)) return makeError("binary_search() needs a uniformly typed sorted list", line);
+            if (!cmp(toObject(els[mid]), args[1], c)) return makeError("binary_search() needs a uniformly typed sorted list", line);
             if (c == 0) return makeObj<IntegerObject>(mid);
             if (c < 0) lo = mid + 1; else hi = mid - 1;
         }

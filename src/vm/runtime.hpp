@@ -81,7 +81,7 @@ namespace Runtime {
                 return makeError("list index out of range: " + idx->inspect() +
                                  " (length " + std::to_string(n) + ")", line);
             }
-            return list->elements[i];
+            return toObject(list->elements[i]);   // unboxed store -> box at builtin boundary
         }
 
         if (obj->type() == ObjectType::MAP) {
@@ -147,7 +147,7 @@ namespace Runtime {
                 return makeError("tuple index out of range: " + idx->inspect() +
                                  " (length " + std::to_string(n) + ")", line);
             }
-            return tup->elements[i];
+            return toObject(tup->elements[i]);   // unboxed store -> box at builtin boundary
         }
 
         return makeError("indexing only works on list, map and string; got " +
@@ -220,8 +220,9 @@ namespace Runtime {
             switch (right->type()) {
                 case ObjectType::LIST:
                 case ObjectType::TUPLE: {
+                    Value lv = fromObject(left);
                     for (const auto& e : static_cast<ListObject*>(right.get())->elements) {
-                        if (objectEquals(e, left)) return TRUE_OBJ;
+                        if (valueEquals(e, lv)) return TRUE_OBJ;
                     }
                     return FALSE_OBJ;
                 }

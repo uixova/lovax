@@ -714,7 +714,7 @@ private:
                 int extra = argc - fixed;
                 auto rest = makeObj<ListObject>();
                 GcRoot rr(rest.get());
-                for (int i = extra - 1; i >= 0; --i) rest->elements.push_back(toObject(peek(i)));
+                for (int i = extra - 1; i >= 0; --i) rest->elements.push_back(peek(i));
                 sp_ -= extra;
                 push(Value::object(rest));
                 argc = proto.paramCount;
@@ -1427,9 +1427,10 @@ private:
                 VM_CASE(LIST) {
                     uint16_t n = readU16();
                     auto list = makeObj<ListObject>();
-                    GcRoot lr(list.get());   // boxing int elements allocates -> GC
                     list->elements.reserve(n);
-                    for (int i = n - 1; i >= 0; --i) list->elements.push_back(toObject(peek(i)));
+                    // Elements are UNBOXED Values now — a stack slot copies straight
+                    // in, no per-element boxing, so this loop never allocates.
+                    for (int i = n - 1; i >= 0; --i) list->elements.push_back(peek(i));
                     sp_ -= n;
                     push(Value::object(list));
                     VM_NEXT;
@@ -1437,9 +1438,8 @@ private:
                 VM_CASE(TUPLE) {
                     uint16_t n = readU16();
                     auto tup = makeObj<TupleObject>();
-                    GcRoot tr(tup.get());    // boxing int elements allocates -> GC
                     tup->elements.reserve(n);
-                    for (int i = n - 1; i >= 0; --i) tup->elements.push_back(toObject(peek(i)));
+                    for (int i = n - 1; i >= 0; --i) tup->elements.push_back(peek(i));
                     sp_ -= n;
                     push(Value::object(tup));
                     VM_NEXT;
@@ -1473,7 +1473,7 @@ private:
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
-                            push(fromObject(list->elements[i]));
+                            push(list->elements[i]);   // unboxed: direct Value, no alloc
                             VM_NEXT;
                         }
                     }
@@ -1491,7 +1491,7 @@ private:
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
-                            push(fromObject(list->elements[i]));
+                            push(list->elements[i]);   // unboxed: direct Value, no alloc
                             VM_NEXT;
                         }
                     }
@@ -1509,9 +1509,8 @@ private:
                         long long n = (long long)list->elements.size();
                         if (i < 0) i += n;
                         if (i >= 0 && i < n) {
-                            auto nv = toObject(val);
-                            gcShade(nv.get());          // write barrier (RFC-023)
-                            list->elements[i] = nv;
+                            gcShadeValue(val);          // write barrier (RFC-023): shade carried ptr
+                            list->elements[i] = val;    // unboxed: direct Value, no alloc
                             VM_NEXT;
                         }
                     }
@@ -1797,7 +1796,7 @@ private:
                         case IterObject::Kind::LIST: {
                             auto* list = static_cast<ListObject*>(iter->source.get());
                             if (iter->index >= (long long)list->elements.size()) done = true;
-                            else { second = fromObject(list->elements[iter->index]);
+                            else { second = list->elements[iter->index];   // unboxed
                                    first = Value::integer(iter->index); iter->index++; }
                             break;
                         }
@@ -1945,7 +1944,7 @@ private:
                                            " target(s) but value has " +
                                            std::to_string(list->elements.size()), currentLine()));
                     }
-                    for (uint16_t i = 0; i < n; ++i) push(fromObject(list->elements[i]));
+                    for (uint16_t i = 0; i < n; ++i) push(list->elements[i]);   // unboxed
                     VM_NEXT;
                 }
                 VM_CASE(SLICE) {
@@ -2186,8 +2185,9 @@ private:
                 return makeError("list index out of range: " + idx->inspect() +
                                  " (length " + std::to_string(n) + ")", line);
             }
-            gcShade(val.get());                          // write barrier (RFC-023)
-            list->elements[i] = val;
+            Value nv = fromObject(val);
+            gcShadeValue(nv);                            // write barrier (RFC-023)
+            list->elements[i] = nv;
             return nullptr;
         }
         if (obj->type() == ObjectType::MAP) {

@@ -26,9 +26,9 @@ static void testObjectEquals() {
     auto b = makeObj<FloatObject>(5.0);
     CHECK(objectEquals(a, b));           // 5 == 5.0 across types
     auto t1 = makeObj<TupleObject>();
-    t1->elements.push_back(makeObj<IntegerObject>(1));
+    t1->elements.push_back(Value::integer(1));   // elements are unboxed Values now
     auto l1 = makeObj<ListObject>();
-    l1->elements.push_back(makeObj<IntegerObject>(1));
+    l1->elements.push_back(Value::integer(1));
     CHECK(!objectEquals(Ref<Object>(t1.get()), Ref<Object>(l1.get()))); // tuple != list
 }
 

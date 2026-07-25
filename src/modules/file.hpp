@@ -104,7 +104,7 @@ inline ObjPtr makeFileModule() {
         std::string ln;
         while (std::getline(f, ln)) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-            list->elements.push_back(makeObj<StringObject>(ln));
+            list->elements.push_back(Value::object(makeObj<StringObject>(ln)));
         }
         return list;
     });
@@ -147,7 +147,7 @@ inline ObjPtr makeFileModule() {
         std::sort(names.begin(), names.end());
         auto list = makeObj<ListObject>();
         for (const auto& n : names) {
-            list->elements.push_back(makeObj<StringObject>(n));
+            list->elements.push_back(Value::object(makeObj<StringObject>(n)));
         }
         return list;
     });
@@ -232,10 +232,10 @@ inline ObjPtr makeFileModule() {
         const auto& els = static_cast<ListObject*>(args[1].get())->elements;
         buf.reserve(els.size());
         for (const auto& e : els) {
-            if (e->type() != ObjectType::INTEGER) {
+            if (!e.isInt()) {
                 return makeError("write_bytes() elements must be integers (0-255)", line);
             }
-            long long v = static_cast<IntegerObject*>(e.get())->value;
+            long long v = e.asInt();
             if (v < 0 || v > 255) {
                 return makeError("write_bytes() byte out of range: " + std::to_string(v), line);
             }
@@ -276,12 +276,12 @@ inline ObjPtr makeFileModule() {
         char sc = sep[0];
 
         auto pushCell = [&]() {
-            row->elements.push_back(makeObj<StringObject>(cell));
+            row->elements.push_back(Value::object(makeObj<StringObject>(cell)));
             cell.clear();
         };
         auto pushRow = [&]() {
             pushCell();
-            rows->elements.push_back(row);
+            rows->elements.push_back(Value::object(row));
             row = makeObj<ListObject>();
         };
 
@@ -334,13 +334,13 @@ inline ObjPtr makeFileModule() {
         std::ofstream f(path, std::ios::binary);
         if (!f.is_open()) return makeError("cannot write file: " + path, line);
         for (const auto& rowObj : static_cast<ListObject*>(args[1].get())->elements) {
-            if (rowObj->type() != ObjectType::LIST) {
+            if (!(rowObj.isObj() && rowObj.asObj()->type() == ObjectType::LIST)) {
                 return makeError("write_csv() every row must be a list", line);
             }
-            const auto& cells = static_cast<ListObject*>(rowObj.get())->elements;
+            const auto& cells = static_cast<ListObject*>(rowObj.asObj())->elements;
             for (size_t i = 0; i < cells.size(); ++i) {
                 if (i > 0) f << sep;
-                f << csvQuote(cells[i]->inspect(), sep);
+                f << csvQuote(valueInspect(cells[i]), sep);
             }
             f << "\n";
         }
@@ -417,14 +417,14 @@ inline ObjPtr makeFileModule() {
         for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
             std::string name = entry.path().filename().string();
             if (wild(pat.c_str(), name.c_str())) {
-                out->elements.push_back(makeObj<StringObject>(entry.path().string()));
+                out->elements.push_back(Value::object(makeObj<StringObject>(entry.path().string())));
             }
         }
         if (ec) return makeError("file.glob() cannot read directory: " + dir, line);
         std::sort(out->elements.begin(), out->elements.end(),
-                  [](const ObjPtr& a, const ObjPtr& b) {
-                      return static_cast<StringObject*>(a.get())->value <
-                             static_cast<StringObject*>(b.get())->value;
+                  [](const Value& a, const Value& b) {
+                      return static_cast<StringObject*>(a.asObj())->value <
+                             static_cast<StringObject*>(b.asObj())->value;
                   });
         return out;
     });
@@ -444,14 +444,14 @@ inline ObjPtr makeFileModule() {
              it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
             if (it->is_regular_file(ec)) {
-                out->elements.push_back(makeObj<StringObject>(it->path().string()));
+                out->elements.push_back(Value::object(makeObj<StringObject>(it->path().string())));
                 if (++count > 100000) return makeError("file.walk() too many files (limit 100k)", line);
             }
         }
         std::sort(out->elements.begin(), out->elements.end(),
-                  [](const ObjPtr& a, const ObjPtr& b) {
-                      return static_cast<StringObject*>(a.get())->value <
-                             static_cast<StringObject*>(b.get())->value;
+                  [](const Value& a, const Value& b) {
+                      return static_cast<StringObject*>(a.asObj())->value <
+                             static_cast<StringObject*>(b.asObj())->value;
                   });
         return out;
     });

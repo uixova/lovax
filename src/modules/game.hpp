@@ -82,7 +82,7 @@ inline ObjPtr makeGameModule() {
         }
         auto* l = static_cast<ListObject*>(args[0].get());
         if (l->elements.empty()) return makeError("pick() cannot pick from an empty list", line);
-        return l->elements[(size_t)rngBounded(l->elements.size())];
+        return toObject(l->elements[(size_t)rngBounded(l->elements.size())]);
     });
 
     // pick_weighted({"sword": 5, "gem": 1}): picks a key by weight (loot tables!)

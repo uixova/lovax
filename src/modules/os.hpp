@@ -83,7 +83,7 @@ inline ObjPtr makeOsModule() {
         if (!args.empty()) return argCountError("args", "0", args.size(), line);
         auto list = makeObj<ListObject>();
         for (const auto& a : scriptArgs()) {
-            list->elements.push_back(makeObj<StringObject>(a));
+            list->elements.push_back(Value::object(makeObj<StringObject>(a)));
         }
         return list;
     });
