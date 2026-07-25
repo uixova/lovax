@@ -12,24 +12,28 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 echo "building variants..."
-$CXX -o "$TMP/nanbox" src/main.cpp                          # default: 8B NaN-box, computed-goto
-$CXX -DLOVAX_NO_NANBOX -o "$TMP/box16" src/main.cpp         # 16B tagged union
+$CXX -o "$TMP/nanbox" src/main.cpp                          # default: 8B NaN-box, computed-goto, JIT on
+$CXX -DLOVAX_NO_NANBOX -o "$TMP/box16" src/main.cpp         # 16B tagged union (no JIT there)
 $CXX -DLOVAX_NO_COMPUTED_GOTO -o "$TMP/nocg" src/main.cpp   # switch dispatch
 
-run() { out=$("$1" "$2" 2>&1); printf '%s|%s' "$?" "$out"; }
+run() { out=$("$1" "${@:2}" 2>&1); printf '%s|%s' "$?" "$out"; }
 fail=0; n=0
 
 diffcheck() { # file
     n=$((n+1))
-    local a b c
-    a=$(run "$TMP/nanbox" "$1")
+    local a b c j
+    a=$(run "$TMP/nanbox" "$1")               # JIT on (default)
     b=$(run "$TMP/box16"  "$1")
     c=$(run "$TMP/nocg"   "$1")
+    j=$(run "$TMP/nanbox" --no-jit "$1")      # same binary, JIT off — the key axis
     if [ "$a" != "$b" ]; then
         echo "DIVERGENCE 8B vs 16B: $1"; diff <(printf '%s' "$a") <(printf '%s' "$b") | head -12; fail=1
     fi
     if [ "$a" != "$c" ]; then
         echo "DIVERGENCE CG vs NOCG: $1"; diff <(printf '%s' "$a") <(printf '%s' "$c") | head -12; fail=1
+    fi
+    if [ "$a" != "$j" ]; then
+        echo "DIVERGENCE JIT-on vs JIT-off: $1"; diff <(printf '%s' "$a") <(printf '%s' "$j") | head -12; fail=1
     fi
 }
 
@@ -66,6 +70,32 @@ EOF
 for i in 0 1 2 3 17 99 1000 65535 1000000; do
     gen "$i" > "$TMP/g.lov"
     diffcheck "$TMP/g.lov"
+done
+
+echo "== JIT-targeted int while-loops (must equal interpreter exactly) =="
+genloop() { # index -> an all-integer while loop the baseline JIT WILL compile
+    local k=$1
+    cat <<EOF
+fn run(n):
+    set acc = 0
+    set i = 0
+    while i < n:
+        acc = acc + (i * $k + 7) % 13
+        acc = acc & 1048575
+        i = i + 1
+    return acc
+say run(200000)
+set b = 0
+set j = 0
+while j < 100000:
+    b = b + j - $k
+    j = j + 1
+say b
+EOF
+}
+for k in 1 3 7 99 1234; do
+    genloop "$k" > "$TMP/l.lov"
+    diffcheck "$TMP/l.lov"
 done
 
 echo

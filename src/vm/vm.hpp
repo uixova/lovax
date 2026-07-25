@@ -20,6 +20,14 @@
 #include "../evaluator/stdlib.hpp"
 #include "../utils/colors.hpp"
 
+// The baseline JIT needs the 8-byte NaN-box layout (its codegen assumes 8-byte
+// strides everywhere) and an x86-64 backend. On anything else the interpreter
+// runs alone — LOVAX_JIT_ACTIVE simply stays undefined.
+#if defined(LOVAX_NANBOX) && (defined(__x86_64__) || defined(_M_X64)) && !defined(LOVAX_NO_JIT)
+#define LOVAX_JIT_ACTIVE 1
+#include "../jit/compile.hpp"
+#endif
+
 // The Lovax virtual machine: a stack-based bytecode interpreter with
 // computed-goto dispatch, closed upvalues, and immediate numeric values.
 // Object-typed operations reuse the exact runtime semantics (and error
@@ -524,6 +532,21 @@ public:
 private:
     GlobalTable globalsTable_;
     std::vector<Value> globals_;
+
+#ifdef LOVAX_JIT_ACTIVE
+public:
+    // --no-jit / --jit toggle (default on where the JIT is compiled in). Public
+    // so the CLI can flip it before running.
+    bool jitEnabled_ = true;
+    size_t jitCompiled_ = 0, jitDead_ = 0, jitEnters_ = 0;   // --jit-stats
+private:
+    static constexpr int JIT_THRESHOLD = 50;   // loop back-edges before we compile
+    static constexpr int JIT_MAX_BAILS = 8;    // consecutive guard-bails -> blacklist
+    struct JitEntry { int count = 0; Jit::Region region; int bails = 0; bool dead = false; };
+    // Keyed by the loop-head instruction pointer: stable for the life of a Proto
+    // (bytecode is immutable after compilation), unique per loop.
+    std::unordered_map<const uint8_t*, JitEntry> jitTable_;
+#endif
     std::vector<uint8_t> globalDefined_;
     // Raw-pointer stack: no vector bookkeeping, no destructor churn in the hot
     // loop. Popped slots keep stale values until overwritten — harmless, and the
@@ -1180,7 +1203,56 @@ private:
                     if (!valueTruthy(pop())) ip += d;
                     VM_NEXT_FAST;
                 }
-                VM_CASE(LOOP) { uint16_t d = readU16(); ip -= d; gcSafepoint(); VM_NEXT; }
+                VM_CASE(LOOP) {
+                    uint16_t d = readU16();
+                    const uint8_t* afterLoop = ip;   // just past the LOOP instruction
+                    ip -= d;                          // jump to the loop head
+#ifdef LOVAX_JIT_ACTIVE
+                    // Enter the JIT only with no GC pending (the compiled code
+                    // allocates nothing, so once inside, gcPending can never turn
+                    // true) and only for main-frame code (module globals resolve
+                    // through a different table the region compiler doesn't model).
+                    if (jitEnabled_ && !gcPending &&
+                        frame->closure->moduleGlobals == nullptr) {
+                        JitEntry& e = jitTable_[ip];
+                        if (e.region.fn) {
+                            Jit::JitCtx ctx;
+                            ctx.slots = stackAt(frame->base + 1);
+                            ctx.sp = sp_;
+                            ctx.globals = globals_.data();
+                            ctx.consts = frame->consts;
+                            ctx.globalDefined = globalDefined_.data();
+                            int64_t resume = e.region.fn(&ctx);
+                            sp_ = ctx.sp;
+                            ip = frame->chunk->code.data() + (size_t)resume;
+                            jitEnters_++;
+                            // A return inside the region is a guard bail; one at or
+                            // past the end means the loop ran to completion. Only
+                            // CONSISTENT bailing blacklists (a full run resets it),
+                            // so a rarely-overflowing loop is not thrown away.
+                            if ((size_t)resume < e.region.endOff) {
+                                if (++e.bails >= JIT_MAX_BAILS) {
+                                    Jit::mcodeRelease(e.region.code, e.region.codeSize);
+                                    e.region.fn = nullptr; e.dead = true; jitDead_++;
+                                }
+                            } else {
+                                e.bails = 0;
+                            }
+                            gcSafepoint();
+                            VM_NEXT;
+                        }
+                        if (!e.dead && ++e.count >= JIT_THRESHOLD) {
+                            size_t headOff = (size_t)(ip - frame->chunk->code.data());
+                            size_t endOff  = (size_t)(afterLoop - frame->chunk->code.data());
+                            e.region = Jit::compileRegion(*frame->chunk, headOff, endOff);
+                            if (e.region.fn) jitCompiled_++;
+                            else e.dead = true;   // unsupported opcode in range; never retry
+                        }
+                    }
+#endif
+                    gcSafepoint();
+                    VM_NEXT;
+                }
                 VM_CASE(AND_KEEP) {
                     uint16_t d = readU16();
                     if (!valueTruthy(peek())) ip += d;
