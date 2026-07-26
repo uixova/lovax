@@ -179,6 +179,48 @@ public:
         pokeReg(0, RAX);              // overwrite lhs with the result
     }
 
+    // ---- numeric ADD/SUB/MUL: int fast path, then a float path, else bail ----
+    // op: 0=add 1=sub 2=mul. Keeps the pure-int case at two tag compares + inline
+    // integer math; two floats go through SSE2 (the Value bytes ARE the double);
+    // a mixed or non-numeric pair bails to the interpreter.
+    void numBinary(int op, size_t off) {
+        peekReg(RAX, 1);                       // lhs
+        peekReg(RSI, 0);                       // rhs
+        Label tryFloat, done;
+        a.movRR(RCX, RAX); a.shrRI(RCX, JIT_TAG_SHIFT);
+        a.cmpRI(RCX, (int32_t)JIT_TOP17_INT); a.jcc(NE, tryFloat);
+        a.movRR(RCX, RSI); a.shrRI(RCX, JIT_TAG_SHIFT);
+        a.cmpRI(RCX, (int32_t)JIT_TOP17_INT); a.jcc(NE, tryFloat);
+        // both int
+        unboxInt(RAX); unboxInt(RSI);
+        if (op == 0) a.addRR(RAX, RSI);
+        else if (op == 1) a.subRR(RAX, RSI);
+        else a.imulRR(RAX, RSI);
+        boxInt(RAX, off);
+        a.subRI(R_SP, 8);
+        pokeReg(0, RAX);
+        a.jmp(done);
+        // both float? a value is a float iff it is NOT tagged: (v & TAGS) != TAGS
+        a.bind(tryFloat);
+        a.movAbs(RDX, JIT_TAGS);
+        a.movRR(RCX, RAX); a.andRR(RCX, RDX); a.cmpRR(RCX, RDX);
+        { Label ok; a.jcc(NE, ok); bailTo(off); a.bind(ok); }
+        a.movRR(RCX, RSI); a.andRR(RCX, RDX); a.cmpRR(RCX, RDX);
+        { Label ok; a.jcc(NE, ok); bailTo(off); a.bind(ok); }
+        a.movsdXM(XMM0, R_SP, -16);            // lhs double (depth 1)
+        a.movsdXM(XMM1, R_SP, -8);             // rhs double (depth 0)
+        if (op == 0) a.addsd(XMM0, XMM1);
+        else if (op == 1) a.subsd(XMM0, XMM1);
+        else a.mulsd(XMM0, XMM1);
+        // a NaN result would need the write-time canonicalisation the interpreter
+        // does (raw x86 NaN can land in the tag range) — bail on it instead.
+        a.ucomisd(XMM0, XMM0);
+        { Label ok; a.jcc(NP, ok); bailTo(off); a.bind(ok); }
+        a.subRI(R_SP, 8);
+        a.movsdMX(R_SP, -8, XMM0);             // result replaces lhs, rhs consumed
+        a.bind(done);
+    }
+
     // ---- immediate arithmetic on the stack top, in place (ADD_I/SUB_I/...) ----
     void immArith(int op, int16_t k, size_t off) {
         peekReg(RAX, 0);
@@ -357,9 +399,9 @@ inline bool RegionCompiler::compile() {
                 break;
             }
 
-            case Op::ADD: case Op::ADD_INPLACE: intBinary(0, off); break;
-            case Op::SUB:      intBinary(1, off); break;
-            case Op::MUL:      intBinary(2, off); break;
+            case Op::ADD: case Op::ADD_INPLACE: numBinary(0, off); break;
+            case Op::SUB:      numBinary(1, off); break;
+            case Op::MUL:      numBinary(2, off); break;
             case Op::BIT_AND:  intBinary(3, off); break;
             case Op::BIT_OR:   intBinary(4, off); break;
             case Op::BIT_XOR:  intBinary(5, off); break;
@@ -388,18 +430,41 @@ inline bool RegionCompiler::compile() {
             case Op::GREATER_JF: case Op::GREATER_EQ_JF: {
                 uint16_t d = rdU16(off + 1);
                 size_t target = next + d;             // taken when the test is FALSE
-                peekReg(RAX, 1); guardInt(RAX, off);
-                peekReg(RSI, 0); guardInt(RSI, off, RDX);
+                // int uses signed conditions; float (via ucomisd) uses the
+                // unsigned ones — "keep" = the condition-TRUE case (fall through).
+                Cond intKeep = op == Op::LESS_JF ? L : op == Op::LESS_EQ_JF ? LE
+                             : op == Op::GREATER_JF ? G : GE;
+                Cond fltKeep = op == Op::LESS_JF ? B : op == Op::LESS_EQ_JF ? BE
+                             : op == Op::GREATER_JF ? A : AE;
+                peekReg(RAX, 1); peekReg(RSI, 0);
+                Label tryFloat, after;
+                a.movRR(RCX, RAX); a.shrRI(RCX, JIT_TAG_SHIFT);
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_INT); a.jcc(NE, tryFloat);
+                a.movRR(RCX, RSI); a.shrRI(RCX, JIT_TAG_SHIFT);
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_INT); a.jcc(NE, tryFloat);
+                // both int: signed compare
                 unboxInt(RAX); unboxInt(RSI);
-                a.subRI(R_SP, 16);                    // both operands consumed
+                a.subRI(R_SP, 16);
                 a.cmpRR(RAX, RSI);
-                Cond keep = op == Op::LESS_JF       ? L
-                          : op == Op::LESS_EQ_JF    ? LE
-                          : op == Op::GREATER_JF    ? G : GE;
-                Label fall;
-                a.jcc(keep, fall);                    // condition true -> fall through
-                branchTo(target);
-                a.bind(fall);
+                { Label fall; a.jcc(intKeep, fall); branchTo(target); a.bind(fall); }
+                a.jmp(after);
+                // both float? (else bail)
+                a.bind(tryFloat);
+                a.movAbs(RDX, JIT_TAGS);
+                a.movRR(RCX, RAX); a.andRR(RCX, RDX); a.cmpRR(RCX, RDX);
+                { Label ok; a.jcc(NE, ok); bailTo(off); a.bind(ok); }
+                a.movRR(RCX, RSI); a.andRR(RCX, RDX); a.cmpRR(RCX, RDX);
+                { Label ok; a.jcc(NE, ok); bailTo(off); a.bind(ok); }
+                a.movsdXM(XMM0, R_SP, -16); a.movsdXM(XMM1, R_SP, -8);
+                a.ucomisd(XMM0, XMM1);
+                { Label ok; a.jcc(NP, ok); bailTo(off); a.bind(ok); }   // NaN -> interpreter
+                // subRI would clobber the ucomisd flags, so branch FIRST and
+                // consume the two operands on each path afterwards.
+                { Label fall;
+                  a.jcc(fltKeep, fall);
+                  a.subRI(R_SP, 16); branchTo(target);
+                  a.bind(fall); a.subRI(R_SP, 16); }
+                a.bind(after);
                 break;
             }
 

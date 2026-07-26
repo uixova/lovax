@@ -32,7 +32,7 @@ enum Xmm : int {
 // Condition codes (the low nibble of the jcc/setcc opcode).
 enum Cond : int {
     O = 0x0, NO = 0x1, B = 0x2, AE = 0x3, E = 0x4, NE = 0x5, BE = 0x6, A = 0x7,
-    S = 0x8, NS = 0x9, L = 0xC, GE = 0xD, LE = 0xE, G = 0xF
+    S = 0x8, NS = 0x9, P = 0xA, NP = 0xB, L = 0xC, GE = 0xD, LE = 0xE, G = 0xF
 };
 
 // A forward/backward branch target. Bind it once; every jump to it is patched.
@@ -166,6 +166,11 @@ public:
         u8(0xF2); rex(false, d, s); u8(0x0F); u8(op); modrmReg(d, s);
     }
     void addsd(Xmm d, Xmm s) { sseRR(0x58, d, s); }
+    void subsd(Xmm d, Xmm s) { sseRR(0x5C, d, s); }
+    void mulsd(Xmm d, Xmm s) { sseRR(0x59, d, s); }
+    void ucomisd(Xmm d, Xmm s) {                            // 66 0F 2E /r (sets ZF/PF/CF)
+        u8(0x66); rex(false, d, s); u8(0x0F); u8(0x2E); modrmReg(d, s);
+    }
     void cvtsi2sd(Xmm d, Reg s) {                           // F2 REX.W 0F 2A /r
         u8(0xF2); rex(true, d, s); u8(0x0F); u8(0x2A); modrmReg(d, s);
     }

@@ -141,6 +141,40 @@ int main(int argc, char** argv) {
         CHECK(f && f() == 0xFFFFFFFF2AFFFF00ull, "movMI8 single-byte store");
     }
 
+    // 4c. SSE2 doubles: mulsd / subsd / addsd through memory, plus ucomisd +
+    //     setcc for a float comparison. Bit patterns are compared exactly.
+    {
+        auto bits = [](double d){ unsigned long long u; std::memcpy(&u,&d,8); return u; };
+        Asm a;
+        a.pushR(RBP); a.movRR(RBP, RSP); a.subRI(RSP, 48);
+        a.movAbs(RAX, bits(2.5)); a.movMR(RBP, -8,  RAX);
+        a.movAbs(RAX, bits(4.0)); a.movMR(RBP, -16, RAX);
+        a.movAbs(RAX, bits(1.0)); a.movMR(RBP, -24, RAX);
+        a.movsdXM(XMM0, RBP, -8); a.movsdXM(XMM1, RBP, -16);
+        a.mulsd(XMM0, XMM1);                 // 2.5 * 4.0 = 10.0
+        a.movsdXM(XMM1, RBP, -24);
+        a.subsd(XMM0, XMM1);                 // 10.0 - 1.0 = 9.0
+        a.movsdMX(RBP, -32, XMM0);
+        a.movRM(RAX, RBP, -32);
+        a.movRR(RSP, RBP); a.popR(RBP); a.ret();
+        auto f = build<unsigned long long(*)()>(a);
+        CHECK(f && f() == bits(9.0), "mulsd + subsd => 9.0");
+    }
+    {
+        auto bits = [](double d){ unsigned long long u; std::memcpy(&u,&d,8); return u; };
+        Asm a;
+        a.pushR(RBP); a.movRR(RBP, RSP); a.subRI(RSP, 32);
+        a.movAbs(RAX, bits(5.0)); a.movMR(RBP, -8,  RAX);
+        a.movAbs(RAX, bits(3.0)); a.movMR(RBP, -16, RAX);
+        a.movsdXM(XMM0, RBP, -8); a.movsdXM(XMM1, RBP, -16);
+        a.ucomisd(XMM0, XMM1);               // compare 5.0 vs 3.0
+        a.movAbs(RAX, 0);
+        a.setcc(A, RAX);                     // RAX = (5.0 > 3.0) ? 1 : 0  (unsigned A)
+        a.movRR(RSP, RBP); a.popR(RBP); a.ret();
+        auto f = build<long long(*)()>(a);
+        CHECK(f && f() == 1, "ucomisd + setcc A (5.0 > 3.0)");
+    }
+
     // 5. backward branch loop: sum 1..n  (labels, jcc, cmp)
     {
         Asm a;

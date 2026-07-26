@@ -1,0 +1,54 @@
+# Stage-2 JIT float path: SSE2 add/sub/mul and float comparisons inside hot
+# loops, mixed with integer counters. Output must be bit-identical to the
+# interpreter (JIT correctness contract); --no-jit must match line for line.
+
+# float accumulation + float compare that resets (exercises both branches)
+fn wander(n):
+    set x = 0.0
+    set hits = 0
+    set i = 0
+    while i < n:
+        x = x * 1.001 + 0.5
+        if x > 50.0:
+            x = x - 50.0
+            hits = hits + 1
+        i = i + 1
+    return hits
+say wander(100000)
+
+# a tiny Mandelbrot-style escape loop: float mul/sub/add + float compare + int
+fn escapes(steps):
+    set cx = -0.7
+    set cy = 0.27
+    set x = 0.0
+    set y = 0.0
+    set i = 0
+    set count = 0
+    while i < steps:
+        set xx = x * x
+        set yy = y * y
+        if xx + yy > 4.0:
+            x = 0.0
+            y = 0.0
+        else:
+            count = count + 1
+        set xt = xx - yy + cx
+        y = 2.0 * x * y + cy
+        x = xt
+        i = i + 1
+    return count
+say escapes(100000)
+
+# float running product (mul only) compared against a threshold
+fn grow(n):
+    set p = 1.0
+    set resets = 0
+    set i = 0
+    while i < n:
+        p = p * 1.01
+        if p >= 1000.0:
+            p = 1.0
+            resets = resets + 1
+        i = i + 1
+    return resets
+say grow(50000)
