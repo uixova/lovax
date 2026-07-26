@@ -121,6 +121,26 @@ int main(int argc, char** argv) {
         CHECK(f && f(100, 23) == 123, "mem [rsp+0] / [rbp-8] round-trip");
     }
 
+    // 4b. movMI8 writes exactly one byte (globalDefined flag) — must not clobber
+    //     the neighbouring bytes of the qword it lands in.
+    {
+        Asm a;
+        a.pushR(RBP);
+        a.movRR(RBP, RSP);
+        a.subRI(RSP, 16);
+        a.movAbs(RAX, 0xFFFFFFFFFFFFFFFFull);
+        a.movMR(RBP, -8, RAX);      // fill 8 bytes with 0xFF
+        a.movMI8(RBP, -8, 0x00);    // clear only the lowest byte
+        a.movMI8(RBP, -5, 0x2A);    // set byte 3 (RBP-8 + 3) to 0x2A
+        a.movRM(RAX, RBP, -8);      // read the qword back
+        a.movRR(RSP, RBP);
+        a.popR(RBP);
+        a.ret();
+        auto f = build<unsigned long long(*)()>(a);
+        // little-endian: byte0 (RBP-8) cleared, byte3 (RBP-5)=0x2A, rest 0xFF
+        CHECK(f && f() == 0xFFFFFFFF2AFFFF00ull, "movMI8 single-byte store");
+    }
+
     // 5. backward branch loop: sum 1..n  (labels, jcc, cmp)
     {
         Asm a;

@@ -1,5 +1,36 @@
 # Cross-language benchmark
 
+## JIT Stage-2 expansion: index / if / for — 2026-07-26
+
+The baseline JIT now compiles list indexing (`INDEX_GET`/`INDEX_SET`),
+conditionals (`JUMP_IF_FALSE`), `for … in range()` (`FOR_NEXT`, range fast
+path), the `nil`/`true`/`false` literals and top-level `set` (`DEFINE_GLOBAL`).
+Index access is where the unboxed storage (previous section) pays off in machine
+code: a bounds check then a direct 8-byte `Value` load/store, no boxing.
+`INDEX_SET` only stores an immediate (int/float/bool/nil) in compiled code — a
+value carrying a pointer bails to the interpreter, so no write barrier is ever
+needed inside the region. Non-list objects, maps/strings, negative or
+out-of-range indices, and non-range iterators all bail cleanly.
+
+JIT-on vs JIT-off, same binary, same session, best-of-5 (the controlled A/B for
+the JIT itself):
+
+| bench | JIT off | JIT on | speedup |
+|-------|--------:|-------:|--------:|
+| sieve | 498 | **233** | **2.1×** |
+| qsort | 582 | **286** | **2.0×** |
+
+Correctness held throughout: golden 98/98 bit-identical with JIT on, differential
+111 programs (JIT-on == JIT-off == 16-byte == switch), GC_STRESS+ASan and the
+incremental-barrier gate clean, a plain-ASan JIT-active sweep over the
+index/for/if programs clean (no OOB in the codegen), fuzz 0 crashes, the
+assembler/codegen unit gate green (a new `movMI8` byte-store encoder + test).
+New golden case 72 exercises index/for/if/define-global in hot loops.
+
+**Not yet JIT'd:** float arithmetic (mandel bails and blacklists — its region is
+all-float, which the integer guards reject) and calls (fib; that is Stage 3).
+Those are the remaining gaps.
+
 ## Unboxed list storage — Lovax before/after (2026-07-25)
 
 `ListObject::elements` changed from `std::vector<Ref<Object>>` (one heap object

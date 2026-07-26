@@ -43,19 +43,6 @@ static Chunk buildLoopChunk() {
     return c;                                // region = [0, 41)
 }
 
-static Region compileRegion(const Chunk& c, size_t start, size_t end) {
-    RegionCompiler rc(c, start, end);
-    Region r;
-    if (!rc.compile()) return r;
-    void* p = mcodeAlloc(rc.a.size());
-    if (!p) return r;
-    std::memcpy(p, rc.a.data(), rc.a.size());
-    if (!mcodeFinalize(p, rc.a.size())) return r;
-    r.code = p; r.codeSize = rc.a.size();
-    r.fn = reinterpret_cast<JitFn>(p);
-    return r;
-}
-
 int main() {
     std::printf("== JIT baseline codegen (isolated) ==\n");
     Chunk c = buildLoopChunk();

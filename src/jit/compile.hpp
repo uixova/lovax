@@ -32,6 +32,15 @@
 #include "disasm.hpp"          // instrLength / opOperands (shared bytecode walk)
 #include "../vm/chunk.hpp"
 
+// The codegen bakes member offsets of the GC object types (ListObject,
+// IterObject, RangeObject, Object) into machine code. These are polymorphic
+// (single-inheritance, one vtable) so offsetof is only "conditionally
+// supported" by the standard, but every mainstream ABI — and the one we target
+// — lays them out exactly as offsetof reports; the golden suite proves the
+// values bit-for-bit. Silence the pedantic warning here only.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+
 namespace Lovax {
 namespace Jit {
 
@@ -58,7 +67,15 @@ struct Region {
 static constexpr uint64_t JIT_TAGS      = 0xFFF8000000000000ull;
 static constexpr uint64_t JIT_PAYLOAD   = 0x00007FFFFFFFFFFFull;
 static constexpr int      JIT_TAG_SHIFT = 47;
+// top17 == (TAGS | tag<<47) >> 47 == 0x1FFF0 | tag, matching value.hpp's tags
+// (T_NIL=1 .. T_BOXINT=6). A float never lands on any of these (its top 13 bits
+// are not all set once NaN is canonicalized).
+static constexpr uint32_t JIT_TOP17_NIL   = 0x1FFF1u;
+static constexpr uint32_t JIT_TOP17_FALSE = 0x1FFF2u;
+static constexpr uint32_t JIT_TOP17_TRUE  = 0x1FFF3u;
 static constexpr uint32_t JIT_TOP17_INT = 0x1FFF4u;   // (TAGS | 4<<47) >> 47
+static constexpr uint32_t JIT_TOP17_OBJ    = 0x1FFF5u;
+static constexpr uint32_t JIT_TOP17_BOXINT = 0x1FFF6u;
 
 class RegionCompiler {
 public:
@@ -204,6 +221,35 @@ public:
         pokeReg(0, RAX);
     }
 
+    // Guard: value in `r` must be a T_OBJ pointing to a LIST; on success `r` is
+    // left holding the Object* (payload). Bails to `off` otherwise. The tag is a
+    // 4-byte enum right after the vtable; its value is < 256, so the low byte
+    // (movzx) equals it — no 32-bit load needed.
+    void guardListPtr(Reg r, size_t off) {
+        a.movRR(RCX, r);
+        a.shrRI(RCX, JIT_TAG_SHIFT);
+        a.cmpRI(RCX, (int32_t)JIT_TOP17_OBJ);
+        Label isObj; a.jcc(E, isObj); bailTo(off); a.bind(isObj);
+        a.movAbs(RDX, JIT_PAYLOAD); a.andRR(r, RDX);          // r = Object*
+        a.movzxRM8(RCX, r, (int32_t)offsetof(Object, tag));
+        a.cmpRI(RCX, (int32_t)(int)ObjectType::LIST);
+        Label isList; a.jcc(E, isList); bailTo(off); a.bind(isList);
+    }
+
+    // Given a ListObject* in `listReg` and an already-unboxed non-negative index
+    // in `idxReg`, leaves the element address in `idxReg` (= data + idx*8) and
+    // bails to `off` if the index is out of bounds. Clobbers RDX (and the
+    // caller-chosen scratch). std::vector layout (libstdc++): [_M_start,
+    // _M_finish, _M_end] — data = *elements, finish = *(elements+8).
+    void listElemAddr(Reg listReg, Reg idxReg, Reg scratch, size_t off) {
+        a.movRM(scratch, listReg, (int32_t)offsetof(ListObject, elements));     // data
+        a.movRM(RDX, listReg, (int32_t)offsetof(ListObject, elements) + 8);     // finish
+        a.shlRI(idxReg, 3);
+        a.addRR(idxReg, scratch);                    // idxReg = element address
+        a.cmpRR(idxReg, RDX);
+        Label ok; a.jcc(B, ok); bailTo(off); a.bind(ok);   // addr >= finish -> OOB
+    }
+
     bool compile();
 };
 
@@ -212,8 +258,9 @@ public:
 inline bool jitSupported(Op op) {
     switch (op) {
         case Op::GET_LOCAL: case Op::SET_LOCAL: case Op::CONST:
+        case Op::NIL: case Op::TRUE_: case Op::FALSE_:
         case Op::POP: case Op::DUP: case Op::CLOSE_UPVALUE:
-        case Op::GET_GLOBAL: case Op::SET_GLOBAL:
+        case Op::GET_GLOBAL: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL:
         case Op::ADD: case Op::SUB: case Op::MUL:
         case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR:
         case Op::ADD_INPLACE:
@@ -222,6 +269,8 @@ inline bool jitSupported(Op op) {
         case Op::LGET2: case Op::LGET_ADD_I: case Op::LGET_SUB_I:
         case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
         case Op::GREATER_EQ_JF:
+        case Op::INDEX_GET: case Op::INDEX_SET: case Op::JUMP_IF_FALSE:
+        case Op::FOR_NEXT:
         case Op::JUMP: case Op::LOOP:
             return true;
         default:
@@ -270,6 +319,9 @@ inline bool RegionCompiler::compile() {
                 pushReg(RAX);
                 break;
             }
+            case Op::NIL:    a.movAbs(RAX, JIT_TAGS | ((uint64_t)1 << JIT_TAG_SHIFT)); pushReg(RAX); break;
+            case Op::FALSE_: a.movAbs(RAX, JIT_TAGS | ((uint64_t)2 << JIT_TAG_SHIFT)); pushReg(RAX); break;
+            case Op::TRUE_:  a.movAbs(RAX, JIT_TAGS | ((uint64_t)3 << JIT_TAG_SHIFT)); pushReg(RAX); break;
             case Op::POP: a.subRI(R_SP, 8); break;
             case Op::DUP: peekReg(RAX, 0); pushReg(RAX); break;
             // Safe as a no-op: the VM refuses to enter a region while any
@@ -293,6 +345,15 @@ inline bool RegionCompiler::compile() {
                     popReg(RAX);
                     a.movMR(R_GLOBALS, (int32_t)s * 8, RAX);
                 }
+                break;
+            }
+
+            case Op::DEFINE_GLOBAL: {
+                uint16_t s = rdU16(off + 1);
+                popReg(RAX);
+                a.movMR(R_GLOBALS, (int32_t)s * 8, RAX);         // globals[s] = value
+                a.movRM(RCX, R_CTX, offsetof(JitCtx, globalDefined));
+                a.movMI8(RCX, (int32_t)s, 1);                    // globalDefined[s] = 1
                 break;
             }
 
@@ -342,6 +403,101 @@ inline bool RegionCompiler::compile() {
                 break;
             }
 
+            // list[idx] read — the unboxed-storage payoff: bounds-checked, then a
+            // direct Value load. Non-list object, non-int/negative index, or OOB
+            // all bail to the interpreter (which handles maps/strings/negatives).
+            case Op::INDEX_GET: {
+                peekReg(RAX, 1);                      // obj
+                guardListPtr(RAX, off);              // RAX = ListObject*
+                peekReg(RSI, 0);                      // idx
+                guardInt(RSI, off, RDX);
+                unboxInt(RSI);
+                a.cmpRI(RSI, 0);
+                { Label ok; a.jcc(GE, ok); bailTo(off); a.bind(ok); }
+                listElemAddr(RAX, RSI, RDI, off);     // RSI = element addr
+                a.movRM(RAX, RSI, 0);                 // the Value
+                a.subRI(R_SP, 8);                     // 2 operands in, 1 result out
+                pokeReg(0, RAX);
+                break;
+            }
+            // list[idx] = value. Only stores an IMMEDIATE value (no carried
+            // pointer) so no write barrier is ever needed; a value holding an
+            // object/boxed-int bails to the interpreter (which shades it).
+            case Op::INDEX_SET: {
+                peekReg(RAX, 2);                      // obj
+                guardListPtr(RAX, off);              // RAX = ListObject*
+                peekReg(RSI, 1);                      // idx
+                guardInt(RSI, off, RDX);
+                unboxInt(RSI);
+                a.cmpRI(RSI, 0);
+                { Label ok; a.jcc(GE, ok); bailTo(off); a.bind(ok); }
+                peekReg(RDI, 0);                      // value
+                a.movRR(RCX, RDI); a.shrRI(RCX, JIT_TAG_SHIFT);
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_OBJ);
+                { Label ok; a.jcc(NE, ok); bailTo(off); a.bind(ok); }
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_BOXINT);
+                { Label ok; a.jcc(NE, ok); bailTo(off); a.bind(ok); }
+                listElemAddr(RAX, RSI, RCX, off);     // RSI = element addr (scratch RCX)
+                a.movMR(RSI, 0, RDI);                 // store the immediate value
+                a.subRI(R_SP, 24);                    // 3 operands in, 0 out
+                break;
+            }
+            case Op::JUMP_IF_FALSE: {
+                uint16_t d = rdU16(off + 1);
+                size_t target = next + d;             // taken when the popped value is falsy
+                popReg(RAX);
+                a.movRR(RCX, RAX); a.shrRI(RCX, JIT_TAG_SHIFT);
+                Label doBranch, fall;
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_NIL);   a.jcc(E, doBranch);
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_FALSE); a.jcc(E, doBranch);
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_TRUE);  a.jcc(E, fall);
+                a.cmpRI(RCX, (int32_t)JIT_TOP17_INT);
+                { Label isInt; a.jcc(E, isInt); bailTo(off); a.bind(isInt); }
+                unboxInt(RAX);                         // int: 0 is falsy
+                a.cmpRI(RAX, 0); a.jcc(E, doBranch);
+                a.jmp(fall);
+                a.bind(doBranch); branchTo(target);
+                a.bind(fall);
+                break;
+            }
+            // for x in range(...): the scalar hot loop. Reads the iterator's
+            // range state directly; anything but a RANGE iterator bails.
+            case Op::FOR_NEXT: {
+                uint8_t flags = chunk.code[off + 1];
+                uint16_t v1 = rdU16(off + 2);
+                uint16_t v2 = rdU16(off + 4);
+                uint16_t exitJump = rdU16(off + 6);
+                bool pair = (flags & 2) != 0;
+                size_t exitTarget = next + exitJump;
+                peekReg(RAX, 0);                       // iterator (stays on stack)
+                a.movAbs(RDX, JIT_PAYLOAD); a.andRR(RAX, RDX);     // IterObject*
+                a.movzxRM8(RCX, RAX, (int32_t)offsetof(IterObject, kind));
+                a.cmpRI(RCX, (int32_t)(int)IterObject::Kind::RANGE);
+                { Label isR; a.jcc(E, isR); bailTo(off); a.bind(isR); }
+                a.movRM(RDI, RAX, (int32_t)offsetof(IterObject, source));   // RangeObject*
+                a.movRM(RSI, RAX, (int32_t)offsetof(IterObject, index));    // current value
+                a.movRM(RDX, RDI, (int32_t)offsetof(RangeObject, step));
+                a.movRM(RCX, RDI, (int32_t)offsetof(RangeObject, end));
+                Label doExit, body, stepNeg, cont;
+                a.cmpRI(RDX, 0);
+                a.jcc(LE, stepNeg);
+                a.cmpRR(RSI, RCX); a.jcc(GE, doExit);              // step>0 && cur>=end
+                a.jmp(body);
+                a.bind(stepNeg);
+                a.cmpRR(RSI, RCX); a.jcc(LE, doExit);              // step<=0 && cur<=end
+                a.bind(body);
+                a.movRR(R8, RSI);                                  // R8 = cur (preserved)
+                a.addRR(RSI, RDX);                                 // index += step
+                a.movMR(RAX, (int32_t)offsetof(IterObject, index), RSI);
+                boxInt(R8, off);                                  // may bail if cur huge
+                a.movMR(R_SLOTS, (int32_t)v1 * 8, R8);
+                if (pair) a.movMR(R_SLOTS, (int32_t)v2 * 8, R8);
+                a.jmp(cont);
+                a.bind(doExit); branchTo(exitTarget);
+                a.bind(cont);
+                break;
+            }
+
             case Op::JUMP: branchTo(next + rdU16(off + 1)); break;
             case Op::LOOP: {
                 size_t target = next - rdU16(off + 1);
@@ -388,5 +544,7 @@ inline Region compileRegion(const Chunk& c, size_t start, size_t end) {
 
 } // namespace Jit
 } // namespace Lovax
+
+#pragma GCC diagnostic pop
 
 #endif // LOVAX_JIT_COMPILE_HPP
