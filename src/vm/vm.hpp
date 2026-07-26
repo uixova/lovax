@@ -110,6 +110,13 @@ public:
     }
 };
 
+#ifdef LOVAX_JIT_ACTIVE
+class VM;
+// C-callable trampoline the JIT's compiled CALL jumps to (address baked at
+// codegen time via Jit::g_jitTrampoline). Defined after VM.
+int64_t lovaxJitTrampolineThunk(void* vm, int64_t argc, int64_t line);
+#endif
+
 class VM {
 public:
     static constexpr int MAX_FRAMES = 500;
@@ -118,6 +125,9 @@ public:
     VM() {
         stackMem_ = std::make_unique<Value[]>(STACK_LIMIT);
         sp_ = stackMem_.get();
+#ifdef LOVAX_JIT_ACTIVE
+        Jit::g_jitTrampoline = &lovaxJitTrampolineThunk;   // bake target for compiled CALL
+#endif
         // Register for GC root scanning + install the collector's root callback once.
         liveVMs().push_back(this);
         Heap::get().markRoots = &VM::markAllRoots;
@@ -542,10 +552,86 @@ public:
 private:
     static constexpr int JIT_THRESHOLD = 50;   // loop back-edges before we compile
     static constexpr int JIT_MAX_BAILS = 8;    // consecutive guard-bails -> blacklist
+    static constexpr int JIT_BODY_THRESHOLD = 10;  // calls before we compile a body
     struct JitEntry { int count = 0; Jit::Region region; int bails = 0; bool dead = false; };
     // Keyed by the loop-head instruction pointer: stable for the life of a Proto
     // (bytecode is immutable after compilation), unique per loop.
     std::unordered_map<const uint8_t*, JitEntry> jitTable_;
+    // Whole-function compiled bodies (Stage 3, for call-heavy / recursive code like
+    // fib) are cached on the Chunk itself (chunk->jitBodyFn) — a pointer check in
+    // the CALL fast path, no per-call hash lookup.
+    Ref<Object> pendingJitError_;   // set when a trampolined call inside a body throws
+    friend int64_t lovaxJitTrampolineThunk(void*, int64_t, int64_t);
+
+    // Runs the compiled body of the current top frame if it has one (compiling it
+    // once it is hot). Advances frame->ip to where the interpreter must resume
+    // (the RETURN it reached, or a mid-body bail). Returns 0 if a body ran, 1 if a
+    // trampolined call inside it errored (pendingJitError_ set), -1 if there is no
+    // body (nothing done). The value stack is a fixed array and frames_ is reserved
+    // to MAX_FRAMES, so the base pointers the compiled code holds stay valid.
+    int jitRunBody() {
+        Frame* fr = &frames_.back();
+        const Chunk* ch = fr->chunk;
+        // The codegen models the plain globals table (R_GLOBALS); a module-bound
+        // closure resolves through a different one, so never run its body compiled.
+        if (!jitEnabled_ || fr->closure->moduleGlobals != nullptr) return -1;
+        if (!ch->jitBodyFn) {
+            if (gcPending || ch->jitBodyDead || ++ch->jitBodyCount < JIT_BODY_THRESHOLD) return -1;
+            Jit::Region reg = Jit::compileRegion(*ch, 0, ch->code.size());
+            if (!reg.fn) { ch->jitBodyDead = true; return -1; }
+            ch->jitBodyFn = (void*)reg.fn;
+            ch->jitBodyCode = reg.code;
+            ch->jitBodyCodeSize = reg.codeSize;
+            jitCompiled_++;
+        }
+        if (gcPending) return -1;   // never enter compiled code with a collection pending
+        Jit::JitCtx ctx;
+        ctx.slots = stackAt(fr->base + 1);
+        ctx.sp = sp_;
+        ctx.globals = globals_.data();
+        ctx.consts = fr->consts;
+        ctx.globalDefined = globalDefined_.data();
+        ctx.vm = this;
+        int64_t resume = reinterpret_cast<Jit::JitFn>(ch->jitBodyFn)(&ctx);
+        sp_ = ctx.sp;
+        jitEnters_++;
+        if (resume < 0) return 1;   // a trampolined call errored
+        fr->ip = ch->code.data() + (size_t)resume;
+        return 0;
+    }
+
+    // The CALL trampoline body (compiled code reaches it via g_jitTrampoline). The
+    // callee + args are already on the value stack; run the call to completion
+    // through the interpreter's own machinery, which re-enters compiled bodies for
+    // the callee (so recursion stays compiled). Result is left on the stack.
+    int64_t jitTrampoline(int argc, int line) {
+        size_t entry = frames_.size();
+        Ref<Object> err = callValue(argc, line);
+        if (err != nullptr && isError(err)) { pendingJitError_ = err; return 1; }
+        if (frames_.size() > entry) {          // a closure frame was pushed
+            int jr = jitRunBody();             // runs its body (recursion stays compiled)
+            if (jr == 1) return 1;             // a nested trampolined call errored
+            if (jr == 0) {
+                // The body ran to a RETURN. Execute it inline instead of spinning
+                // up a full run() — that per-call setup is what made naive
+                // trampolining slower than the interpreter on call-bound code.
+                Frame* fr = &frames_.back();
+                size_t roff = (size_t)(fr->ip - fr->chunk->code.data());
+                if (openUpvalues_.empty() && roff < fr->chunk->code.size() &&
+                    (Op)fr->chunk->code[roff] == Op::RETURN) {
+                    *stackAt(fr->base) = std::move(sp_[-1]);
+                    sp_ = stackAt(fr->base) + 1;
+                    frames_.pop_back();
+                    while (!handlers_.empty() && handlers_.back().frameDepth > frames_.size())
+                        handlers_.pop_back();
+                    return 0;
+                }
+            }
+            Ref<Object> r = run(entry);        // body bailed mid-way (or none) -> interpret
+            if (isError(r)) { pendingJitError_ = r; return 1; }
+        }
+        return 0;   // builtin: callValue already left the result on the stack
+    }
 #endif
     std::vector<uint8_t> globalDefined_;
     // Raw-pointer stack: no vector bookkeeping, no destructor churn in the hot
@@ -1222,10 +1308,12 @@ private:
                             ctx.globals = globals_.data();
                             ctx.consts = frame->consts;
                             ctx.globalDefined = globalDefined_.data();
+                            ctx.vm = this;
                             int64_t resume = e.region.fn(&ctx);
                             sp_ = ctx.sp;
-                            ip = frame->chunk->code.data() + (size_t)resume;
                             jitEnters_++;
+                            if (resume < 0) { VM_THROW(pendingJitError_); }  // trampolined call threw
+                            ip = frame->chunk->code.data() + (size_t)resume;
                             // A return inside the region is a guard bail; one at or
                             // past the end means the loop ran to completion. Only
                             // CONSISTENT bailing blacklists (a full run resets it),
@@ -1285,6 +1373,17 @@ private:
                                                    stackSize() - p.localCount - 1, argc,
                                                    p.chunk.consts.data(), &p.chunk});
                                 syncIn();
+#ifdef LOVAX_JIT_ACTIVE
+                                // Whole-function JIT (Stage 3): run the callee's
+                                // compiled body if it is hot. It leaves ip at the
+                                // RETURN it reached, which the interpreter then
+                                // executes to pop the frame.
+                                {
+                                    int jr = jitRunBody();
+                                    if (jr == 1) { VM_THROW(pendingJitError_); }
+                                    if (jr == 0) { syncIn(); VM_NEXT; }
+                                }
+#endif
                                 VM_NEXT_FAST;
                             }
                         }
@@ -2301,6 +2400,17 @@ private:
         return nullptr;
     }
 };
+
+#ifdef LOVAX_JIT_ACTIVE
+inline int64_t lovaxJitTrampolineThunk(void* ctxp, int64_t argc, int64_t line) {
+    auto* ctx = static_cast<Jit::JitCtx*>(ctxp);
+    VM* vm = static_cast<VM*>(ctx->vm);
+    vm->sp_ = ctx->sp;                                   // sync IN: compiled body's sp
+    int64_t r = vm->jitTrampoline((int)argc, (int)line);
+    ctx->sp = vm->sp_;                                   // sync OUT: result on the stack
+    return r;
+}
+#endif
 
 } // namespace Lovax
 

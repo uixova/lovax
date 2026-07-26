@@ -119,6 +119,16 @@ struct Chunk {
     // so a stale index can only miss, never return a wrong field.
     mutable std::vector<uint32_t> icache;
 
+    // Whole-function JIT (Stage 3): the compiled machine-code body, cached on the
+    // Chunk so the CALL fast path checks a pointer, not a hash map. void* to avoid
+    // a cycle with the JIT headers; set/used only by the VM under LOVAX_JIT_ACTIVE
+    // (jitBodyCode/Size let it release the W^X mapping).
+    mutable void* jitBodyFn = nullptr;
+    mutable void* jitBodyCode = nullptr;
+    mutable size_t jitBodyCodeSize = 0;
+    mutable int jitBodyCount = 0;
+    mutable bool jitBodyDead = false;
+
     uint16_t addIC() {
         icache.push_back(0xFFFFFFFFu);
         return (uint16_t)(icache.size() - 1);

@@ -51,7 +51,20 @@ struct JitCtx {
     Value* globals;        // effective global table base
     const Value* consts;   // chunk constant pool
     const unsigned char* globalDefined;
+    void* vm;              // VM* — the CALL trampoline needs it (Stage 3)
 };
+
+// The CALL trampoline (Stage 3): compiled code calls this to perform a call whose
+// callee + args are already on the value stack, running it to completion through
+// the interpreter's own call machinery (which re-enters compiled bodies). Set by
+// the VM at construction, so codegen can bake its address. Signature:
+//   (JitCtx* ctx, int64_t argc, int64_t line) -> 0 ok (result left on stack), 1 err
+// The thunk syncs ctx->sp <-> vm->sp_ around the nested run, so the GC (which
+// scans up to vm->sp_) sees every live slot the compiled body pushed — otherwise
+// a collection during the call would free them. The value stack is a fixed array
+// (never reallocated) and frames_ is reserved to MAX_FRAMES, so the base pointers
+// the compiled code holds stay valid across the nested run.
+inline int64_t (*g_jitTrampoline)(void*, int64_t, int64_t) = nullptr;
 
 // Returns the bytecode offset to resume at.
 using JitFn = int64_t (*)(JitCtx*);
@@ -105,6 +118,12 @@ public:
     // Leave the region: RAX = bytecode offset the interpreter must resume at.
     void bailTo(size_t bytecodeOff) {
         a.movAbs(RAX, (uint64_t)bytecodeOff);
+        a.jmp(epilogue);
+    }
+    // Leave the region signalling an error: RAX = -1. The interpreter throws its
+    // pending error (a trampolined call failed). Distinct from any real offset.
+    void bailError() {
+        a.movAbs(RAX, (uint64_t)(int64_t)-1);
         a.jmp(epilogue);
     }
     // Guard: value in `r` must be an inline integer, else bail to `off`.
@@ -311,8 +330,11 @@ inline bool jitSupported(Op op) {
         case Op::LGET2: case Op::LGET_ADD_I: case Op::LGET_SUB_I:
         case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
         case Op::GREATER_EQ_JF:
+        case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
+        case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF:
         case Op::INDEX_GET: case Op::INDEX_SET: case Op::JUMP_IF_FALSE:
         case Op::FOR_NEXT:
+        case Op::CALL: case Op::RETURN:
         case Op::JUMP: case Op::LOOP:
             return true;
         default:
@@ -560,6 +582,52 @@ inline bool RegionCompiler::compile() {
                 a.jmp(cont);
                 a.bind(doExit); branchTo(exitTarget);
                 a.bind(cont);
+                break;
+            }
+
+            // pop top, compare (signed int) with an i16 immediate, jump forward
+            // when the comparison is FALSE. Float/object operands bail. subRI runs
+            // BEFORE cmp so it doesn't clobber the compare flags.
+            case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
+            case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF: {
+                int16_t k = (int16_t)rdU16(off + 1);
+                uint16_t d = rdU16(off + 3);
+                size_t target = next + d;
+                peekReg(RAX, 0);
+                guardInt(RAX, off);
+                unboxInt(RAX);
+                a.subRI(R_SP, 8);                    // pop before the compare
+                a.movAbs(RSI, (uint64_t)(int64_t)k);
+                a.cmpRR(RAX, RSI);
+                Cond keep = op == Op::LT_I_JF ? L : op == Op::LE_I_JF ? LE
+                          : op == Op::GT_I_JF ? G : op == Op::GE_I_JF ? GE
+                          : op == Op::EQ_I_JF ? E : NE;   // fall through when TRUE
+                Label fall; a.jcc(keep, fall); branchTo(target); a.bind(fall);
+                break;
+            }
+
+            // RETURN — the compiled body has left its result on the operand
+            // stack; hand back to the interpreter AT the RETURN so it does the
+            // frame pop (frames_ is a vector; the region never touches it).
+            case Op::RETURN: bailTo(off); break;
+
+            // CALL — the callee + args are on the stack. Publish sp, then call
+            // the trampoline (interpreter's own call machinery, which re-enters
+            // compiled bodies), reload sp, and bail-with-error on failure. The
+            // value stack is a fixed array, so R_SLOTS/R_GLOBALS/R_CONSTS (all
+            // callee-saved) survive the nested run.
+            case Op::CALL: {
+                uint8_t argc = chunk.code[off + 1];
+                int line = off < chunk.lines.size() ? chunk.lines[off] : 0;
+                a.movMR(R_CTX, (int32_t)offsetof(JitCtx, sp), R_SP);   // publish sp -> ctx->sp
+                a.movRR(RDI, R_CTX);                                   // arg1 = ctx (has vm+sp)
+                a.movAbs(RSI, (uint64_t)argc);                         // arg2 = argc
+                a.movAbs(RDX, (uint64_t)(int64_t)line);                // arg3 = line
+                a.movAbs(RAX, (uint64_t)(uintptr_t)g_jitTrampoline);
+                a.callR(RAX);
+                a.movRM(R_SP, R_CTX, (int32_t)offsetof(JitCtx, sp));   // reload sp <- ctx->sp
+                a.cmpRI(RAX, 0);
+                { Label ok; a.jcc(E, ok); bailError(); a.bind(ok); }   // error -> throw
                 break;
             }
 

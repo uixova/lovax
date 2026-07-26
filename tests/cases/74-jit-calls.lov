@@ -1,0 +1,58 @@
+# Stage-3 JIT: whole-function compiled bodies + the call trampoline. Recursion,
+# mutual recursion, error propagation through a compiled call, calls returning
+# different types, and a builtin called from a compiled body. Output must be
+# bit-identical to the interpreter; --no-jit must match line for line.
+
+fn fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+say fib(28)
+
+# mutual recursion (two compiled bodies calling each other through the trampoline)
+fn isEven(n):
+    if n == 0:
+        return true
+    return isOdd(n - 1)
+fn isOdd(n):
+    if n == 0:
+        return false
+    return isEven(n - 1)
+say isEven(400), isOdd(400)
+
+# accumulator-style recursion returning a running sum
+fn sumTo(n, acc):
+    if n == 0:
+        return acc
+    return sumTo(n - 1, acc + n)
+say sumTo(400, 0)
+
+# a compiled body that calls a builtin (trampoline dispatches to the builtin path)
+fn build(n):
+    set xs = []
+    set i = 0
+    while i < n:
+        push(xs, i * i)
+        i = i + 1
+    return sum(xs)
+say build(500)
+
+# error thrown inside a recursive compiled body must propagate out cleanly
+fn risky(n):
+    if n == 0:
+        throw error("boom", "hit zero")
+    return risky(n - 1)
+fn guarded(n):
+    try:
+        return risky(n)
+    catch e:
+        return e.kind
+say guarded(50)
+
+# a recursive function whose result overflows the 47-bit inline int range
+# (the ADD boxing path bails to the interpreter mid-body; result stays exact)
+fn power2(n):
+    if n == 0:
+        return 1
+    return power2(n - 1) * 2
+say power2(60)
