@@ -19,17 +19,24 @@ the JIT itself):
 |-------|--------:|-------:|--------:|
 | sieve | 498 | **233** | **2.1×** |
 | qsort | 582 | **286** | **2.0×** |
+| mandel | 135 | **45** | **3.0×** |
 
-Correctness held throughout: golden 98/98 bit-identical with JIT on, differential
-111 programs (JIT-on == JIT-off == 16-byte == switch), GC_STRESS+ASan and the
-incremental-barrier gate clean, a plain-ASan JIT-active sweep over the
-index/for/if programs clean (no OOB in the codegen), fuzz 0 crashes, the
-assembler/codegen unit gate green (a new `movMI8` byte-store encoder + test).
-New golden case 72 exercises index/for/if/define-global in hot loops.
+`mandel` lands via the float path added next: `ADD`/`SUB`/`MUL` and the fused
+comparisons (`LESS_JF` … `GREATER_EQ_JF`) now take an int fast path, then a
+float path (SSE2 — the Value bytes ARE the double: `movsd` load, `addsd`/
+`subsd`/`mulsd`, `ucomisd` compare), else bail. A mixed int/float pair bails
+(the interpreter promotes); a NaN result or unordered compare bails (the
+interpreter does the write-time NaN canonicalisation). New encoder ops
+`subsd`/`mulsd`/`ucomisd` + P/NP conditions, each with a behavioural test.
 
-**Not yet JIT'd:** float arithmetic (mandel bails and blacklists — its region is
-all-float, which the integer guards reject) and calls (fib; that is Stage 3).
-Those are the remaining gaps.
+Correctness held throughout: golden 99/99 bit-identical with JIT on,
+differential 111 programs (JIT-on == JIT-off == 16-byte == switch),
+GC_STRESS+ASan and the incremental-barrier gate clean, a plain-ASan JIT-active
+sweep clean, fuzz 0 crashes, the assembler/codegen unit gate green. New golden
+cases 72 (index/for/if/define-global) and 73 (float add/sub/mul + float compare)
+run in hot loops.
+
+**Still not JIT'd:** calls (fib) — that is Stage 3 (cross-function frames).
 
 ## Unboxed list storage — Lovax before/after (2026-07-25)
 
