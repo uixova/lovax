@@ -1,0 +1,43 @@
+# Stage-2 JIT opcodes: for-over-range (FOR_NEXT), list index get/set
+# (INDEX_GET/INDEX_SET), if branches (JUMP_IF_FALSE) and top-level `set`
+# (DEFINE_GLOBAL) — all inside hot loops. Output must be bit-identical to the
+# interpreter (JIT correctness contract); --no-jit must match line for line.
+
+# for over range + index write, then index read + conditional accumulate
+set xs = []
+for i in range(2000):
+    push(xs, i * i - 3)
+set total = 0
+set i = 0
+while i < 2000:
+    if xs[i] % 2 == 0:
+        total = total + xs[i]
+    else:
+        total = total - 1
+    i = i + 1
+say total
+
+# a mini sieve: for-loop init, nested while with index set (bool store) + if
+set flags = []
+for k in range(500):
+    push(flags, true)
+set count = 0
+set n = 2
+while n < 500:
+    if flags[n]:
+        count = count + 1
+        set m = n + n
+        while m < 500:
+            flags[m] = false
+            m = m + n
+    n = n + 1
+say count
+
+# for-loop writing/reading an int array, running sum
+set arr = []
+for j in range(1000):
+    push(arr, j)
+set s = 0
+for j in range(1000):
+    set s = s + arr[j]
+say s

@@ -140,6 +140,11 @@ public:
     void movzxRM8(Reg d, Reg base, int32_t disp) {
         rex(true, d, base); u8(0x0F); u8(0xB6); modrmMem(d, base, disp);
     }
+    // mov BYTE PTR [base+disp], imm8 — writes exactly one byte (e.g. setting a
+    // globalDefined flag), so it never clobbers the neighbouring flags.
+    void movMI8(Reg base, int32_t disp, uint8_t imm) {
+        rex(false, 0, base); u8(0xC6); modrmMem(0, base, disp); u8(imm);
+    }
 
     // ---- branches ----
     void jmp(Label& l)          { u8(0xE9); ref(l); }
