@@ -1,5 +1,54 @@
 # Cross-language benchmark
 
+## JIT Stage-3: compiled function bodies + call trampoline — fib 1.18× — 2026-07-27
+
+Recursive / call-bound code (fib) has no loop, so the loop-triggered JIT never
+fired on it. Stage-3 adds **whole-function** compiled bodies: a function that has
+been called `JIT_BODY_THRESHOLD` times gets its whole body compiled (start→
+RETURN), cached on the Chunk (`jitBodyFn` — a pointer check in the CALL fast
+path, no per-call hash lookup). RETURN hands back to the interpreter at the
+RETURN so it does the frame pop; a `CALL` inside a compiled body goes through a
+**trampoline** (`g_jitTrampoline`) that runs the call through the interpreter's
+own machinery — which re-enters compiled bodies, so recursion stays compiled.
+Also added: the fused immediate compares `LT_I_JF … NE_I_JF` (fib's `if n < 2`).
+
+This is sound because the value stack is a fixed array (never reallocated) and
+`frames_` is reserved to MAX_FRAMES=500, so the base pointers the compiled code
+holds stay valid across a nested call, and the trampoline's C++ recursion is
+bounded (~500 deep, well under the 8 MB stack; deeper recursion raises the normal
+"max call depth" error, not a crash). The trampoline syncs `ctx->sp ↔ vm->sp_`
+around the call so the GC sees every live slot.
+
+**A measured lesson (why two extra tricks were needed):** naive trampolining was
+*slower* than the interpreter on fib (224 vs 197 ms) — the per-call round-trip
+(callValue + a fresh `run()` + a hash lookup) cost more than the compiled body
+saved. Two fixes flipped it: (1) cache the body pointer on the Chunk, no hash
+lookup; (2) execute the common `RETURN` inline in the trampoline instead of
+spinning up a full `run()`. That is the crux LuaJIT sidesteps entirely by
+**tracing** — it inlines the recursion into a straight-line trace, with no
+per-call boundary. We studied LuaJIT's call/recursion recording (`lj_record.c`
+`rec_call*`/`rec_func*`, down-recursion unroll + up-recursion trace-linking) to
+choose this: full tracing is a much larger architecture, so a baseline
+method-JIT with a trampoline is the sound, tractable step here (study, not copy;
+credited).
+
+JIT-on vs JIT-off, same binary, best-of-5:
+
+| bench | JIT off | JIT on | speedup |
+|-------|--------:|-------:|--------:|
+| fib   | 199 | **168** | **1.18×** |
+
+Modest next to LuaJIT's tracing (which does fib several× faster), but a real
+win, and `btree` (call/struct-heavy) is unchanged — the CALL fast-path body
+check adds no measurable interpreter overhead. Correctness: golden 100/100
+bit-identical JIT-on (new case 74: recursion, mutual recursion, a builtin called
+from a compiled body, error propagation through the trampoline, and an int64
+overflow mid-body), differential 111 programs, GC_STRESS+ASan and the
+incremental-barrier gate clean, fuzz 0 crashes.
+
+**A true fib win to LuaJIT's level needs Stage-4:** compiled-to-compiled direct
+calls (machine-code frame setup, no interpreter round-trip) or a tracing JIT.
+
 ## JIT Stage-2 expansion: index / if / for — 2026-07-26
 
 The baseline JIT now compiles list indexing (`INDEX_GET`/`INDEX_SET`),
