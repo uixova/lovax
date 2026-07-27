@@ -1,5 +1,36 @@
 # Cross-language benchmark
 
+## Stage-4b: list indexing in the register allocator — 2026-07-27
+
+Stage-4a's RA was integer-only. Stage-4b adds list indexing so array kernels
+(qsort-style) compile there too. The register model gains a small type state per
+value — VT_INT (unboxed int64 in a GP reg) and VT_BOXED (a raw NaN-box word, for
+a list base or a freshly-loaded element) — and a value is guarded+unboxed to
+VT_INT only when it feeds an integer op. A pre-pass classifies each local by an
+origin scan: a local used as an index BASE is a list (kept as the raw word),
+every other local is an int.
+
+INDEX_GET/SET emit the object guard, the LIST tag guard, the vector data+size
+load, an unsigned bounds check (which catches negative indices too) and the
+element load/store. GC safety: a region is CALL-free so it never allocates, but
+the incremental collector may be mid-MARK on entry, so an INDEX_SET whose value
+carries a heap pointer BAILS to the interpreter (which stores it with the write
+barrier); storing an int/float/bool needs no barrier and stays in machine code —
+the array-of-numbers hot path.
+
+| bench (index-bound) | template JIT | RA JIT | 
+|---|---:|---:|
+| qsort (300k) | 331 ms | 293 ms |
+| sorting torture (5 algos) | 88 ms | 95 ms |
+
+**Honest:** the index win is small (qsort ~11%, pure-index break-even) because
+indexing is GUARD-bound, not box/unbox-bound — every access re-checks is-object /
+is-list / bounds. The list type is loop-invariant, so hoisting those guards out
+of the loop (LICM) is what turns this into a real win; that is the Stage-4
+optimizer pass. What lands here is the correct foundation: array loops now run in
+the register allocator, bit-identical to the interpreter across all goldens, the
+differential gate (RA axis) and the incremental-GC write-barrier gate.
+
 ## Stage-4a: register-allocating JIT — 2026-07-27
 
 The template JIT keeps the operand stack in memory and re-boxes every
