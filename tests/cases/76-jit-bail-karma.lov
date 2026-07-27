@@ -1,0 +1,200 @@
+# JIT boundary / mixed-feature torture — self-verifying. Interleaves JIT-friendly
+# numeric loops with early-exit (break), overflow-to-boxing, list building and
+# map access, cross-checking each result a second independent way. This is the
+# exact surface Stage-4's snapshot/bail must preserve: a value computed in
+# machine code, handed back to the interpreter, must stay bit-exact. Identical
+# under --jit and --no-jit.
+
+# ---- prime counting two ways: sieve (list index) vs trial division (arith) ----
+fn count_primes_sieve(n):
+    set flags = []
+    set i = 0
+    while i <= n:
+        push(flags, true)
+        i = i + 1
+    set count = 0
+    set p = 2
+    while p <= n:
+        if flags[p]:
+            count = count + 1
+            set j = p * p
+            while j <= n:
+                flags[j] = false
+                j = j + p
+        p = p + 1
+    return count
+
+fn is_prime(x):
+    if x < 2:
+        return false
+    set d = 2
+    while d * d <= x:
+        if x % d == 0:
+            return false
+        d = d + 1
+    return true
+
+fn count_primes_trial(n):
+    set count = 0
+    set x = 2
+    while x <= n:
+        if is_prime(x):
+            count = count + 1
+        x = x + 1
+    return count
+
+set N = 30000
+set cs = count_primes_sieve(N)
+set ct = count_primes_trial(N)
+check(cs == ct, "prime counts agree")
+say "primes below", N, "=", cs
+
+# ---- first prime past a threshold, using break for early exit ----
+fn first_prime_after(start):
+    set x = start + 1
+    set result = -1
+    while x < start + 10000:
+        if is_prime(x):
+            result = x
+            break
+        x = x + 1
+    return result
+
+set fp = first_prime_after(100000)
+check(is_prime(fp), "first prime is prime")
+check(fp == 100003, "first prime value")
+say "first prime after 100000:", fp
+
+# ---- rolling FNV-1a hash over a generated sequence (deterministic checksum) ----
+fn fnv_hash(n, seed):
+    set h = 2166136261
+    set s = seed
+    set i = 0
+    while i < n:
+        s = (s * 48271) % 2147483647
+        h = (h ^ (s & 255)) & 4294967295
+        h = (h * 16777619) & 4294967295
+        i = i + 1
+    return h
+
+check(fnv_hash(40000, 7) == fnv_hash(40000, 7), "fnv deterministic")
+say "fnv:", fnv_hash(40000, 7)
+
+# ---- digit sum and reversal, cross-checked ----
+fn digit_sum(x):
+    set s = 0
+    set v = x
+    while v > 0:
+        s = s + v % 10
+        v = v / 10
+    return s
+
+fn reverse_num(x):
+    set r = 0
+    set v = x
+    while v > 0:
+        r = r * 10 + v % 10
+        v = v / 10
+    return r
+
+# a palindrome reversed equals itself; digit sum is reversal-invariant
+set total_ds = 0
+set i = 1
+while i <= 20000:
+    check(digit_sum(i) == digit_sum(reverse_num(i)), "digitsum invariant")
+    total_ds = total_ds + digit_sum(i)
+    i = i + 1
+say "digit-sum total:", total_ds
+check(reverse_num(12321) == 12321, "palindrome")
+check(reverse_num(123) == 321, "reverse")
+
+# ---- run-length encode a generated run-heavy sequence, decode, compare ----
+fn build_seq(n, seed):
+    set xs = []
+    set s = seed
+    set i = 0
+    while i < n:
+        s = (s * 1103515245 + 12345) % 2147483648
+        # bias toward short runs of small symbols
+        push(xs, (s / 65536) % 4)
+        i = i + 1
+    return xs
+
+fn rle_encode(xs):
+    set out = []
+    set i = 0
+    while i < len(xs):
+        set val = xs[i]
+        set run = 1
+        while i + run < len(xs) and xs[i + run] == val:
+            run = run + 1
+        push(out, val)
+        push(out, run)
+        i = i + run
+    return out
+
+fn rle_decode(enc):
+    set out = []
+    set i = 0
+    while i < len(enc):
+        set val = enc[i]
+        set run = enc[i + 1]
+        set k = 0
+        while k < run:
+            push(out, val)
+            k = k + 1
+        i = i + 2
+    return out
+
+set seq = build_seq(5000, 42)
+set enc = rle_encode(seq)
+set dec = rle_decode(enc)
+check(len(dec) == len(seq), "rle length")
+set i = 0
+while i < len(seq):
+    check(dec[i] == seq[i], "rle roundtrip")
+    i = i + 1
+say "rle roundtrip ok, symbols =", len(seq), " encoded pairs =", len(enc) / 2
+
+# ---- tiny stack-machine interpreter: evaluate RPN, checked against direct calc --
+# program: push constants, add/mul; result cross-checked with a plain formula
+fn rpn_eval(prog):
+    set stack = []
+    set i = 0
+    while i < len(prog):
+        set op = prog[i]
+        if op == 0:
+            i = i + 1
+            push(stack, prog[i])
+        else:
+            set b = pop(stack)
+            set a = pop(stack)
+            if op == 1:
+                push(stack, a + b)
+            else:
+                push(stack, a * b)
+        i = i + 1
+    return pop(stack)
+
+# (3 + 4) * (5 + 6) = 77 ; encoded: push3 push4 add push5 push6 add mul
+set prog = [0, 3, 0, 4, 1, 0, 5, 0, 6, 1, 2]
+check(rpn_eval(prog) == 77, "rpn")
+say "rpn (3+4)*(5+6) =", rpn_eval(prog)
+
+# ---- overflow-to-boxing inside an otherwise JIT-hot loop, exact int64 ----
+fn accumulate_big(n):
+    set s = 0
+    set i = 0
+    while i < n:
+        s = s + i * i * i
+        i = i + 1
+    return s
+
+set big = accumulate_big(20000)
+# closed form: (sum i)^2 for i in 0..n-1 == (m(m-1)/2)^2 with m = n
+set m = 20000 - 1
+set tri = m * (m + 1) / 2
+check(big == tri * tri, "cube sum exact int64")
+say "cube sum:", big
+
+say "76 ok"

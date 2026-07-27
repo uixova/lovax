@@ -1,0 +1,166 @@
+# JIT recursion / call torture — self-verifying. Stresses the call path (Stage-3
+# compiled bodies + trampoline today, compiled-to-compiled tomorrow). Every
+# recursive result is cross-checked against an independent iterative computation
+# or a known constant, so a broken call/return frame trips check(). Identical
+# under --jit and --no-jit.
+
+# ---- fib: recursive vs iterative ----
+fn fib_rec(n):
+    if n < 2:
+        return n
+    return fib_rec(n - 1) + fib_rec(n - 2)
+
+fn fib_iter(n):
+    set a = 0
+    set b = 1
+    set i = 0
+    while i < n:
+        set t = a + b
+        a = b
+        b = t
+        i = i + 1
+    return a
+
+set i = 0
+while i <= 27:
+    check(fib_rec(i) == fib_iter(i), "fib")
+    i = i + 1
+say "fib(27) =", fib_iter(27)
+
+# ---- factorial: recursive vs iterative (mod to stay exact/bounded) ----
+fn fact_rec(n):
+    if n <= 1:
+        return 1
+    return n * fact_rec(n - 1)
+
+fn fact_iter(n):
+    set p = 1
+    set i = 2
+    while i <= n:
+        p = p * i
+        i = i + 1
+    return p
+
+set i = 1
+while i <= 20:
+    check(fact_rec(i) == fact_iter(i), "fact")
+    i = i + 1
+say "20! =", fact_iter(20)
+
+# ---- Euclid gcd: recursive vs iterative ----
+fn gcd_rec(a, b):
+    if b == 0:
+        return a
+    return gcd_rec(b, a % b)
+
+fn gcd_iter(a, b):
+    set x = a
+    set y = b
+    while y != 0:
+        set t = x % y
+        x = y
+        y = t
+    return x
+
+set s = 123456789
+set count = 0
+set i = 1
+while i <= 5000:
+    s = (s * 48271) % 2147483647
+    set a = s % 100000 + 1
+    set b = (s / 7) % 100000 + 1
+    check(gcd_rec(a, b) == gcd_iter(a, b), "gcd")
+    count = count + 1
+    i = i + 1
+say "gcd pairs verified:", count
+
+# ---- Ackermann: known small values (heavy nested recursion) ----
+fn ack(m, n):
+    if m == 0:
+        return n + 1
+    if n == 0:
+        return ack(m - 1, 1)
+    return ack(m - 1, ack(m, n - 1))
+
+check(ack(0, 0) == 1, "ack00")
+check(ack(1, 1) == 3, "ack11")
+check(ack(2, 3) == 9, "ack23")
+check(ack(3, 3) == 61, "ack33")
+check(ack(3, 4) == 125, "ack34")
+say "ackermann(3,4) =", ack(3, 4)
+
+# ---- mutual recursion: is_even / is_odd vs modulo ----
+fn is_even(n):
+    if n == 0:
+        return true
+    return is_odd(n - 1)
+
+fn is_odd(n):
+    if n == 0:
+        return false
+    return is_even(n - 1)
+
+# depth capped by the 500-frame limit; 200 stays well under it
+set i = 0
+while i <= 200:
+    check(is_even(i) == (i % 2 == 0), "even")
+    check(is_odd(i) == (i % 2 == 1), "odd")
+    i = i + 1
+say "mutual recursion ok up to 200"
+
+# ---- Takeuchi function: known value tak(18,12,6) ----
+fn tak(x, y, z):
+    if y >= x:
+        return z
+    return tak(tak(x - 1, y, z), tak(y - 1, z, x), tak(z - 1, x, y))
+
+check(tak(10, 5, 0) == 5, "tak1050")
+check(tak(18, 12, 6) == 7, "tak")
+say "tak(18,12,6) =", tak(18, 12, 6)
+
+# ---- recursive power vs iterative, and vs modpow identity ----
+fn pow_rec(base, exp):
+    if exp == 0:
+        return 1
+    return base * pow_rec(base, exp - 1)
+
+fn pow_iter(base, exp):
+    set r = 1
+    set i = 0
+    while i < exp:
+        r = r * base
+        i = i + 1
+    return r
+
+set i = 0
+while i <= 30:
+    check(pow_rec(2, i) == pow_iter(2, i), "pow2")
+    i = i + 1
+check(pow_rec(3, 20) == pow_iter(3, 20), "pow3")
+say "2^30 =", pow_iter(2, 30)
+
+# ---- recursive tree sum: sum of a binary tree of depth d has 2^(d+1)-1 nodes ----
+fn tree_sum(depth, val):
+    if depth == 0:
+        return val
+    return val + tree_sum(depth - 1, val * 2) + tree_sum(depth - 1, val * 2 + 1)
+
+# node count check via a counting recursion
+fn tree_count(depth):
+    if depth == 0:
+        return 1
+    return 1 + 2 * tree_count(depth - 1)
+
+check(tree_count(10) == pow_iter(2, 11) - 1, "treecount")
+say "tree(10) nodes =", tree_count(10), " sum =", tree_sum(10, 1)
+
+# ---- deep linear recursion (exercises many stacked frames) ----
+fn countdown(n, acc):
+    if n == 0:
+        return acc
+    return countdown(n - 1, acc + n)
+
+check(countdown(400, 0) == 400 * 401 / 2, "countdown")
+say "countdown(400) =", countdown(400, 0)
+
+say "74 ok"

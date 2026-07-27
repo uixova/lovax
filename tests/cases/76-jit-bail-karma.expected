@@ -1,0 +1,9 @@
+# exit: 0
+primes below 30000 = 3245
+first prime after 100000: 100003
+fnv: 1780646825
+digit-sum total: 370002
+rle roundtrip ok, symbols = 5000  encoded pairs = 3767
+rpn (3+4)*(5+6) = 77
+cube sum: 39996000100000000
+76 ok

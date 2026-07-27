@@ -1,0 +1,138 @@
+# JIT float torture — self-verifying. Hot loops of float arithmetic and mixed
+# int/float (the SSE2 JIT path + int<->float boundary). Results are checked
+# against known constants within an epsilon, and a few integer checksums come
+# out of float loops so a broken float guard/spill trips check(). Identical
+# under --jit and --no-jit (float bit patterns must match exactly).
+
+fn approx(a, b, eps):
+    return abs(a - b) < eps
+
+# ---- trapezoidal integral of x^2 on [0,1] == 1/3 ----
+fn integrate_sq(steps):
+    set h = 1.0 / steps
+    set total = 0.0
+    set i = 0
+    while i < steps:
+        set x0 = i * h
+        set x1 = (i + 1) * h
+        total = total + (x0 * x0 + x1 * x1) * 0.5 * h
+        i = i + 1
+    return total
+
+check(approx(integrate_sq(20000), 0.3333333, 0.001), "integral x^2")
+say "integral x^2 ~", floor(integrate_sq(20000) * 1000000)
+
+# ---- Leibniz series for pi/4 ----
+fn leibniz(terms):
+    set sum = 0.0
+    set k = 0
+    set sign = 1.0
+    while k < terms:
+        sum = sum + sign / (2.0 * k + 1.0)
+        sign = sign - 2.0 * sign
+        k = k + 1
+    return sum * 4.0
+
+check(approx(leibniz(100000), 3.14159, 0.001), "leibniz pi")
+say "pi ~", floor(leibniz(200000) * 100000)
+
+# ---- Newton's method square root; verify sqrt(x)^2 ~ x ----
+fn nsqrt(x):
+    if x == 0.0:
+        return 0.0
+    set g = x
+    set i = 0
+    while i < 60:
+        g = (g + x / g) * 0.5
+        i = i + 1
+    return g
+
+set v = 2.0
+set checked = 0
+while v < 1000.0:
+    set r = nsqrt(v)
+    check(approx(r * r, v, 0.0001), "nsqrt")
+    checked = checked + 1
+    v = v + 1.0
+say "nsqrt verified:", checked
+
+# ---- geometric series sum_{k>=0} 1/2^k -> 2 ----
+fn geo(terms):
+    set sum = 0.0
+    set term = 1.0
+    set k = 0
+    while k < terms:
+        sum = sum + term
+        term = term * 0.5
+        k = k + 1
+    return sum
+
+check(approx(geo(60), 2.0, 0.0000001), "geometric")
+say "geo ~", floor(geo(60) * 1000000)
+
+# ---- harmonic-ish accumulation, determinism across jit/no-jit ----
+fn fsum(n):
+    set s = 0.0
+    set i = 1
+    while i <= n:
+        s = s + 1.0 / (i * i)
+        i = i + 1
+    return s
+
+set a = fsum(50000)
+set b = fsum(50000)
+check(a == b, "fsum deterministic")
+check(approx(a, 1.6449, 0.001), "basel ~ pi^2/6")
+say "basel ~", floor(a * 100000)
+
+# ---- Mandelbrot escape-count checksum (float inner loop -> int result) ----
+fn mandel_count(cx, cy, maxit):
+    set x = 0.0
+    set y = 0.0
+    set it = 0
+    while it < maxit:
+        set x2 = x * x
+        set y2 = y * y
+        if x2 + y2 > 4.0:
+            return it
+        set xt = x2 - y2 + cx
+        y = 2.0 * x * y + cy
+        x = xt
+        it = it + 1
+    return maxit
+
+fn mandel_checksum(w, h):
+    set total = 0
+    set py = 0
+    while py < h:
+        set px = 0
+        while px < w:
+            set cx = -2.0 + 3.0 * px / w
+            set cy = -1.5 + 3.0 * py / h
+            total = total + mandel_count(cx, cy, 100)
+            px = px + 1
+        py = py + 1
+    return total
+
+set mc1 = mandel_checksum(60, 40)
+set mc2 = mandel_checksum(60, 40)
+check(mc1 == mc2, "mandel deterministic")
+say "mandel checksum:", mc1
+
+# ---- mixed int/float in one hot loop (int index + float compute) ----
+fn mixed(n):
+    set fsum = 0.0
+    set isum = 0
+    set i = 0
+    while i < n:
+        isum = isum + i
+        fsum = fsum + i * 0.5
+        i = i + 1
+    return [isum, floor(fsum)]
+
+set r = mixed(100000)
+check(r[0] == 100000 * 99999 / 2, "mixed int part")
+check(r[1] == floor(100000 * 99999 / 2 * 0.5), "mixed float part")
+say "mixed:", r[0], r[1]
+
+say "75 ok"
