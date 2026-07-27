@@ -135,6 +135,7 @@ int main(int argc, char* argv[]) {
     bool dumpBytecode = false;
     bool noJit = false;
     bool jitStats = false;
+    bool jitRA = false;
     {
         auto& p = Lovax::StdLib::perms();
         // First pass: does any permission flag appear before the script?
@@ -161,6 +162,7 @@ int main(int argc, char* argv[]) {
             else if (f == "--dump-bytecode") dumpBytecode = true;
             else if (f == "--no-jit")      noJit = true;
             else if (f == "--jit-stats")   jitStats = true;
+            else if (f == "--jit-ra")      jitRA = true;
             else break; // first non-flag argument is the script path
         }
     }
@@ -236,8 +238,9 @@ int main(int argc, char* argv[]) {
     Lovax::VM vm;
 #ifdef LOVAX_JIT_ACTIVE
     if (noJit) vm.jitEnabled_ = false;
+    if (jitRA) Lovax::Jit::jitRAEnabled = true;   // Stage-4a register allocator (opt-in)
 #else
-    (void)noJit;   // JIT not compiled in on this platform; --no-jit is a no-op
+    (void)noJit; (void)jitRA;   // JIT not compiled in on this platform; no-ops
 #endif
     auto result = vm.interpret(program.get());
 
