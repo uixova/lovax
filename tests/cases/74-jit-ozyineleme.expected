@@ -1,0 +1,11 @@
+# exit: 0
+fib(27) = 196418
+20! = 2432902008176640000
+gcd pairs verified: 5000
+ackermann(3,4) = 125
+mutual recursion ok up to 200
+tak(18,12,6) = 7
+2^30 = 1073741824
+tree(10) nodes = 2047  sum = 2096128
+countdown(400) = 80200
+74 ok

@@ -1,0 +1,5 @@
+# exit: 0
+all sorts agree, n = 1200
+bsearch verified: 1200
+matmul identity ok, n = 12
+73 ok

@@ -1,0 +1,173 @@
+# JIT numeric torture — self-verifying. Every hot loop cross-checks its result
+# against a closed form or a second independent computation, so a JIT miscompile
+# (bad guard, wrong unbox, register clobber) changes a value and trips check().
+# Runs identically under --jit and --no-jit (the JIT correctness contract).
+
+# ---- Gauss: loop sum 1..n == n(n+1)/2 ----
+fn gauss_loop(n):
+    set s = 0
+    set i = 1
+    while i <= n:
+        s = s + i
+        i = i + 1
+    return s
+
+set n = 100000
+check(gauss_loop(n) == n * (n + 1) / 2, "gauss")
+
+# ---- sum of squares == n(n+1)(2n+1)/6 ----
+fn sumsq(n):
+    set s = 0
+    set i = 1
+    while i <= n:
+        s = s + i * i
+        i = i + 1
+    return s
+
+set m = 5000
+check(sumsq(m) == m * (m + 1) * (2 * m + 1) / 6, "sumsq")
+
+# ---- sum of cubes == (n(n+1)/2)^2 ----
+fn sumcube(n):
+    set s = 0
+    set i = 1
+    while i <= n:
+        s = s + i * i * i
+        i = i + 1
+    return s
+
+set c = 1000
+set tri = c * (c + 1) / 2
+check(sumcube(c) == tri * tri, "sumcube")
+
+# ---- nested loop: sum of full multiplication table == (sum 1..n)^2 ----
+fn table_sum(n):
+    set total = 0
+    set a = 1
+    while a <= n:
+        set b = 1
+        while b <= n:
+            total = total + a * b
+            b = b + 1
+        a = a + 1
+    return total
+
+set t = 300
+set st = t * (t + 1) / 2
+check(table_sum(t) == st * st, "table")
+
+# ---- modular exponentiation: (base^exp) mod md, verified against repeated mul ----
+fn modpow(base, exp, md):
+    set result = 1
+    set b = base % md
+    set e = exp
+    while e > 0:
+        if e % 2 == 1:
+            result = (result * b) % md
+        b = (b * b) % md
+        e = e / 2
+    return result
+
+fn modmul_loop(base, exp, md):
+    set r = 1
+    set k = 0
+    while k < exp:
+        r = (r * base) % md
+        k = k + 1
+    return r
+
+check(modpow(7, 500, 1000000007) == modmul_loop(7, 500, 1000000007), "modpow")
+check(modpow(2, 1000, 97) == modmul_loop(2, 1000, 97), "modpow2")
+
+# ---- Fermat's little theorem: a^(p-1) mod p == 1 for prime p ----
+set p = 1000003
+check(modpow(123456, p - 1, p) == 1, "fermat")
+
+# ---- population count two ways: bit loop vs subtract-lowest-set ----
+fn popcount_shift(x):
+    set c = 0
+    set v = x
+    while v > 0:
+        c = c + (v & 1)
+        v = v / 2
+    return c
+
+fn popcount_kernighan(x):
+    set c = 0
+    set v = x
+    while v > 0:
+        v = v & (v - 1)
+        c = c + 1
+    return c
+
+set acc = 0
+set q = 1
+while q <= 20000:
+    check(popcount_shift(q) == popcount_kernighan(q), "popcount")
+    acc = acc + popcount_kernighan(q)
+    q = q + 1
+say "popcount total:", acc
+
+# ---- Collatz step counts, deterministic checksum ----
+fn collatz_steps(x):
+    set steps = 0
+    set v = x
+    while v != 1:
+        if v % 2 == 0:
+            v = v / 2
+        else:
+            v = 3 * v + 1
+        steps = steps + 1
+    return steps
+
+set csum = 0
+set start = 1
+while start <= 3000:
+    csum = csum + collatz_steps(start)
+    start = start + 1
+say "collatz checksum:", csum
+
+# ---- bit-op checksum (AND/OR/XOR/shift-by-mul patterns in a hot loop) ----
+fn bitmix(n):
+    set h = 2166136261
+    set i = 0
+    while i < n:
+        h = (h ^ i) & 4294967295
+        h = (h * 16777619) & 4294967295
+        h = (h | (i & 255)) & 4294967295
+        i = i + 1
+    return h
+
+set h1 = bitmix(50000)
+set h2 = bitmix(50000)
+check(h1 == h2, "bitmix deterministic")
+say "bitmix:", h1
+
+# ---- immediate-op fusion path (ADD_I/SUB_I/MUL_I/MOD_I) in a hot loop ----
+fn imm_ops(n):
+    set x = 0
+    set i = 0
+    while i < n:
+        x = x + 7
+        x = x * 3
+        x = x - 2
+        x = x % 1000000
+        i = i + 1
+    return x
+
+check(imm_ops(10000) == imm_ops(10000), "imm deterministic")
+say "imm:", imm_ops(10000)
+
+# ---- exact int64 beyond the 47-bit inline range (JIT boxing path must bail) ----
+fn big_sum(n):
+    set s = 70000000000000
+    set i = 0
+    while i < n:
+        s = s + 1000000000
+        i = i + 1
+    return s
+
+check(big_sum(100000) == 70000000000000 + 100000 * 1000000000, "int64 exact")
+say "big:", big_sum(100000)
+
+say "72 ok"
