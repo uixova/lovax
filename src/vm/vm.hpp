@@ -26,6 +26,7 @@
 #if defined(LOVAX_NANBOX) && (defined(__x86_64__) || defined(_M_X64)) && !defined(LOVAX_NO_JIT)
 #define LOVAX_JIT_ACTIVE 1
 #include "../jit/compile.hpp"
+#include "../jit/compile_ra.hpp"   // Stage-4a register-allocating region compiler
 #endif
 
 // The Lovax virtual machine: a stack-based bytecode interpreter with
@@ -1332,7 +1333,13 @@ private:
                         if (!e.dead && ++e.count >= JIT_THRESHOLD) {
                             size_t headOff = (size_t)(ip - frame->chunk->code.data());
                             size_t endOff  = (size_t)(afterLoop - frame->chunk->code.data());
-                            e.region = Jit::compileRegion(*frame->chunk, headOff, endOff);
+                            // Stage-4a: try the register allocator first (opt-in);
+                            // it takes CALL-free integer loops, else falls back to
+                            // the template compiler, which stays the oracle.
+                            if (Jit::jitRAEnabled)
+                                e.region = Jit::compileRegionRA(*frame->chunk, headOff, endOff);
+                            if (!e.region.fn)
+                                e.region = Jit::compileRegion(*frame->chunk, headOff, endOff);
                             if (e.region.fn) jitCompiled_++;
                             else e.dead = true;   // unsupported opcode in range; never retry
                         }

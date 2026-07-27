@@ -1,5 +1,44 @@
 # Cross-language benchmark
 
+## Stage-4a: register-allocating JIT — 2026-07-27
+
+The template JIT keeps the operand stack in memory and re-boxes every
+intermediate: each integer op is guardInt + unbox + unbox + compute + box
+(~25 instructions). The new register-allocating region compiler (compile_ra.hpp,
+RFC-027 Stage-4a) keeps integers UNBOXED in registers across the whole region:
+a value is guarded + unboxed ONCE on entry (locals in the prologue, constants at
+compile time), every op works on raw int64s, and a result only gets a cheap
+RANGE CHECK (still fits the 47-bit inline payload?) before continuing. Boxing
+happens solely at the memory boundary — normal exit and bail — and never
+overflows because every result was range-checked. Per-op cost ~25 → ~6
+instructions.
+
+Depth-indexed operand registers (position d is always pool[numLocals+d]) make
+every branch/merge automatically consistent, so internal jumps need no flush;
+bail boxes the live locals + operands back and returns the resume offset, the
+same interpreter-takeover contract as the template compiler (no deopt). Scope:
+CALL-free integer loops that fit the 7-register pool; anything else falls back
+to the template compiler, which stays the differential oracle.
+
+Hot all-integer loop (`acc += (i*3+7)%13; acc &= 0xFFFFFF`, 30M iterations):
+
+| | time | vs interp |
+|---|---:|---:|
+| interpreter (`--no-jit`) | 2466 ms | 1.0× |
+| template JIT (default)   | 621 ms  | 4.0× |
+| **RA JIT** (`--jit-ra`)  | **253 ms** | **9.7×** |
+
+**2.45× over the template JIT**, same result. Opt-in behind `--jit-ra` until it
+is the default — zero regression risk. Correctness: RA output is bit-identical
+to the interpreter across all 105 goldens and to the template JIT in the
+differential gate (new axis), ASan-clean on the JIT torture suite.
+
+**Honest scope:** the win lands on pure-integer, call-free loops (compute
+kernels). Mixed loops move less — heavy_loop 244→232 ms — because their hot
+regions use list indexing / floats / calls Stage-4a does not take yet. Those are
+Stage-4b (unboxed float + list index) and 4c (compiled-to-compiled calls, for
+fib). This is the register-allocation foundation the rest of Stage-4 builds on.
+
 ## JIT Stage-3: compiled function bodies + call trampoline — fib 1.18× — 2026-07-27
 
 Recursive / call-bound code (fib) has no loop, so the loop-triggered JIT never
