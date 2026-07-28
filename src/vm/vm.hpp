@@ -607,8 +607,34 @@ private:
     // the callee (so recursion stays compiled). Result is left on the stack.
     int64_t jitTrampoline(int argc, int line) {
         size_t entry = frames_.size();
-        Ref<Object> err = callValue(argc, line);
-        if (err != nullptr && isError(err)) { pendingJitError_ = err; return 1; }
+        // Fast path (Stage-4c): a non-variadic closure called with exactly its
+        // parameters and holding a compiled body. Push the frame directly,
+        // skipping callValue's generic validation (variadic collection, arg-count
+        // error paths, builtin dispatch) — the guards here prove none apply. The
+        // shared post-call logic below then runs the compiled body + inline
+        // RETURN. Anything not matching falls to callValue unchanged.
+        bool fast = false;
+        {
+            Value& callee = peek(argc);
+            if (callee.isObjType(ObjectType::FUNCTION)) {
+                auto* cl = static_cast<ClosureObject*>(callee.asObj());
+                const Proto& p = *cl->proto;
+                if (!p.variadic && argc == p.paramCount && argc == p.requiredCount &&
+                    p.chunk.jitBodyFn && cl->moduleGlobals == nullptr &&
+                    frames_.size() < MAX_FRAMES &&
+                    stackSize() + p.localCount + 16 <= STACK_LIMIT) {
+                    for (int i = argc; i < p.localCount; ++i) push(Value::nil());
+                    frames_.push_back({cl, p.chunk.code.data(),
+                                       stackSize() - p.localCount - 1, argc,
+                                       p.chunk.consts.data(), &p.chunk});
+                    fast = true;
+                }
+            }
+        }
+        if (!fast) {
+            Ref<Object> err = callValue(argc, line);
+            if (err != nullptr && isError(err)) { pendingJitError_ = err; return 1; }
+        }
         if (frames_.size() > entry) {          // a closure frame was pushed
             int jr = jitRunBody();             // runs its body (recursion stays compiled)
             if (jr == 1) return 1;             // a nested trampolined call errored

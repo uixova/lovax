@@ -1,5 +1,22 @@
 # Cross-language benchmark
 
+## Stage-4c: compiled-call fast path — 2026-07-27
+
+A compiled body's CALL goes through a C++ trampoline. Stage-4c gives it a fast
+path: a non-variadic closure called with exactly its parameters and holding a
+compiled body has its frame pushed directly, skipping callValue's generic
+validation (variadic collection, arg-count error construction, builtin
+dispatch); anything else falls to callValue unchanged. fib(32): 305 -> 288 ms
+(~6%), same result, golden 105/0, differential 119 (all builds identical).
+
+**Honest ceiling:** this is small on purpose. fib is bottlenecked by the
+per-call compiled-body invocation itself — prologue/epilogue, dispatch, ctx
+setup — which no method-JIT frame trick removes; only TRACING (inlining the
+recursion into one flat trace) does. So the real call/recursion win is Stage-5,
+and Stage-4c takes only the safe, low-risk slice. A machine-code frame setup was
+considered and rejected: ~1.3x for a high corruption risk (ClosureObject ->
+shared_ptr -> Proto -> Chunk offset chain), not worth it before tracing.
+
 ## Stage-4b: list indexing in the register allocator — 2026-07-27
 
 Stage-4a's RA was integer-only. Stage-4b adds list indexing so array kernels
