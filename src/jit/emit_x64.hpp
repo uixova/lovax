@@ -179,6 +179,9 @@ public:
     void movqRX(Reg d, Xmm s) {                             // 66 REX.W 0F 7E /r
         u8(0x66); rex(true, s, d); u8(0x0F); u8(0x7E); modrmReg(s, d);
     }
+    void movqXR(Xmm d, Reg s) {                             // 66 REX.W 0F 6E /r (xmm <- r64)
+        u8(0x66); rex(true, d, s); u8(0x0F); u8(0x6E); modrmReg(d, s);
+    }
 
 private:
     // Emits a rel32 placeholder (or the final displacement for an already-bound

@@ -1,0 +1,74 @@
+# JIT FLOAT torture (Stage-5.6a trace compiler) — self-verifying. Every hot loop
+# is a top-level numeric (float/int, global) loop the trace compiler takes; each
+# result is an INTEGER value carried as a float (exactly representable < 2^53), so
+# `==` against a closed form is exact. Runs identically under --jit-trace and
+# --no-jit (the trace correctness contract; differential proves it bit-for-bit).
+
+# ---- float Gauss: sum of x*1.0 for x in 1..n == n(n+1)/2 (exact as float) ----
+set n = 100000
+set s = 0.0
+set i = 1
+while i <= n:
+    s = s + i * 1.0
+    i = i + 1
+check(s == n * (n + 1) / 2 * 1.0, "float gauss")
+say "fgauss:", s
+
+# ---- float accumulate with subtraction: net == 0.0 ----
+set a = 0.0
+set b = 0.0
+set k = 0
+while k < 50000:
+    a = a + 3.0
+    b = b - 3.0
+    k = k + 1
+check(a + b == 0.0, "float net zero")
+check(a == 150000.0, "float add")
+
+# ---- mixed int/float in one loop (coercion path cvtsi2sd) ----
+set f = 0.0
+set g = 0
+set j = 0
+while j < 40000:
+    f = f + j * 2.0
+    g = g + j * 2
+    j = j + 1
+check(f == g * 1.0, "int/float coercion agree")
+say "mix:", g
+
+# ---- float comparison guard in a hot loop (ucomisd path) ----
+set c = 0
+set x = 0.0
+while x < 30000.0:
+    c = c + 1
+    x = x + 1.0
+check(c == 30000, "float compare count")
+
+# ---- mandelbrot-shaped inner loop (branch/diamond + float, escape via i=MAXI) --
+set MAXI = 40
+set total = 0
+set py = 0
+while py < 60:
+    set y0 = py * 0.05 - 1.5
+    set px = 0
+    while px < 60:
+        set x0 = px * 0.05 - 2.0
+        set mx = 0.0
+        set my = 0.0
+        set it = 0
+        while it < MAXI:
+            set xx = mx * mx
+            set yy = my * my
+            if xx + yy > 4.0:
+                it = MAXI
+            else:
+                set xt = xx - yy + x0
+                my = 2.0 * mx * my + y0
+                mx = xt
+                it = it + 1
+                total = total + 1
+        px = px + 1
+    py = py + 1
+say "mandel-shape total:", total
+
+say "80 ok"
