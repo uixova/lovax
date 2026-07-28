@@ -1,5 +1,22 @@
 # Cross-language benchmark
 
+## Stage-5 start: the register allocator is now the DEFAULT — 2026-07-28
+
+The RA proved itself (bit-identical to the interpreter across all 105 goldens, the
+differential RA axis, and the incremental-GC gate), so it is on by default now;
+`--no-ra` falls back to the template compiler. Consequence for the table below:
+`intloop` at the default build is now the RA number, not the template number —
+
+| intloop (30M) | default (RA) | --no-ra (template) | lua5.4 | luajit | node |
+|---|---:|---:|---:|---:|---:|
+| time (ms) | **356** | 702 | 866 | 452 | 186 |
+
+so **out of the box Lovax now beats plain Lua (2.4x) and LuaJIT (1.3x) on integer
+compute** — only V8/Node ahead. The other cross-benches are unchanged (the RA
+falls back on their float/recursion hot code); those are the tracing JIT's job
+(Stage-5 core). The historical sections below say "opt-in behind --jit-ra" —
+that described the state at the time; it is the default from here on.
+
 ## Stage-4 cross-language snapshot — 2026-07-28 (best of 3, ms, lower=better)
 
 Full field on this host (g++ 16), default `./lovax` (template JIT + the Stage-4c
