@@ -1,5 +1,30 @@
 # Cross-language benchmark
 
+## Stage-5.6a/b: the tracing JIT lands — float + globals — 2026-07-28
+
+The first FLOAT-capable region compiler (`src/jit/trace_record.hpp`, gated behind
+`--jit-trace`). It is the register allocator's numeric successor: floats travel
+as their raw NaN-box word in a GP register and enter an XMM scratch only for the
+SSE op; globals are pinned to registers (read-only ones need no writeback —
+Stage-5.6b's dirty-tracking snapshot); every cell's type is observed from the
+live value the moment the loop turns hot and guarded in the prologue (runtime
+type recording, so float type-inference is free). Guards side-exit to the
+interpreter with a compact deopt snapshot.
+
+| mandel (200×200×60) | interp | default (template) | **--jit-trace** | lua5.4 | luajit | node |
+|---|---:|---:|---:|---:|---:|---:|
+| time (ms) | 116 | 41 | **24** | 40 | 9 | 62 |
+
+So the trace compiler is **1.7x the template default, ~4.8x the interpreter**, and
+now edges plain Lua (40) on this float kernel; LuaJIT (9) stays ahead — the gap is
+the per-region-entry prologue guards that fire on all ~40k pixels, which Stage-5.6d
+(LICM / guard-hoisting) removes. Bit-identical to the interpreter across golden
+(107/0, incl. self-verifying float + guard/deopt torture 80–81), the differential
+`--jit-trace` axis (119 programs), a 400-program numeric-loop fuzz, and
+ASan+UBSan+GC_STRESS_INC. `--jit-trace` is opt-in until the tracer matures through
+5.6c (recursion inline) → 5.6d (optimizer) → 5.6e (linking), then it becomes the
+default trace tier ahead of RA.
+
 ## Stage-5 start: the register allocator is now the DEFAULT — 2026-07-28
 
 The RA proved itself (bit-identical to the interpreter across all 105 goldens, the

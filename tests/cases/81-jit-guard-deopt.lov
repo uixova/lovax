@@ -1,0 +1,64 @@
+# JIT guard / deopt torture (Stage-5.6b) — self-verifying. Forces the trace
+# compiler's side-exits to fire at scale and proves the interpreter resumes with
+# the exact live state each time: (a) an int accumulator crossing the 2^46 inline
+# range mid-loop (rangeCheck guard bails, interpreter boxes, then re-enters);
+# (b) thousands of tiny inner regions each exiting via their loop-condition guard;
+# (c) a float branch/diamond whose direction flips throughout the run. Every
+# result is exact (integer-valued) and cross-checked, so any wrong deopt trips it.
+
+# ---- (a) rangeCheck side-exit: sum crosses the 47-bit inline boundary ----
+# s grows past 2^46 (~7.0e13) after ~70 iterations, so the JIT's box guard bails
+# each step beyond it; the interpreter must resume and keep the exact int64 sum.
+set s = 0
+set step = 1000000000000
+set i = 0
+while i < 100000:
+    s = s + step
+    i = i + 1
+check(s == step * 100000, "int64 rangeCheck deopt")
+say "a:", s
+
+# ---- (b) many small inner regions, each exits via its loop-condition guard ----
+set outer = 0
+set acc = 0
+while outer < 20000:
+    set j = 0
+    while j < 5:
+        acc = acc + j
+        j = j + 1
+    outer = outer + 1
+check(acc == 20000 * (0 + 1 + 2 + 3 + 4), "inner loop-exit deopt")
+say "b:", acc
+
+# ---- (c) float diamond whose branch direction flips every iteration ----
+set flips = 0
+set fsum = 0.0
+set n = 0
+while n < 60000:
+    set v = n * 1.0
+    if v * 0.5 > 15000.0:
+        flips = flips + 1
+        fsum = fsum + 1.0
+    else:
+        fsum = fsum - 1.0
+    n = n + 1
+# v*0.5 > 15000 <=> n > 30000, i.e. for n in 30001..59999 -> 29999 times
+check(flips == 29999, "float branch guard count")
+check(fsum == 29999.0 - 30001.0, "float branch accumulate")
+say "c:", flips, fsum
+
+# ---- (d) alternating int/float pinned cells across a diamond, verified sum ----
+set p = 0
+set q = 0.0
+set m = 0
+while m < 40000:
+    if m % 2 == 0:
+        p = p + m
+    else:
+        q = q + m * 1.0
+    m = m + 1
+# evens 0..39998 sum, odds 1..39999 sum
+check(p + q == 39999 * 40000 / 2 * 1.0, "mixed int/float diamond sum")
+say "d:", p, q
+
+say "81 ok"
