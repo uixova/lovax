@@ -329,8 +329,19 @@ inline const Ref<NullObject>    NULL_OBJ_ = makeObj<NullObject>();
 
 inline Ref<BooleanObject> boolObj(bool b) { return b ? TRUE_OBJ : FALSE_OBJ; }
 
+// Recursion-depth cap for the recursive display + compare walks (inspect,
+// objectEquals). A pathologically deep runtime structure — `x = [x]` a hundred
+// thousand times — otherwise overflows the stack on `say x` or `x == y`. Real
+// data never nests this deep; the GC mark is iterative but these walks are not.
+// thread_local so concurrent VMs/coroutines don't share the counter.
+inline int& renderDepth() { static thread_local int d = 0; return d; }
+static constexpr int MAX_RENDER_DEPTH = 500;
+struct RenderGuard { RenderGuard() { ++renderDepth(); } ~RenderGuard() { --renderDepth(); } };
+
 // Shows strings quoted inside nested structures: say ["a"] -> ["a"]
 inline std::string inspectQuoted(const Ref<Object>& obj) {
+    if (renderDepth() >= MAX_RENDER_DEPTH) return "...";
+    RenderGuard g;
     if (obj->type() == ObjectType::STRING) {
         return "\"" + obj->inspect() + "\"";
     }
@@ -552,6 +563,8 @@ inline std::string valueInspect(const Value& v) {
 }
 // Quoted form for nested display: say ["a"] -> ["a"]
 inline std::string valueInspectQuoted(const Value& v) {
+    if (renderDepth() >= MAX_RENDER_DEPTH) return "...";
+    RenderGuard g;
     if (v.isObj() && v.asObj()->type() == ObjectType::STRING)
         return "\"" + v.asObj()->inspect() + "\"";
     return valueInspect(v);
@@ -1136,6 +1149,8 @@ inline std::string typeName(ObjectType t) {
 // Deep equality: numbers compare across types (5 == 5.0), lists/maps by content, functions by identity
 inline bool valueEquals(const Value& a, const Value& b);   // defined in value.hpp; lists compare Values
 inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
+    if (renderDepth() >= MAX_RENDER_DEPTH) return false;   // pathological deep compare -> not-equal, not a crash
+    RenderGuard g;
     bool aNum = (a->type() == ObjectType::INTEGER || a->type() == ObjectType::FLOAT);
     bool bNum = (b->type() == ObjectType::INTEGER || b->type() == ObjectType::FLOAT);
     // complex == complex, and 3+0j == 3 (Python rule)
