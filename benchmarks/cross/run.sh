@@ -26,7 +26,7 @@ declare -A CMD=(
 declare -A EXT=(
   [lovax]="lov" [lua54]="lua" [lua55]="lua" [luajit]="lua" [python]="py" [node]="js"
 )
-BENCHES=(fib strcat hashmap btree gc regex jsonb mandel sieve qsort)
+BENCHES=(fib intloop strcat hashmap btree gc regex jsonb mandel sieve qsort)
 
 have() { command -v "$1" >/dev/null 2>&1; }
 # best-of-REPS wall-clock in ms for: runner file
