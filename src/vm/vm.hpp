@@ -910,12 +910,6 @@ private:
         };
         auto constant = [&](uint16_t idx) -> const Value& { return consts[idx]; };
 
-        // Unwinds everything and reports; the first error is terminal.
-        auto runtimeError = [&](const Ref<Object>& err) -> Ref<Object> {
-            frames_.resize(exitFrameDepth);
-            return err;
-        };
-
         // Error dispatch (RFC-008): if a try handler is active within this run's
         // frame window, unwind to it, bind the error message, and resume in catch.
         auto tryHandle = [&](const Ref<Object>& err) -> bool {
