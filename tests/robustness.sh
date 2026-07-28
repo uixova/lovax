@@ -39,6 +39,19 @@ import sys;L=[]
 for i in range(20000): L.append(' '*i+'if true:')
 L.append(' '*20000+'say 1');sys.stdout.write(chr(10).join(L))"    "$TMP/blk.lov";    nocrash "deep block nesting (20k)"       "$TMP/blk.lov"
 
+# --- pathological RUNTIME structures: the recursive display/compare walks must
+#     not overflow the stack (renderDepth cap) ---
+py "
+print('set x=[1]'); print('set i=0')
+print('while i < 200000:'); print('  x=[x]'); print('  i=i+1')
+print('say x')"                                                   "$TMP/rin.lov";   nocrash "say 200k-deep nested list"      "$TMP/rin.lov"
+py "
+print('set x=[1]'); print('set i=0')
+print('while i < 200000:'); print('  x=[x]'); print('  i=i+1')
+print('set y=[1]'); print('set j=0')
+print('while j < 200000:'); print('  y=[y]'); print('  j=j+1')
+print('say x == y')"                                              "$TMP/req.lov";   nocrash "compare 200k-deep lists"        "$TMP/req.lov"
+
 # --- normal-size versions: must still work ---
 py "print('say ' + '+'.join(['1']*9000))"                         "$TMP/ok1.lov";    runs "9000-term expr"  "$TMP/ok1.lov" "9000"
 py "print('say len(\"' + 'a'*500000 + '\")')"                     "$TMP/ok2.lov";    runs "500k string"     "$TMP/ok2.lov" "500000"
@@ -47,6 +60,8 @@ py "
 L=[]
 for i in range(60): L.append(' '*i+'if true:')
 L.append(' '*60+'say 42');print(chr(10).join(L))"                 "$TMP/ok4.lov";    runs "60-deep nesting" "$TMP/ok4.lov" "42"
+py "print('say [1, [2, [3]], \"a\"]')"                            "$TMP/ok5.lov";    runs "nested display"  "$TMP/ok5.lov" '[1, [2, [3]], "a"]'
+py "print('say [1,2]==[1,2], [1,2]==[1,3]')"                      "$TMP/ok6.lov";    runs "nested equals"   "$TMP/ok6.lov" "true false"
 
 echo
 [ "$fail" = 0 ] && echo "ROBUSTNESS GATE PASSED" || { echo "ROBUSTNESS GATE FAILED"; exit 1; }
