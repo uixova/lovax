@@ -192,7 +192,8 @@ inline ObjPtr makeMathModule() {
         double a = asDouble(args[0]), b = asDouble(args[1]), t = asDouble(args[2]);
         if (a == b) return makeObj<FloatObject>(0.0);
         t = (t - a) / (b - a);
-        if (t < 0) t = 0; if (t > 1) t = 1;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
         return makeObj<FloatObject>(t * t * (3 - 2 * t));
     });
     // ping_pong(t, length): bounces t back and forth in [0, length]

@@ -884,7 +884,7 @@ inline void installBuiltins(BuiltinTable& out) {
     });
 
     // sorted(list): a NEW sorted list (sort() sorts in place)
-    def("sorted", [](const Args& args, int line, const CallFn& call) -> ObjPtr {
+    def("sorted", [](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 1 || args[0]->type() != ObjectType::LIST) {
             return makeError("sorted() expects a list", line);
         }

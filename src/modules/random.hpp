@@ -115,7 +115,7 @@ inline ObjPtr makeRandomModule() {
     });
 
     // beta(a, b): ratio of gammas
-    def("beta", [needNum](const Args& args, int line, const CallFn& call) -> ObjPtr {
+    def("beta", [needNum](const Args& args, int line, const CallFn&) -> ObjPtr {
         if (args.size() != 2 || !needNum(args, 0) || !needNum(args, 1)) {
             return makeError("random.beta(a, b) expects two numbers", line);
         }

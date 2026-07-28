@@ -398,7 +398,6 @@ private:
     bool tagged() const { return (u_ & TAGS) == TAGS; }
     uint64_t tbits() const { return u_ & TAG_MASK; }
     Object* ptr() const { return reinterpret_cast<Object*>(u_ & PAYLOAD); }
-    bool isBoxedInt() const { return tbits() == mk(T_BOXINT); }
 
 public:
     Value() = default;
