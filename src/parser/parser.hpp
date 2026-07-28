@@ -49,10 +49,24 @@ private:
     Token curToken;
     Token peekToken;
     std::vector<ParserError> errorList;
-    int exprDepth = 0; // Protection against pathological nesting (fuzz safety)
+    int exprDepth = 0;  // Protection against pathological expression nesting
+    int blockDepth = 0; // Protection against pathological block nesting
 
     static constexpr int MAX_ERRORS = 20;
     static constexpr int MAX_EXPR_DEPTH = 200;
+    // A left-associative CHAIN (a+b+c..., a.b.c..., a[0][0]...) is parsed
+    // iteratively here but builds a left-nested AST of that depth; the COMPILER
+    // and the AST destructor then recurse that deep. Cap the chain so a huge flat
+    // expression is a graceful error, not a stack-overflow crash. 10000 is far
+    // below the measured safe depth (~60k on an 8MB stack) yet beyond any real
+    // expression. (Nesting via parseExpression recursion is bounded separately by
+    // MAX_EXPR_DEPTH above.)
+    static constexpr int MAX_EXPR_CHAIN = 10000;
+    // Nested blocks (if/for/while/fn bodies) recurse through parseBlockStatement;
+    // deep enough nesting overflows the parser/compiler stack (measured crash
+    // ~14-20k deep on an 8MB stack). Cap it — 1000 is safe even on a ~1MB stack
+    // and far beyond any real code's block nesting.
+    static constexpr int MAX_BLOCK_DEPTH = 1000;
 
     std::unordered_map<TokenType, Precedence> precedences = {
         {TokenType::OR, Precedence::P_OR},
@@ -717,6 +731,13 @@ private:
         auto block = std::make_unique<BlockStatement>();
         block->token = curToken;
 
+        DepthGuard guard(blockDepth);   // graceful error instead of a stack overflow
+        if (blockDepth > MAX_BLOCK_DEPTH) {
+            addError("block nesting too deep: limit (" +
+                     std::to_string(MAX_BLOCK_DEPTH) + ") exceeded", curToken);
+            return block;
+        }
+
         nextParserToken(); // Skip the INDENT token and focus on the first statement
 
         while (curToken.type != TokenType::DEDENT &&
@@ -844,7 +865,13 @@ private:
         std::unique_ptr<Expression> leftExp = parsePrefix();
         if (leftExp == nullptr) return nullptr;
 
+        int chainLen = 0;   // depth of the left-nested AST this loop builds
         while (peekToken.type != TokenType::END_OF_FILE && precedence < peekPrecedence()) {
+            if (++chainLen > MAX_EXPR_CHAIN) {
+                addError("expression too long: chain limit (" +
+                         std::to_string(MAX_EXPR_CHAIN) + ") exceeded", curToken);
+                return nullptr;
+            }
             switch (peekToken.type) {
                 case TokenType::LPAREN:
                     nextParserToken();
