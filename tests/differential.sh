@@ -22,11 +22,11 @@ fail=0; n=0
 diffcheck() { # file
     n=$((n+1))
     local a b c j r
-    a=$(run "$TMP/nanbox" "$1")               # JIT on (default: template compiler)
+    a=$(run "$TMP/nanbox" "$1")               # JIT on (default: RA compiler)
     b=$(run "$TMP/box16"  "$1")
     c=$(run "$TMP/nocg"   "$1")
     j=$(run "$TMP/nanbox" --no-jit "$1")      # same binary, JIT off — the key axis
-    r=$(run "$TMP/nanbox" --jit-ra "$1")      # Stage-4a register allocator on
+    r=$(run "$TMP/nanbox" --no-ra "$1")       # template compiler (RA off) — the other JIT tier
     if [ "$a" != "$b" ]; then
         echo "DIVERGENCE 8B vs 16B: $1"; diff <(printf '%s' "$a") <(printf '%s' "$b") | head -12; fail=1
     fi
@@ -37,7 +37,7 @@ diffcheck() { # file
         echo "DIVERGENCE JIT-on vs JIT-off: $1"; diff <(printf '%s' "$a") <(printf '%s' "$j") | head -12; fail=1
     fi
     if [ "$a" != "$r" ]; then
-        echo "DIVERGENCE template-JIT vs RA-JIT: $1"; diff <(printf '%s' "$a") <(printf '%s' "$r") | head -12; fail=1
+        echo "DIVERGENCE RA-JIT vs template-JIT: $1"; diff <(printf '%s' "$a") <(printf '%s' "$r") | head -12; fail=1
     fi
 }
 

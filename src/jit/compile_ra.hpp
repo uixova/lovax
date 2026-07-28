@@ -52,7 +52,12 @@
 namespace Lovax {
 namespace Jit {
 
-inline bool jitRAEnabled = false;   // --jit-ra; default off -> zero regression risk
+// The RA is ON by default now that it is proven (bit-identical to the interpreter
+// across all goldens, the differential RA axis, and the incremental-GC gate).
+// --no-ra turns it off (falls back to the template compiler); --jit-ra is kept as
+// a harmless explicit-on. When a loop region is not RA-eligible (calls / floats /
+// register pressure) it still falls back to the template compiler automatically.
+inline bool jitRAEnabled = true;
 
 class RegionCompilerRA {
 public:
