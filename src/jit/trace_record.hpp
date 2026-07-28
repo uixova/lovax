@@ -76,7 +76,10 @@ public:
     bool ok = true;
 
     // A cell is one interpreter storage location kept live across the region.
-    struct Cell { bool isGlobal; int idx; int vt; bool pinned; int poolIdx; };
+    // `dirty` = written somewhere in the region; a read-only pinned cell's memory
+    // still holds its prologue-loaded value, so its register never needs writing
+    // back (the Stage-5.6b snapshot skips it at every exit).
+    struct Cell { bool isGlobal; int idx; int vt; bool pinned; bool dirty; int poolIdx; };
     std::vector<Cell> cells;
     std::unordered_map<int,int> localCell;    // slot  -> cell index
     std::unordered_map<int,int> globalCell;   // gidx  -> cell index
@@ -85,6 +88,16 @@ public:
     int numPinned = 0;
     int maxDepth = 0;
     std::vector<int> otype;       // operand type by depth (valid for d < depth)
+
+    // A side-exit snapshot: the exact interpreter state to reconstruct when a
+    // guard fails at bytecode offset `resume`. `depth` operands are already
+    // published to the value stack by the exit; `dirtyCells` are the pinned
+    // cells whose registers must be written back (read-only cells are omitted —
+    // their memory is already current). This is the compact deopt record the
+    // Stage-5.6d optimizer will consume (it may reorder/eliminate IR but must
+    // rebuild precisely this state on exit).
+    struct Snapshot { size_t resume; int depth; };
+    std::vector<Snapshot> snaps;  // one per emitted side-exit / guard bail
 
     RegionCompilerTrace(const Chunk& c, size_t s, size_t e,
                         const Value* sl, const Value* gl, const unsigned char* def)
@@ -106,6 +119,7 @@ public:
         a.movAbs(RCX, TAG_INT);     a.orRR(dst, RCX);
     }
     void bailTo(size_t bytecodeOff, int depth) {
+        snaps.push_back(Snapshot{bytecodeOff, depth});   // record the deopt point
         for (int i = 0; i < depth; ++i) {
             if (otype[i] == VT_INT) boxTo(RDX, opReg(i));
             else                    a.movRR(RDX, opReg(i));   // float word is the value
@@ -186,6 +200,7 @@ inline bool RegionCompilerTrace::compile() {
     // A global that is DEFINE_GLOBAL'd anywhere is a per-iteration temp -> keep it
     // in memory; a global touched only by GET/SET is pinned to a register.
     std::unordered_map<int,bool> defd;   // gidx -> is DEFINE_GLOBAL'd in region
+    std::unordered_map<int,bool> dirtyL, dirtyG;   // written (SET/DEFINE) in region
     std::vector<int> localOrder, globalOrder;
 
     auto trTypeOf = [](VKind k, int& vt) -> bool {
@@ -212,11 +227,13 @@ inline bool RegionCompilerTrace::compile() {
         if (op == Op::GET_LOCAL || op == Op::SET_LOCAL) {
             int slot = (int)rdU16(off + 1);
             if (!localCell.count(slot)) { localCell[slot] = -1; localOrder.push_back(slot); }
+            if (op == Op::SET_LOCAL) dirtyL[slot] = true;
         }
         if (op == Op::GET_GLOBAL || op == Op::SET_GLOBAL || op == Op::DEFINE_GLOBAL) {
             int g = (int)rdU16(off + 1);
             if (!globalCell.count(g)) { globalCell[g] = -1; globalOrder.push_back(g); }
             if (op == Op::DEFINE_GLOBAL) defd[g] = true;
+            if (op == Op::SET_GLOBAL || op == Op::DEFINE_GLOBAL) dirtyG[g] = true;
         }
         depth += traceStackDelta(op);
         if (depth < 0) return false;
@@ -229,8 +246,9 @@ inline bool RegionCompilerTrace::compile() {
         VKind k = isGlobal ? rtGlobals[idx].tag() : rtSlots[idx].tag();
         if (isGlobal && !rtDefined[idx]) return false;     // must be live at entry
         int vt; if (!trTypeOf(k, vt)) return false;
+        bool dirty = isGlobal ? dirtyG.count(idx) : dirtyL.count(idx);
         int ci = (int)cells.size();
-        cells.push_back(Cell{isGlobal, idx, vt, (bool)pinned, -1});
+        cells.push_back(Cell{isGlobal, idx, vt, (bool)pinned, dirty, -1});
         if (isGlobal) globalCell[idx] = ci; else localCell[idx] = ci;
         return true;
     };
@@ -482,7 +500,8 @@ inline bool RegionCompilerTrace::compile() {
 
     a.bind(bailTail);
     for (auto& c : cells) {
-        if (!c.pinned) continue;                  // memory cells already coherent
+        if (!c.pinned || !c.dirty) continue;      // memory cells & read-only cells
+                                                  // already hold their current value
         Reg r = pinReg((int)(&c - &cells[0]));
         if (c.vt == VT_INT) boxTo(RDX, r);
         else                a.movRR(RDX, r);
