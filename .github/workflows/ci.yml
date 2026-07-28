@@ -89,6 +89,11 @@ jobs:
       - name: C++ unit tests
         run: ./tests/unit.sh
 
+      - name: Robustness gate (pathological source must not crash)
+        run: |
+          g++ -std=c++17 -O2 -o lovax src/main.cpp
+          ./tests/robustness.sh
+
       - name: Security gate (fuzz — no crashes allowed)
         run: |
           # Run the adversarial/fuzz suite under the ASan build: a memory bug
