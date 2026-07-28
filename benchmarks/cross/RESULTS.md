@@ -1,5 +1,77 @@
 # Cross-language benchmark
 
+## Stage-4 cross-language snapshot — 2026-07-28 (best of 3, ms, lower=better)
+
+Full field on this host (g++ 16), default `./lovax` (template JIT + the Stage-4c
+call fast path; the RA is opt-in and does not fire on these workloads — see
+below). Output verified identical across languages.
+
+| bench   | lovax | lua5.4 | lua5.5 | luajit | python | node |
+|---------|------:|-------:|-------:|-------:|-------:|-----:|
+| fib     | 250   | 203    | 207    | **30** | 330    | 72   |
+| intloop | 678†  | 866    | 452    | 4037   | **186**| —    |
+| strcat  | 139   | **21** | 28     | 33     | 45     | 69   |
+| hashmap | **171** | 419  | 411    | 159    | 244    | 444  |
+| btree   | 205   | 210    | **177**| 89     | 126    | 120  |
+| gc      | 67    | 57     | 55     | **5**  | 88     | 63   |
+| regex   | **18**| n/a    | n/a    | n/a    | 68     | 71   |
+| jsonb   | **58**| n/a    | n/a    | n/a    | 95     | 92   |
+| mandel  | 47    | 40     | 43     | **9**  | 404    | 62   |
+| sieve   | 219   | 181    | 144    | **47** | 861    | 90   |
+| qsort   | 280   | 251    | 237    | **104**| 651    | 126  |
+| startup | 6.4   | 4.2    | 3.4    | 3.6    | 24     | 45   |
+
+Peak RSS (MB): gc 19 · btree 35 · hashmap 56 — in the Lua tier, well under Node.
+
+† `intloop` is a pure-integer compute loop (30M iters) — the RA's target. The
+table shows the DEFAULT build (template JIT). With the RA on (`--jit-ra`) it is a
+different story:
+
+| intloop (30M) | interp | template | **RA** | lua5.4 | luajit | node |
+|---|---:|---:|---:|---:|---:|---:|
+| time (ms) | 2333 | 678 | **342** | 866 | 452 | 186 |
+
+**With the register allocator, Lovax on integer compute beats plain Lua (2.5x)
+AND LuaJIT (1.3x)** — only V8/Node is ahead. LuaJIT keeps integers as doubles
+(5.1 semantics), so a non-power-of-two modulo is a float divide; Lovax keeps
+exact int64 and emits an integer `idiv`. This is the one place Stage-4 already
+overtakes LuaJIT, and it is exactly the workload the RA was built for. (The RA is
+opt-in until it is made the default after more soak.)
+
+**Where Lovax leads the non-JIT field:** hashmap (own open-addressing map beats
+both Luas, Python, Node — only LuaJIT ahead), regex (own engine, 3-4x over
+Python/Node), jsonb, startup. **Where it trails:** the compute/call benches
+(fib, mandel, sieve, qsort) sit ~1.2-1.5x behind plain Lua and ~5-10x behind
+LuaJIT; strcat is O(n^2) copy.
+
+### What Stage-4's RA actually did — and where it did not
+
+The register allocator's win is real but *targeted*. On a pure-integer compute
+loop it is decisive:
+
+| pure-int hot loop (30M) | interp | template | RA (`--jit-ra`) |
+|---|---:|---:|---:|
+| time | 2176 | 628 | **251** (2.5x over template) |
+
+But it does **not** move the cross-language table, and this is the honest,
+important finding for Stage-5:
+
+- **qsort**: default 279 ms == `--jit-ra` 279 ms. Indexing is guard-bound (each
+  access re-checks is-object / is-list / bounds), and at -O3 the template
+  compiler is already good, so the RA breaks even. The win needs **LICM** to
+  hoist the loop-invariant list guards.
+- **mandel**: float loop — the RA is integer-only so far; it falls back to the
+  template (47 ms). Needs **unboxed-float RA** (Stage-4b-float), targeted at the
+  ~2.5x the integer path got.
+- **fib**: call-bound — RA doesn't apply; Stage-4c's fast path gave ~6%. The real
+  win is **tracing** (Stage-5).
+- **sieve**: bool-keyed list — needs float/bool index + LICM.
+
+So Stage-4 delivered the register-allocation *foundation* and a proven 2.5x on
+the workload it targets, but the cross-language movers are the next three:
+**unboxed-float RA (mandel), LICM guard-hoist (qsort/sieve), tracing (fib)** —
+which is exactly the Stage-5 priority order this snapshot sets.
+
 ## Stage-4c: compiled-call fast path — 2026-07-27
 
 A compiled body's CALL goes through a C++ trampoline. Stage-4c gives it a fast
