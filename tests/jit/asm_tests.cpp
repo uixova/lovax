@@ -174,6 +174,21 @@ int main(int argc, char** argv) {
         auto f = build<long long(*)()>(a);
         CHECK(f && f() == 1, "ucomisd + setcc A (5.0 > 3.0)");
     }
+    {   // divsd + movsdRR (register-register copy) — Stage-5 float RA
+        auto bits = [](double d){ unsigned long long u; std::memcpy(&u,&d,8); return u; };
+        Asm a;
+        a.pushR(RBP); a.movRR(RBP, RSP); a.subRI(RSP, 32);
+        a.movAbs(RAX, bits(10.0)); a.movMR(RBP, -8,  RAX);
+        a.movAbs(RAX, bits(4.0));  a.movMR(RBP, -16, RAX);
+        a.movsdXM(XMM0, RBP, -8); a.movsdXM(XMM2, RBP, -16);
+        a.divsd(XMM0, XMM2);                 // 10.0 / 4.0 = 2.5
+        a.movsdRR(XMM3, XMM0);               // XMM3 <- XMM0
+        a.movsdMX(RBP, -24, XMM3);
+        a.movRM(RAX, RBP, -24);
+        a.movRR(RSP, RBP); a.popR(RBP); a.ret();
+        auto f = build<unsigned long long(*)()>(a);
+        CHECK(f && f() == bits(2.5), "divsd + movsdRR => 2.5");
+    }
 
     // 5. backward branch loop: sum 1..n  (labels, jcc, cmp)
     {
