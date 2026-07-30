@@ -1,5 +1,24 @@
 # Cross-language benchmark
 
+## Stage-5 trace compiler is now the DEFAULT (after RA) — 2026-07-28
+
+The tracer graduated: `jitTraceEnabled = true`. The tier chain is now
+**RA → trace → template → interpreter**. The RA keeps the pure-int-local loops it
+is optimal at (intloop is unchanged: 187ms default, same as `--no-trace`); the
+trace compiler takes the float / global numeric loops the RA declines. So the
+float-kernel win is now out of the box, no flag:
+
+| mandel (200×200×60) | default (was template) | **default (now trace)** | lua5.4 | luajit |
+|---|---:|---:|---:|---:|
+| time (ms) | 24 | **13** | 40 | 9 |
+
+`--no-trace` restores the RA/template pipeline. Verified on the new default:
+golden 108/0; differential 122 programs (default trace-on == `--no-trace` == 16B ==
+switch == interpreter); robustness; jit_asm; ASan+UBSan+GC_STRESS_INC bit-identical.
+Placing trace AFTER the RA means it can never regress a loop the RA already handled
+and, being at least as good as the template on the float/global loops it takes, is
+a pure win. (Full trace-tier-first + trace-linking is Stage-5.6e.)
+
 ## Stage-5.6d: floats live in XMM registers across the region — 2026-07-28
 
 The tracer now has a real two-file register allocator: INT values stay UNBOXED in

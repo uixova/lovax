@@ -138,6 +138,7 @@ int main(int argc, char* argv[]) {
     bool jitRA = false;
     bool noRA = false;
     bool jitTrace = false;
+    bool noTrace = false;
     {
         auto& p = Lovax::StdLib::perms();
         // First pass: does any permission flag appear before the script?
@@ -167,6 +168,7 @@ int main(int argc, char* argv[]) {
             else if (f == "--jit-ra")      jitRA = true;
             else if (f == "--no-ra")       noRA = true;
             else if (f == "--jit-trace")   jitTrace = true;
+            else if (f == "--no-trace")    noTrace = true;
             else break; // first non-flag argument is the script path
         }
     }
@@ -244,9 +246,10 @@ int main(int argc, char* argv[]) {
     if (noJit) vm.jitEnabled_ = false;
     if (jitRA) Lovax::Jit::jitRAEnabled = true;    // explicit-on (RA is on by default)
     if (noRA)  Lovax::Jit::jitRAEnabled = false;   // --no-ra: fall back to the template compiler
-    if (jitTrace) Lovax::Jit::jitTraceEnabled = true;  // --jit-trace: enable the Stage-5.6a tracer
+    if (jitTrace) Lovax::Jit::jitTraceEnabled = true;  // explicit-on (trace is on by default)
+    if (noTrace)  Lovax::Jit::jitTraceEnabled = false; // --no-trace: fall back to RA / template
 #else
-    (void)noJit; (void)jitRA; (void)noRA; (void)jitTrace;   // JIT not compiled in on this platform; no-ops
+    (void)noJit; (void)jitRA; (void)noRA; (void)jitTrace; (void)noTrace;   // JIT not compiled in; no-ops
 #endif
     auto result = vm.interpret(program.get());
 

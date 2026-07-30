@@ -40,9 +40,13 @@
 namespace Lovax {
 namespace Jit {
 
-// Opt-in. --jit-trace turns it on; off by default so RA / template / interpreter
-// are the untouched pipeline until the tracer is proven across every gate.
-inline bool jitTraceEnabled = false;
+// On by default now that the tracer is proven bit-identical to the interpreter
+// across golden, the differential --jit-trace axis (122 programs), an 800-program
+// numeric + call-inline fuzz, and ASan+UBSan+GC_STRESS_INC. It sits AFTER the RA
+// in the pipeline (RA keeps the pure-int-local loops it is optimal at), taking the
+// float / global loops the RA declines — so it never regresses what RA does and
+// delivers the float-kernel win out of the box. --no-trace turns it off.
+inline bool jitTraceEnabled = true;
 
 class RegionCompilerTrace {
 public:
