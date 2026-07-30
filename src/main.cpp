@@ -139,6 +139,8 @@ int main(int argc, char* argv[]) {
     bool noRA = false;
     bool jitTrace = false;
     bool noTrace = false;
+    bool jitNumFn = false;
+    bool noNumFn = false;
     {
         auto& p = Lovax::StdLib::perms();
         // First pass: does any permission flag appear before the script?
@@ -169,6 +171,8 @@ int main(int argc, char* argv[]) {
             else if (f == "--no-ra")       noRA = true;
             else if (f == "--jit-trace")   jitTrace = true;
             else if (f == "--no-trace")    noTrace = true;
+            else if (f == "--jit-numfn")   jitNumFn = true;
+            else if (f == "--no-numfn")    noNumFn = true;
             else break; // first non-flag argument is the script path
         }
     }
@@ -248,8 +252,10 @@ int main(int argc, char* argv[]) {
     if (noRA)  Lovax::Jit::jitRAEnabled = false;   // --no-ra: fall back to the template compiler
     if (jitTrace) Lovax::Jit::jitTraceEnabled = true;  // explicit-on (trace is on by default)
     if (noTrace)  Lovax::Jit::jitTraceEnabled = false; // --no-trace: fall back to RA / template
+    if (jitNumFn) Lovax::Jit::jitNumFnEnabled = true;  // explicit-on (numfn is on by default)
+    if (noNumFn)  Lovax::Jit::jitNumFnEnabled = false; // --no-numfn: Stage-6a recursion JIT off
 #else
-    (void)noJit; (void)jitRA; (void)noRA; (void)jitTrace; (void)noTrace;   // JIT not compiled in; no-ops
+    (void)noJit; (void)jitRA; (void)noRA; (void)jitTrace; (void)noTrace; (void)jitNumFn; (void)noNumFn;
 #endif
     auto result = vm.interpret(program.get());
 

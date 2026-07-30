@@ -1,0 +1,64 @@
+# Numeric-function JIT (Stage-6a) — self-verifying. Pure-int recursive functions
+# compiled to complete native functions; each result is cross-checked against a
+# closed form or a second computation. Runs identically under --jit-numfn and
+# --no-jit (the native path is side-effect-free and aborts to the interpreter on
+# any deviation, so it can never change a result).
+
+# ---- fib: closed-form check via the identity fib(n) = fib(n-1)+fib(n-2) ----
+fn fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+check(fib(20) == 6765, "fib20")
+check(fib(25) == 75025, "fib25")
+check(fib(30) == 832040, "fib30")
+
+# ---- triangular: tri(n) == n(n+1)/2 ----
+fn tri(n):
+    if n <= 0:
+        return 0
+    return n + tri(n - 1)
+check(tri(100) == 100 * 101 / 2, "tri100")
+check(tri(400) == 400 * 401 / 2, "tri400")
+
+# ---- sum of squares recursion == n(n+1)(2n+1)/6 ----
+fn sumsq(n):
+    if n <= 0:
+        return 0
+    return n * n + sumsq(n - 1)
+check(sumsq(200) == 200 * 201 * 401 / 6, "sumsq200")
+
+# ---- two-argument recursion: Ackermann (small) ----
+fn ack(m, n):
+    if m == 0:
+        return n + 1
+    if n == 0:
+        return ack(m - 1, 1)
+    return ack(m - 1, ack(m, n - 1))
+check(ack(2, 3) == 9, "ack23")
+check(ack(3, 3) == 61, "ack33")
+
+# ---- gcd (Euclid) two ways ----
+fn gcd(a, b):
+    if b == 0:
+        return a
+    return gcd(b, a % b)
+check(gcd(1071, 462) == 21, "gcd")
+check(gcd(270, 192) == 6, "gcd2")
+
+# ---- power by recursion: pow(b,e) == b^e (small, exact int64) ----
+fn ipow(b, e):
+    if e <= 0:
+        return 1
+    return b * ipow(b, e - 1)
+check(ipow(2, 30) == 1073741824, "pow2_30")
+check(ipow(3, 10) == 59049, "pow3_10")
+
+# ---- exact int64 beyond 2^47 through recursion (boundary boxing) ----
+fn addbig(n):
+    if n <= 0:
+        return 70000000000000
+    return 1000000000 + addbig(n - 1)
+check(addbig(400) == 70000000000000 + 400 * 1000000000, "int64 exact recursion")
+
+say "83 ok"

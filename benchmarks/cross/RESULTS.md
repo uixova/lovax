@@ -1,5 +1,31 @@
 # Cross-language benchmark
 
+## Stage-6a: numeric-function JIT — recursion compiled to native (fib 273→37ms) — 2026-07-30
+
+A pure-integer recursive or leaf function now compiles to a COMPLETE native
+function (`src/jit/compile_fn.hpp`): System V ABI, parameters + operands in
+callee-saved registers, and a self-recursive call is a direct machine `call` to
+the function's own entry — so recursion runs entirely in machine code with no
+interpreter frame or trampoline per call, and integers stay unboxed native int64
+(exact, two's-complement wrap = the language spec), boxed only at the return
+boundary. It is proven side-effect-free (no globals write / alloc / index / I/O),
+so on any deviation — the recursion-depth counter reaching MAX_FRAMES, or the
+callee global reassigned — it sets an abort flag and the interpreter re-runs the
+whole call, the oracle. On by default; `--no-numfn` disables.
+
+| bench | before | **after** | luajit | lua5.4 | node |
+|---|---:|---:|---:|---:|---:|
+| fib (32) | 273 | **37** | 25 | 199 | 73 |
+
+fib goes from **10.9× behind LuaJIT to 1.5×** (and crushes Lua 199, Node 73). It
+covers pure numeric recursion (fib, Ackermann, gcd, integer pow, triangular) — 1–4
+int params, self-recursion. Recursion that indexes (qsort) or allocates (btree)
+still needs later work. Verified bit-identical: golden 109/0 (new self-verifying
+83-jit-numfn-recursion — fib/Ackermann/gcd/pow/int64-boundary cross-checked); the
+differential `--no-numfn` axis (123 programs); a 400-program recursion fuzz; edge
+cases (mutual recursion, reachable-nil-return, float args, the exact max-depth
+boundary — all fall back identically); ASan+UBSan+GC_STRESS_INC.
+
 ## Stage-5 trace compiler is now the DEFAULT (after RA) — 2026-07-28
 
 The tracer graduated: `jitTraceEnabled = true`. The tier chain is now

@@ -28,6 +28,7 @@
 #include "../jit/compile.hpp"
 #include "../jit/compile_ra.hpp"   // Stage-4a register-allocating region compiler
 #include "../jit/trace_record.hpp" // Stage-5.6a float/global trace region compiler
+#include "../jit/compile_fn.hpp"   // Stage-6a numeric whole-function (recursion) JIT
 #endif
 
 // The Lovax virtual machine: a stack-based bytecode interpreter with
@@ -555,6 +556,9 @@ private:
     static constexpr int JIT_THRESHOLD = 50;   // loop back-edges before we compile
     static constexpr int JIT_MAX_BAILS = 8;    // consecutive guard-bails -> blacklist
     static constexpr int JIT_BODY_THRESHOLD = 10;  // calls before we compile a body
+    static constexpr int JIT_NUMFN_THRESHOLD = 10; // calls before we compile a numeric fn
+    static_assert(Jit::NUMFN_MAX_DEPTH == MAX_FRAMES,
+                  "numeric-fn depth guard must match the interpreter's call-depth limit");
     struct JitEntry { int count = 0; Jit::Region region; int bails = 0; bool dead = false; };
     // Keyed by the loop-head instruction pointer: stable for the life of a Proto
     // (bytecode is immutable after compilation), unique per loop.
@@ -1394,6 +1398,49 @@ private:
                 VM_CASE(CALL) {
                     int argc = readByte();
                     gcSafepoint();   // stack = [callee, args..] are all roots here
+#ifdef LOVAX_JIT_ACTIVE
+                    // Numeric-function JIT (Stage-6a): a pure-int recursive/leaf
+                    // function compiled to a complete native function. Side-effect
+                    // free, so on any deviation it aborts and we fall through to the
+                    // interpreter, which re-runs the whole call.
+                    if (Jit::jitNumFnEnabled) {
+                        Value& callee = peek(argc);
+                        if (callee.isObjType(ObjectType::FUNCTION)) {
+                            ClosureObject* cl = static_cast<ClosureObject*>(callee.asObj());
+                            const Chunk& ch = cl->proto->chunk;
+                            if (ch.numFn && argc == ch.numFnArity) {
+                                bool allInt = true;
+                                for (int i = 0; i < argc; ++i)
+                                    if (!peek(argc - 1 - i).isInt()) { allInt = false; break; }
+                                if (allInt) {
+                                    int64_t av[4];
+                                    for (int i = 0; i < argc; ++i) av[i] = peek(argc - 1 - i).asInt();
+                                    Jit::g_numAbort = 0;
+                                    int64_t res = Jit::callNumFn(ch.numFn, argc, av,
+                                                                 (int64_t)frames_.size());
+                                    if (!Jit::g_numAbort) {
+                                        sp_ -= (argc + 1);
+                                        push(Value::integer(res));   // exact int64 boundary boxing
+                                        VM_NEXT_FAST;
+                                    }
+                                    // aborted: fall through to callValue (the oracle)
+                                }
+                            } else if (!ch.numFn && !ch.numFnDead && cl->moduleGlobals == nullptr) {
+                                const Proto& p = *cl->proto;
+                                if (!p.variadic && argc == p.paramCount &&
+                                    argc == p.requiredCount && !gcPending) {
+                                    if (++ch.numFnCount >= JIT_NUMFN_THRESHOLD) {
+                                        Jit::NumFnResult r = Jit::compileNumericFn(
+                                            *cl->proto, cl, globals_.data());
+                                        if (r.fn) { ch.numFn = r.fn; ch.numFnCode = r.code;
+                                                    ch.numFnCodeSize = r.size; ch.numFnArity = r.arity; }
+                                        else ch.numFnDead = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+#endif
                     // Exact-arity closure call, inlined: no defaults in play, no
                     // variadic collection — the dominant call shape in real code.
                     {

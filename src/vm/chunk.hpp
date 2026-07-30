@@ -129,6 +129,17 @@ struct Chunk {
     mutable int jitBodyCount = 0;
     mutable bool jitBodyDead = false;
 
+    // Numeric-function JIT (Stage-6a): a pure integer recursive/leaf function
+    // compiled to a COMPLETE native function (System V ABI, self-recursion via a
+    // direct machine call). Side-effect-free, so any runtime deviation aborts to
+    // the interpreter, which re-runs the whole call.
+    mutable void* numFn = nullptr;
+    mutable void* numFnCode = nullptr;
+    mutable size_t numFnCodeSize = 0;
+    mutable int numFnArity = 0;
+    mutable int numFnCount = 0;
+    mutable bool numFnDead = false;
+
     uint16_t addIC() {
         icache.push_back(0xFFFFFFFFu);
         return (uint16_t)(icache.size() - 1);
