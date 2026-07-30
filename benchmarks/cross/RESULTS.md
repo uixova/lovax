@@ -1,5 +1,26 @@
 # Cross-language benchmark
 
+## Stage-5.6d: floats live in XMM registers across the region — 2026-07-28
+
+The tracer now has a real two-file register allocator: INT values stay UNBOXED in
+GP registers and FLOAT values stay as DOUBLES in XMM registers for the whole
+region. Stage-5.6a carried floats as their raw word in a GP register and bounced
+each one into an XMM scratch for every SSE op (movq in / op / movq out); a float
+threading through a chain of ops paid that bounce every step. Now a float op reads
+its XMM operands directly (`addsd xmm,xmm`) and leaves the result in place — only a
+genuine int→float coercion (`cvtsi2sd`) or the memory boundary (a plain `movsd` of
+the 8-byte double, since a float's NaN-box word *is* the double) touches both
+files. This is the same trick LuaJIT gets from keeping floats in xmm.
+
+| mandel (200×200×60) | interp | default (template) | 5.6a trace | **5.6d trace** | lua5.4 | luajit |
+|---|---:|---:|---:|---:|---:|---:|
+| time (ms) | 116 | 24 | 14 | **12.8** | 40 | 9 |
+
+The float kernel is now **1.85× the template default and within 1.4× of LuaJIT**
+(from ~5× behind at Stage-4). Bit-identical across golden (108/0), the differential
+`--jit-trace` axis (122 programs), a 500-program numeric-loop fuzz, a 300-program
+call-inline fuzz, and ASan+UBSan+GC_STRESS_INC. `--jit-trace` stays opt-in.
+
 ## Stage-5.6c: call inlining into loop traces — 2026-07-28
 
 The trace compiler now inlines a called function's body into a hot loop, so the
