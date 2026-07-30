@@ -1874,9 +1874,9 @@ private:
                 VM_CASE(INTERP) {
                     uint16_t n = readU16();
                     std::string out;
-                    for (int i = n - 1; i >= 0; --i) out += valueInspect(peek(i));
+                    for (int i = n - 1; i >= 0; --i) appendValue(out, peek(i));  // no per-part temp
                     sp_ -= n;
-                    push(Value::object(makeObj<StringObject>(out)));
+                    push(Value::object(makeObj<StringObject>(std::move(out))));   // move, no copy
                     VM_NEXT;
                 }
                 VM_CASE(SAY) {
