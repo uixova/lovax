@@ -1354,19 +1354,20 @@ private:
                         if (!e.dead && ++e.count >= JIT_THRESHOLD) {
                             size_t headOff = (size_t)(ip - frame->chunk->code.data());
                             size_t endOff  = (size_t)(afterLoop - frame->chunk->code.data());
-                            // Stage-5.6a: try the trace compiler first (opt-in) —
-                            // it takes numeric (int+float) global/local loops using
-                            // runtime-observed types; then the register allocator
-                            // (CALL-free integer/index loops); then the template
-                            // compiler, which stays the oracle. Each falls back to
-                            // the next automatically.
-                            if (Jit::jitTraceEnabled)
+                            // Tier chain (each falls back to the next): the
+                            // register allocator first — it is optimal on the
+                            // pure-int-local loops it takes; then the Stage-5 trace
+                            // compiler, which takes the float / global numeric loops
+                            // the RA declines (runtime-observed types, floats in
+                            // XMM); then the template compiler, the differential
+                            // oracle.
+                            if (Jit::jitRAEnabled)
+                                e.region = Jit::compileRegionRA(*frame->chunk, headOff, endOff);
+                            if (!e.region.fn && Jit::jitTraceEnabled)
                                 e.region = Jit::compileRegionTrace(
                                     *frame->chunk, headOff, endOff,
                                     stackAt(frame->base + 1), globals_.data(),
                                     globalDefined_.data());
-                            if (!e.region.fn && Jit::jitRAEnabled)
-                                e.region = Jit::compileRegionRA(*frame->chunk, headOff, endOff);
                             if (!e.region.fn)
                                 e.region = Jit::compileRegion(*frame->chunk, headOff, endOff);
                             if (e.region.fn) jitCompiled_++;

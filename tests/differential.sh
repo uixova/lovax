@@ -27,7 +27,7 @@ diffcheck() { # file
     c=$(run "$TMP/nocg"   "$1")
     j=$(run "$TMP/nanbox" --no-jit "$1")      # same binary, JIT off — the key axis
     r=$(run "$TMP/nanbox" --no-ra "$1")       # template compiler (RA off) — the other JIT tier
-    t=$(run "$TMP/nanbox" --jit-trace "$1")   # Stage-5.6a float/global trace compiler tier
+    t=$(run "$TMP/nanbox" --no-trace "$1")    # trace on-by-default vs off — the Stage-5 axis
     if [ "$a" != "$b" ]; then
         echo "DIVERGENCE 8B vs 16B: $1"; diff <(printf '%s' "$a") <(printf '%s' "$b") | head -12; fail=1
     fi
@@ -41,7 +41,7 @@ diffcheck() { # file
         echo "DIVERGENCE RA-JIT vs template-JIT: $1"; diff <(printf '%s' "$a") <(printf '%s' "$r") | head -12; fail=1
     fi
     if [ "$a" != "$t" ]; then
-        echo "DIVERGENCE trace-JIT vs default: $1"; diff <(printf '%s' "$a") <(printf '%s' "$t") | head -12; fail=1
+        echo "DIVERGENCE default(trace-on) vs --no-trace: $1"; diff <(printf '%s' "$a") <(printf '%s' "$t") | head -12; fail=1
     fi
 }
 
