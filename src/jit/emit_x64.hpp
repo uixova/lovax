@@ -149,6 +149,7 @@ public:
     // ---- branches ----
     void jmp(Label& l)          { u8(0xE9); ref(l); }
     void jcc(Cond c, Label& l)  { u8(0x0F); u8((uint8_t)(0x80 + c)); ref(l); }
+    void callLabel(Label& l)    { u8(0xE8); ref(l); }   // direct rel32 call (self-recursion)
     void bind(Label& l) {
         l.bound = (int)buf.size();
         for (size_t at : l.patches) patchRel32(at, l.bound);

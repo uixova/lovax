@@ -28,6 +28,7 @@ diffcheck() { # file
     j=$(run "$TMP/nanbox" --no-jit "$1")      # same binary, JIT off — the key axis
     r=$(run "$TMP/nanbox" --no-ra "$1")       # template compiler (RA off) — the other JIT tier
     t=$(run "$TMP/nanbox" --no-trace "$1")    # trace on-by-default vs off — the Stage-5 axis
+    nf=$(run "$TMP/nanbox" --no-numfn "$1")   # numfn on-by-default vs off — the Stage-6a axis
     if [ "$a" != "$b" ]; then
         echo "DIVERGENCE 8B vs 16B: $1"; diff <(printf '%s' "$a") <(printf '%s' "$b") | head -12; fail=1
     fi
@@ -42,6 +43,9 @@ diffcheck() { # file
     fi
     if [ "$a" != "$t" ]; then
         echo "DIVERGENCE default(trace-on) vs --no-trace: $1"; diff <(printf '%s' "$a") <(printf '%s' "$t") | head -12; fail=1
+    fi
+    if [ "$a" != "$nf" ]; then
+        echo "DIVERGENCE default(numfn-on) vs --no-numfn: $1"; diff <(printf '%s' "$a") <(printf '%s' "$nf") | head -12; fail=1
     fi
 }
 
