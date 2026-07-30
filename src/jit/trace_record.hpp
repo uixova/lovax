@@ -38,8 +38,10 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include "compile.hpp"          // JitCtx, Region, JitFn, JIT_* constants, Asm
 #include "trace_ir.hpp"         // linear typed SSA IR (the record target)
 
@@ -62,7 +64,9 @@ public:
 
     static constexpr uint64_t TAG_INT   = JIT_TAGS | ((uint64_t)4 << JIT_TAG_SHIFT);
 
-    enum VT { VT_INT = 0, VT_NUM = 1 };   // unboxed int64 | raw double-bits word
+    // unboxed int64 | raw double-bits word | a callee closure word (consumed only
+    // by CALL — never enters arithmetic; a numeric op on one is a bail-compile)
+    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2 };
 
     const Chunk& chunk;
     size_t start, end;
@@ -98,6 +102,14 @@ public:
     // rebuild precisely this state on exit).
     struct Snapshot { size_t resume; int depth; };
     std::vector<Snapshot> snaps;  // one per emitted side-exit / guard bail
+
+    // Stage-5.6c call inlining. A global whose GET feeds a CALL is a callee (never
+    // a numeric cell); each inlinable CALL records its leaf callee proto, the exact
+    // closure word to guard the global against, and the arg count.
+    std::unordered_set<int> calleeGlobals;
+    std::unordered_map<size_t, const Proto*> inlineProto;   // CALL off -> leaf callee
+    std::unordered_map<size_t, uint64_t>     calleeWord;    // CALL off -> guard word
+    std::unordered_map<size_t, int>          calleeArgc;
 
     RegionCompilerTrace(const Chunk& c, size_t s, size_t e,
                         const Value* sl, const Value* gl, const unsigned char* def)
@@ -160,6 +172,162 @@ public:
         else                    a.movqXR(x, opReg(d));
     }
 
+    // ---- numeric primitives shared by the main body and inlined callees ----
+    // `dd` = operand depth to operate at (top two = dd-2, dd-1 -> dd-2). A guard
+    // failure resumes the interpreter at (bailOff, bailDepth), which for an inline
+    // is the CALL site with its pre-call stack — never the inline's own temps.
+    // Returns false (via ok) only on a compile-time type error.
+    void numericBinary(int kind, int dd, size_t bailOff, int bailDepth) {  // 0=add 1=sub 2=mul
+        if (otype[dd - 2] == VT_CALLEE || otype[dd - 1] == VT_CALLEE) { ok = false; return; }
+        int lt = otype[dd - 2], rt = otype[dd - 1];
+        Reg lhs = opReg(dd - 2), rhs = opReg(dd - 1);
+        if (lt == VT_INT && rt == VT_INT) {
+            a.movRR(RAX, lhs);
+            if (kind == 0) a.addRR(RAX, rhs);
+            else if (kind == 1) a.subRR(RAX, rhs);
+            else a.imulRR(RAX, rhs);
+            a.movRR(RCX, RAX); a.shlRI(RCX, 17); a.sarRI(RCX, 17); a.cmpRR(RCX, RAX);
+            Label okL; a.jcc(E, okL); bailTo(bailOff, bailDepth); a.bind(okL);
+            a.movRR(lhs, RAX);
+            otype[dd - 2] = VT_INT;
+        } else {
+            toXmm(dd - 2, XMM0); toXmm(dd - 1, XMM1);
+            if (kind == 0) a.addsd(XMM0, XMM1);
+            else if (kind == 1) a.subsd(XMM0, XMM1);
+            else a.mulsd(XMM0, XMM1);
+            a.ucomisd(XMM0, XMM0);
+            Label okN; a.jcc(NP, okN); bailTo(bailOff, bailDepth); a.bind(okN);
+            a.movqRX(lhs, XMM0);
+            otype[dd - 2] = VT_NUM;
+        }
+    }
+    // immediate int arith on the top operand in place (ADD_I/SUB_I/MUL_I/…).
+    void immBinary(Op op, int16_t k, int dd, size_t bailOff, int bailDepth) {
+        if (otype[dd - 1] != VT_INT) { ok = false; return; }
+        Reg r = opReg(dd - 1);
+        a.movRR(RAX, r); a.movAbs(RDX, (uint64_t)(int64_t)k);
+        switch (op) {
+            case Op::ADD_I:  a.addRR(RAX, RDX); break;
+            case Op::SUB_I:  a.subRR(RAX, RDX); break;
+            case Op::MUL_I:  a.imulRR(RAX, RDX); break;
+            case Op::BAND_I: a.andRR(RAX, RDX); break;
+            case Op::BOR_I:  a.orRR(RAX, RDX);  break;
+            case Op::BXOR_I: a.xorRR(RAX, RDX); break;
+            default: break;
+        }
+        if (op == Op::ADD_I || op == Op::SUB_I || op == Op::MUL_I) {
+            a.movRR(RCX, RAX); a.shlRI(RCX, 17); a.sarRI(RCX, 17); a.cmpRR(RCX, RAX);
+            Label okL; a.jcc(E, okL); bailTo(bailOff, bailDepth); a.bind(okL);
+        }
+        a.movRR(r, RAX);
+    }
+    void modBinary(int16_t k, int dd) {
+        Reg r = opReg(dd - 1);
+        a.movRR(RAX, r); a.movAbs(RCX, (uint64_t)(int64_t)k);
+        a.cqo(); a.idivR(RCX); a.movRR(RAX, RDX);
+        Label done;
+        a.cmpRI(RAX, 0); a.jcc(E, done);
+        a.movRR(RDX, RAX); a.xorRR(RDX, RCX);
+        a.cmpRI(RDX, 0); a.jcc(GE, done);
+        a.addRR(RAX, RCX);
+        a.bind(done);
+        a.movRR(r, RAX);
+    }
+    void bitBinary(Op op, int dd) {
+        if (otype[dd - 2] != VT_INT || otype[dd - 1] != VT_INT) { ok = false; return; }
+        Reg lhs = opReg(dd - 2), rhs = opReg(dd - 1);
+        a.movRR(RAX, lhs);
+        if (op == Op::BIT_AND) a.andRR(RAX, rhs);
+        else if (op == Op::BIT_OR) a.orRR(RAX, rhs);
+        else a.xorRR(RAX, rhs);
+        a.movRR(lhs, RAX); otype[dd - 2] = VT_INT;
+    }
+
+    // Validate a callee is a leaf single-return numeric expression we can inline,
+    // and report its internal operand-stack peak. Allowed body: local/const reads
+    // and numeric/immediate arithmetic, ending at the first RETURN, reached with
+    // no branch or call before it.
+    bool leafOk(const Proto* p, int argc, int& calleeMaxDepth) {
+        if (p->variadic || p->upvalueCount != 0) return false;
+        if (p->paramCount != argc || p->requiredCount != argc) return false;
+        if (p->localCount != p->paramCount) return false;   // params only, no body locals
+        const Chunk& cc = p->chunk;
+        int dd = 0; calleeMaxDepth = 0;
+        for (size_t o = 0; o < cc.code.size(); ) {
+            Op op = (Op)cc.code[o];
+            int len = instrLength(cc, o);
+            if (len == 0) return false;
+            switch (op) {
+                case Op::GET_LOCAL: dd += 1; break;
+                case Op::LGET2:     dd += 2; break;
+                case Op::CONST: {
+                    const Value& k = cc.consts[(uint16_t)((cc.code[o+1]<<8)|cc.code[o+2])];
+                    if (k.tag() == VKind::INT) { long long v=k.asInt(); if (v < -(1ll<<46) || v >= (1ll<<46)) return false; }
+                    else if (k.tag() != VKind::FLOAT) return false;
+                    dd += 1; break;
+                }
+                case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
+                case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: dd -= 1; break;
+                case Op::ADD_I: case Op::SUB_I: case Op::MUL_I: case Op::MOD_I:
+                case Op::BAND_I: case Op::BOR_I: case Op::BXOR_I:
+                    if (op == Op::MOD_I && (int16_t)((cc.code[o+1]<<8)|cc.code[o+2]) == 0) return false;
+                    break;
+                case Op::RETURN:
+                    return dd == 1;                 // exactly the result on the stack
+                default: return false;              // any branch/call/global/index -> not a leaf
+            }
+            if (dd < 0) return false;
+            if (dd > calleeMaxDepth) calleeMaxDepth = dd;
+            o += len;
+        }
+        return false;                               // no RETURN reached
+    }
+    // Emit the leaf callee's body inline. Args occupy opReg(base-argc .. base-1);
+    // callee local i == arg i. Temps push above `base`. The result lands at
+    // opReg(base-argc-1) (the old callee slot). Guard failures resume at the CALL.
+    void emitInlineCallee(const Proto* p, int base, int argc, size_t callOff) {
+        const Chunk& cc = p->chunk;
+        int argBase = base - argc;      // first arg operand index
+        int dd = base;                  // inline operands start above the args
+        auto pushLocal = [&](int i) {
+            a.movRR(opReg(dd), opReg(argBase + i));
+            otype[dd] = otype[argBase + i]; dd++;
+        };
+        for (size_t o = 0; o < cc.code.size(); ) {
+            Op op = (Op)cc.code[o];
+            int len = instrLength(cc, o);
+            uint16_t a0 = (uint16_t)((cc.code[o+1]<<8)|cc.code[o+2]);
+            switch (op) {
+                case Op::GET_LOCAL: pushLocal((int)a0); break;
+                case Op::LGET2: pushLocal((int)a0); pushLocal((int)(uint16_t)((cc.code[o+3]<<8)|cc.code[o+4])); break;
+                case Op::CONST: {
+                    const Value& k = cc.consts[a0];
+                    if (k.tag() == VKind::INT) { a.movAbs(opReg(dd), (uint64_t)k.asInt()); otype[dd] = VT_INT; }
+                    else { uint64_t b; double d = k.asFloat(); std::memcpy(&b,&d,8); a.movAbs(opReg(dd), b); otype[dd] = VT_NUM; }
+                    dd++; break;
+                }
+                case Op::ADD: case Op::ADD_INPLACE: numericBinary(0, dd, callOff, base); dd--; break;
+                case Op::SUB: numericBinary(1, dd, callOff, base); dd--; break;
+                case Op::MUL: numericBinary(2, dd, callOff, base); dd--; break;
+                case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: bitBinary(op, dd); dd--; break;
+                case Op::ADD_I: case Op::SUB_I: case Op::MUL_I:
+                case Op::BAND_I: case Op::BOR_I: case Op::BXOR_I:
+                    immBinary(op, (int16_t)a0, dd, callOff, base); break;
+                case Op::MOD_I: if (otype[dd-1] != VT_INT) { ok = false; } else modBinary((int16_t)a0, dd); break;
+                case Op::RETURN: {
+                    // move the single result down to the callee slot; drop callee+args
+                    a.movRR(opReg(base - argc - 1), opReg(dd - 1));
+                    otype[base - argc - 1] = otype[dd - 1];
+                    return;
+                }
+                default: ok = false; return;
+            }
+            if (!ok) return;
+            o += len;
+        }
+        ok = false;
+    }
+
     bool compile();
 };
 
@@ -174,6 +342,9 @@ inline bool traceSupported(Op op) {
         case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR:
         case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
         case Op::GREATER_EQ_JF: case Op::EQUAL_JF: case Op::NOT_EQUAL_JF:
+        case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
+        case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF:
+        case Op::CALL:
         case Op::JUMP: case Op::LOOP:
             return true;
         default:
@@ -191,6 +362,8 @@ inline int traceStackDelta(Op op) {
         case Op::BAND_I: case Op::BOR_I: case Op::BXOR_I: return 0;
         case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
         case Op::GREATER_EQ_JF: case Op::EQUAL_JF: case Op::NOT_EQUAL_JF: return -2;
+        case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
+        case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF: return -1;
         default: return 0;
     }
 }
@@ -209,6 +382,11 @@ inline bool RegionCompilerTrace::compile() {
         return false;                     // nil / bool / obj -> not numeric
     };
 
+    // `orig` tracks each operand's source global index (-1 = not a plain global),
+    // so a CALL can identify its callee global and guard/inline the leaf function.
+    std::vector<int> orig;
+    auto opush = [&](int o){ orig.push_back(o); };
+    auto opop  = [&](int n){ for (int i=0;i<n && !orig.empty();++i) orig.pop_back(); };
     int depth = 0;
     for (size_t off = start; off < end; ) {
         Op op = (Op)chunk.code[off];
@@ -235,11 +413,60 @@ inline bool RegionCompilerTrace::compile() {
             if (op == Op::DEFINE_GLOBAL) defd[g] = true;
             if (op == Op::SET_GLOBAL || op == Op::DEFINE_GLOBAL) dirtyG[g] = true;
         }
-        depth += traceStackDelta(op);
+
+        // stack-shape + origin bookkeeping (CALL is argc-dependent; the rest use
+        // the fixed delta table). depth is the pre-op operand count.
+        if (op == Op::CALL) {
+            int argc = chunk.code[off + 1];
+            int calleePos = depth - argc - 1;
+            if (calleePos < 0) return false;
+            int g = (calleePos < (int)orig.size()) ? orig[calleePos] : -1;
+            if (g < 0) return false;                       // callee not a plain global
+            // resolve + validate the leaf callee from its live value
+            if (!rtGlobals[g].isObj()) return false;
+            Object* ob = rtGlobals[g].asObj();
+            if (!ob || ob->tag != ObjectType::FUNCTION) return false;
+            ClosureObject* clo = static_cast<ClosureObject*>(ob);
+            if (clo->moduleGlobals != nullptr || clo->structShape) return false;
+            const Proto* p = clo->proto.get();
+            int calleeMaxDepth = 0;
+            if (!p || !leafOk(p, argc, calleeMaxDepth)) return false;
+            uint64_t w; std::memcpy(&w, &rtGlobals[g], 8);
+            inlineProto[off] = p; calleeWord[off] = w; calleeArgc[off] = argc;
+            calleeGlobals.insert(g);
+            int peak = depth + calleeMaxDepth;             // temps push above the args
+            if (peak > maxDepth) maxDepth = peak;
+            opop(argc + 1); opush(-1);
+            depth -= argc;                                 // pop callee+args, push result
+        } else {
+            int d = traceStackDelta(op);
+            switch (op) {
+                case Op::GET_GLOBAL: opush((int)rdU16(off + 1)); break;
+                case Op::GET_LOCAL: case Op::CONST: opush(-1); break;
+                case Op::DUP: opush(orig.empty() ? -1 : orig.back()); break;
+                case Op::SET_LOCAL: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL:
+                case Op::POP: opop(1); break;
+                case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
+                case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: opop(2); opush(-1); break;
+                case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
+                case Op::GREATER_EQ_JF: case Op::EQUAL_JF: case Op::NOT_EQUAL_JF: opop(2); break;
+                case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
+                case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF: opop(1); break;
+                case Op::ADD_I: case Op::SUB_I: case Op::MUL_I: case Op::MOD_I:
+                case Op::BAND_I: case Op::BOR_I: case Op::BXOR_I: opop(1); opush(-1); break;
+                default: break;
+            }
+            depth += d;
+        }
         if (depth < 0) return false;
         if (depth > maxDepth) maxDepth = depth;
         off += len;
     }
+
+    // Callee globals are consumed by CALL, never numeric cells — drop them.
+    { std::vector<int> keep;
+      for (int g : globalOrder) if (!calleeGlobals.count(g)) keep.push_back(g);
+      globalOrder.swap(keep); }
 
     // Build cells with their runtime-observed types.
     auto addCell = [&](bool isGlobal, int idx, int pinned) -> bool {
@@ -359,7 +586,12 @@ inline bool RegionCompilerTrace::compile() {
                 depth--; break;
             }
             case Op::GET_GLOBAL: {
-                int ci = globalCell[(int)rdU16(off + 1)];
+                int g = (int)rdU16(off + 1);
+                if (calleeGlobals.count(g)) {         // callee closure word for CALL
+                    a.movRM(opReg(depth), R_GLOBALS, g * 8);
+                    otype[depth] = VT_CALLEE; depth++; break;
+                }
+                int ci = globalCell[g];
                 if (cells[ci].pinned) {
                     a.movRR(opReg(depth), pinReg(ci));   // pinned: already unboxed/raw
                 } else {
@@ -474,6 +706,40 @@ inline bool RegionCompilerTrace::compile() {
                               : op == Op::EQUAL_JF ? E : NE;
                     Label fall; a.jcc(keep, fall); branchTo(target); a.bind(fall);
                 }
+                break;
+            }
+
+            case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
+            case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF: {
+                ensureInt(depth - 1, off, depth);
+                if (!ok) return false;
+                int16_t k = (int16_t)rdU16(off + 1);
+                size_t target = next + rdU16(off + 3);
+                Reg r = opReg(depth - 1);
+                depth -= 1;
+                a.movAbs(RCX, (uint64_t)(int64_t)k);
+                a.cmpRR(r, RCX);
+                Cond keep = op == Op::LT_I_JF ? L : op == Op::LE_I_JF ? LE
+                          : op == Op::GT_I_JF ? G : op == Op::GE_I_JF ? GE
+                          : op == Op::EQ_I_JF ? E : NE;
+                Label fall; a.jcc(keep, fall); branchTo(target); a.bind(fall);
+                break;
+            }
+
+            case Op::CALL: {
+                auto it = inlineProto.find(off);
+                if (it == inlineProto.end()) return false;   // pass-1 must have inlined it
+                const Proto* p = it->second;
+                int argc = calleeArgc[off];
+                int calleeSlot = depth - argc - 1;
+                // guard the callee global still holds the exact recorded closure;
+                // else resume the interpreter at the CALL with its pre-call stack
+                a.movAbs(RCX, calleeWord[off]);
+                a.cmpRR(opReg(calleeSlot), RCX);
+                Label okC; a.jcc(E, okC); bailTo(off, depth); a.bind(okC);
+                emitInlineCallee(p, depth, argc, off);       // result -> calleeSlot
+                if (!ok) return false;
+                depth -= argc;
                 break;
             }
 

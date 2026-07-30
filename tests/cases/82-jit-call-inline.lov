@@ -1,0 +1,65 @@
+# JIT call-inlining torture (Stage-5.6c) — self-verifying. Hot loops call small
+# leaf helpers; the trace compiler inlines each callee body into the loop (no
+# per-call frame), guarding the callee global against reassignment. Every result
+# is integer-valued and cross-checked, so a wrong inline or a missed guard trips
+# it. Runs identically under --jit-trace and --no-jit.
+
+# ---- int leaf helper in a hot loop: sum of (i*i+1) ----
+fn sq(x):
+    return x * x + 1
+set s = 0
+set i = 0
+while i < 100000:
+    s = s + sq(i)
+    i = i + 1
+# sum i*i for 0..99999 + 100000
+set n = 99999
+check(s == n * (n + 1) * (2 * n + 1) / 6 + 100000, "inline sq sum")
+say "sq:", s
+
+# ---- multi-arg leaf helper (params only, single return) ----
+fn wsum(a, b, c):
+    return a * 3 + b * 5 - c * 2
+set t = 0
+set j = 0
+while j < 200000:
+    t = t + wsum(j, j, j)
+    j = j + 1
+# each call = 3j+5j-2j = 6j ; sum 6*j for 0..199999
+set m = 199999
+check(t == 6 * (m * (m + 1) / 2), "inline multi-arg")
+say "wsum:", t
+
+# ---- float leaf helper (coercion + float arithmetic inside the inline) ----
+fn scale(x):
+    return x * 2.5 + 1.0
+set fs = 0.0
+set k = 0
+while k < 80000:
+    fs = fs + scale(k * 1.0)
+    k = k + 1
+# sum (2.5*k + 1.0) for 0..79999 = 2.5*(sum k) + 80000
+set p = 79999
+check(fs == 2.5 * (p * (p + 1) / 2) + 80000.0, "inline float helper")
+say "scale:", fs
+
+# ---- callee-reassignment guard: swap the helper mid-loop, sum must reflect it ----
+fn f(x):
+    return x + 1
+fn g(x):
+    return x + 1000
+set fn2 = f
+set acc = 0
+set q = 0
+while q < 60000:
+    acc = acc + fn2(q)
+    if q == 30000:
+        fn2 = g
+    q = q + 1
+# q in 0..30000 use f (+1), q in 30001..59999 use g (+1000)
+# sum q for 0..59999 + (30001 * 1) + (29999 * 1000)
+set sq2 = 59999 * 60000 / 2
+check(acc == sq2 + 30001 * 1 + 29999 * 1000, "callee reassign guard")
+say "reassign:", acc
+
+say "82 ok"

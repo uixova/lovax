@@ -1,5 +1,34 @@
 # Cross-language benchmark
 
+## Stage-5.6c: call inlining into loop traces — 2026-07-28
+
+The trace compiler now inlines a called function's body into a hot loop, so the
+call boundary (trampoline round-trip, frame push/pop, dispatch) vanishes. A global
+whose GET feeds a CALL is recognised as a callee (never a numeric cell); the leaf
+callee — a params-only, single-`return`, branch/call-free numeric expression — has
+its bytecode spliced into the trace with its params mapped to the argument
+registers already on the operand stack. The callee global is guarded against
+reassignment (its exact closure word is compared at the call site); a mismatch, or
+any guard inside the inlined body, side-exits to the interpreter *at the CALL* with
+the pre-call stack intact (the inline's temps sit above it and are never written).
+
+| loopcall (20M, 2 helpers/iter) | interp | default (template) | **--jit-trace** |
+|---|---:|---:|---:|
+| time (ms) | 4964 | 4818 | **4424** |
+
+~9% over the template default here (two trampoline calls per iteration removed);
+the win scales with call density. Bit-identical across golden (108/0, incl. new
+call-inline torture 82 — int/float/multi-arg helpers cross-checked, plus a
+mid-loop callee swap that exercises the reassignment guard), the differential
+`--jit-trace` axis (122 programs), a 300-program call-inline fuzz, and
+ASan+UBSan+GC_STRESS_INC.
+
+**Honest scope:** this inlines calls *inside loops*. It does NOT touch pure tree
+recursion (fib) — fib has no loop for the region tracer to trigger on, so it needs
+the record-while-execute trace recorder (follow the call across frames, unroll
+down-recursion, trace-link up-recursion) — the larger next slice. Call inlining is
+the reusable call-boundary machinery that recorder builds on.
+
 ## Stage-5.6a/b: the tracing JIT lands — float + globals — 2026-07-28
 
 The first FLOAT-capable region compiler (`src/jit/trace_record.hpp`, gated behind
