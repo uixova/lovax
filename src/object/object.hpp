@@ -2,6 +2,7 @@
 #define OBJECT_HPP
 
 #include <string>
+#include <charconv>
 #include <vector>
 #include <memory>
 #include <functional>
@@ -304,6 +305,7 @@ public:
     // except for the VM's in-place append (ADD_INPLACE), which resets it.
     mutable long long lenCache = -1;
     StringObject(const std::string& val) : Object(ObjectType::STRING), value(val) {}
+    StringObject(std::string&& val) : Object(ObjectType::STRING), value(std::move(val)) {}
     std::string inspect() const override { return value; } // Prints the raw text on the console
     size_t gcBytes() const override { return sizeof(*this) + value.capacity(); }
 };
@@ -560,6 +562,30 @@ inline std::string valueInspect(const Value& v) {
         case VKind::OBJ:   return v.asObj()->inspect();
     }
     return "";
+}
+// Append the inspect() form of `v` DIRECTLY into `out` — no per-part temporary
+// string. Integers go through std::to_chars (stack buffer, zero allocation);
+// a StringObject's bytes are appended in place. This is the INTERP/SAY hot path
+// (string interpolation): builds `"k{i}"`-style results with one allocation (the
+// result buffer) instead of a to_string temp + an intermediate buffer per part.
+inline void appendValue(std::string& out, const Value& v) {
+    switch (v.tag()) {
+        case VKind::NIL:   out += "null"; return;
+        case VKind::BOOL:  out += (v.asBool() ? "true" : "false"); return;
+        case VKind::INT: {
+            char buf[24];
+            auto r = std::to_chars(buf, buf + sizeof(buf), v.asInt());
+            out.append(buf, r.ptr);
+            return;
+        }
+        case VKind::FLOAT: out += formatFloat(v.asFloat()); return;
+        case VKind::OBJ: {
+            Object* o = v.asObj();
+            if (o && o->type() == ObjectType::STRING) { out += static_cast<StringObject*>(o)->value; return; }
+            out += o->inspect();
+            return;
+        }
+    }
 }
 // Quoted form for nested display: say ["a"] -> ["a"]
 inline std::string valueInspectQuoted(const Value& v) {
