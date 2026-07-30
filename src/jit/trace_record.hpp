@@ -56,10 +56,18 @@ public:
     static constexpr Reg R_CTX     = R14;
 
     static constexpr uint64_t TAG_INT   = JIT_TAGS | ((uint64_t)4 << JIT_TAG_SHIFT);
+    // list indexing (ported from the RA compiler; verified layout)
+    static constexpr uint32_t TOP17_OBJ    = 0x1FFF5u;
+    static constexpr uint32_t TOP17_BOXINT = 0x1FFF6u;
+    static constexpr int32_t  OBJ_TAG_OFF   = 8;
+    static constexpr int32_t  VEC_START_OFF = 32;    // offsetof(ListObject,elements)
+    static constexpr int32_t  VEC_FINISH_OFF= 40;
+    static constexpr int      LIST_TAG      = 5;     // ObjectType::LIST
 
     // unboxed int64 (GP) | raw double in an XMM register | a callee closure word
-    // in GP (consumed only by CALL; a numeric op on one is a bail-compile)
-    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2 };
+    // in GP | a pinned list-object raw word (index base, GP) | a raw non-numeric
+    // constant word e.g. a bool (GP, storable into a list, never arithmetic).
+    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2, VT_OBJ = 3, VT_WORD = 4 };
 
     const Chunk& chunk;
     size_t start, end;
@@ -142,6 +150,24 @@ public:
         Label okL; a.jcc(NE, okL); a.jmp(bail); a.bind(okL);
     }
     void ensureInt(int d) { if (otype[d] != VT_INT) ok = false; }   // no float->int op
+    // &list[idx] -> RAX from a raw list word `objR` and unboxed int `idxR`; bails
+    // on non-object, non-list, or out-of-range (incl. negative). Ported from the
+    // RA compiler. Clobbers RAX/RCX/RDX.
+    void indexAddr(Reg objR, Reg idxR, size_t off, int depth) {
+        a.movRR(RCX, objR); a.shrRI(RCX, JIT_TAG_SHIFT);
+        a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+        Label o1; a.jcc(E, o1); bailTo(off, depth); a.bind(o1);
+        a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object*
+        a.movzxRM8(RCX, RAX, OBJ_TAG_OFF);
+        a.cmpRI(RCX, LIST_TAG);
+        Label o2; a.jcc(E, o2); bailTo(off, depth); a.bind(o2);
+        a.movRM(RDX, RAX, VEC_START_OFF);
+        a.movRM(RCX, RAX, VEC_FINISH_OFF); a.subRR(RCX, RDX);                // RCX = size*8
+        a.movRR(RAX, idxR); a.shlRI(RAX, 3);
+        a.cmpRR(RAX, RCX);
+        Label o3; a.jcc(B, o3); bailTo(off, depth); a.bind(o3);              // unsigned: catches <0
+        a.addRR(RAX, RDX);                                                   // RAX = &list[idx]
+    }
     // ensure operand d is a double in xm(d), converting an unboxed int in place.
     void toX(int d) {
         if (otype[d] == VT_NUM) return;
@@ -150,8 +176,9 @@ public:
     }
 
     // ---- numeric primitives shared by the main body and inlined callees ----
+    bool numOperand(int d) { return otype[d] == VT_INT || otype[d] == VT_NUM; }
     void numericBinary(int kind, int dd, size_t bailOff, int bailDepth) {  // 0=add 1=sub 2=mul
-        if (otype[dd - 2] == VT_CALLEE || otype[dd - 1] == VT_CALLEE) { ok = false; return; }
+        if (!numOperand(dd - 2) || !numOperand(dd - 1)) { ok = false; return; }
         if (otype[dd - 2] == VT_INT && otype[dd - 1] == VT_INT) {
             Reg lhs = gp(dd - 2), rhs = gp(dd - 1);
             a.movRR(RAX, lhs);
@@ -313,6 +340,8 @@ inline bool traceSupported(Op op) {
         case Op::LT_I_JF: case Op::LE_I_JF: case Op::GT_I_JF:
         case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF:
         case Op::CALL:
+        case Op::INDEX_SET: case Op::INDEX_GET: case Op::LGET2:
+        case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
         case Op::JUMP: case Op::LOOP:
             return true;
         default:
@@ -322,8 +351,12 @@ inline bool traceSupported(Op op) {
 
 inline int traceStackDelta(Op op) {
     switch (op) {
-        case Op::GET_LOCAL: case Op::CONST: case Op::DUP: case Op::GET_GLOBAL: return +1;
-        case Op::SET_LOCAL: case Op::POP: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL: return -1;
+        case Op::GET_LOCAL: case Op::CONST: case Op::DUP: case Op::GET_GLOBAL:
+        case Op::FALSE_: case Op::TRUE_: case Op::NIL: return +1;
+        case Op::SET_LOCAL: case Op::POP: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL:
+        case Op::JUMP_IF_FALSE: case Op::INDEX_GET: return -1;
+        case Op::INDEX_SET: return -3;
+        case Op::LGET2: return +2;
         case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
         case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: return -1;
         case Op::ADD_I: case Op::SUB_I: case Op::MUL_I: case Op::MOD_I:
@@ -340,6 +373,7 @@ inline bool RegionCompilerTrace::compile() {
     // ---- pass 1: eligibility, cell discovery, runtime-type classification ----
     std::unordered_map<int,bool> defd;
     std::unordered_map<int,bool> dirtyL, dirtyG;
+    std::unordered_map<int,bool> objBaseG, objBaseL;   // used as an INDEX_SET base
     std::vector<int> localOrder, globalOrder;
 
     auto trTypeOf = [](VKind k, int& vt) -> bool {
@@ -371,6 +405,12 @@ inline bool RegionCompilerTrace::compile() {
             if (!localCell.count(slot)) { localCell[slot] = -1; localOrder.push_back(slot); }
             if (op == Op::SET_LOCAL) dirtyL[slot] = true;
         }
+        if (op == Op::LGET2) {                          // registers BOTH locals it reads
+            for (int w = 0; w < 2; ++w) {
+                int slot = (int)rdU16(off + 1 + w * 2);
+                if (!localCell.count(slot)) { localCell[slot] = -1; localOrder.push_back(slot); }
+            }
+        }
         if (op == Op::GET_GLOBAL || op == Op::SET_GLOBAL || op == Op::DEFINE_GLOBAL) {
             int g = (int)rdU16(off + 1);
             if (!globalCell.count(g)) { globalCell[g] = -1; globalOrder.push_back(g); }
@@ -400,13 +440,26 @@ inline bool RegionCompilerTrace::compile() {
             opop(argc + 1); opush(-1);
             depth -= argc;
         } else {
+            // origin encoding: global idx >= 0, local slot as -(2+slot), else -1.
+            if (op == Op::INDEX_SET) {
+                int b = (int)orig.size() - 3;                 // [.. base idx val]
+                if (b < 0) return false;
+                int o = orig[b];
+                if (o >= 0) objBaseG[o] = true;
+                else if (o <= -2) objBaseL[-2 - o] = true;
+                else return false;                            // base not a plain cell
+            }
             int d = traceStackDelta(op);
             switch (op) {
                 case Op::GET_GLOBAL: opush((int)rdU16(off + 1)); break;
-                case Op::GET_LOCAL: case Op::CONST: opush(-1); break;
+                case Op::GET_LOCAL: opush(-2 - (int)rdU16(off + 1)); break;
+                case Op::LGET2: opush(-2 - (int)rdU16(off + 1)); opush(-2 - (int)rdU16(off + 3)); break;
+                case Op::CONST: case Op::FALSE_: case Op::TRUE_: case Op::NIL: opush(-1); break;
                 case Op::DUP: opush(orig.empty() ? -1 : orig.back()); break;
                 case Op::SET_LOCAL: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL:
-                case Op::POP: opop(1); break;
+                case Op::POP: case Op::JUMP_IF_FALSE: opop(1); break;
+                case Op::INDEX_SET: opop(3); break;
+                case Op::INDEX_GET: opop(2); opush(-1); break;
                 case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
                 case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: opop(2); opush(-1); break;
                 case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
@@ -430,10 +483,20 @@ inline bool RegionCompilerTrace::compile() {
 
     // Build cells with their runtime-observed types.
     auto addCell = [&](bool isGlobal, int idx, int pinned) -> bool {
-        VKind k = isGlobal ? rtGlobals[idx].tag() : rtSlots[idx].tag();
+        const Value& v = isGlobal ? rtGlobals[idx] : rtSlots[idx];
+        VKind k = v.tag();
         if (isGlobal && !rtDefined[idx]) return false;
-        int vt; if (!trTypeOf(k, vt)) return false;
         bool dirty = isGlobal ? (bool)dirtyG.count(idx) : (bool)dirtyL.count(idx);
+        bool isBase = isGlobal ? (bool)objBaseG.count(idx) : (bool)objBaseL.count(idx);
+        int vt;
+        if (isBase) {
+            // list index base: a LIST object, read-only across the region (a
+            // reassignment mid-region would invalidate the cached pointer).
+            if (k != VKind::OBJ || !v.isObjType(ObjectType::LIST) || dirty) return false;
+            vt = VT_OBJ;
+        } else if (!trTypeOf(k, vt)) {
+            return false;
+        }
         int ci = (int)cells.size();
         cells.push_back(Cell{isGlobal, idx, vt, (bool)pinned, dirty, -1});
         if (isGlobal) globalCell[idx] = ci; else localCell[idx] = ci;
@@ -485,6 +548,13 @@ inline bool RegionCompilerTrace::compile() {
         if (c.pinned && c.vt == VT_NUM) {
             a.movRM(RAX, (Reg)mBase, disp); guardFloat(RAX, prologueBail);
             a.movqXR(xmCell((int)(&c - &cells[0])), RAX);
+        } else if (c.pinned && c.vt == VT_OBJ) {
+            // list index base: load the raw word + guard it is a heap object here;
+            // indexAddr re-checks the LIST tag and bounds on every access.
+            Reg r = gpCell((int)(&c - &cells[0]));
+            a.movRM(r, (Reg)mBase, disp);
+            a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+            Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
         } else if (c.pinned) {
             Reg r = gpCell((int)(&c - &cells[0]));
             a.movRM(r, (Reg)mBase, disp); guardUnboxInt(r, prologueBail);
@@ -568,6 +638,69 @@ inline bool RegionCompilerTrace::compile() {
                 otype[depth] = otype[depth-1]; depth++; break;
             }
 
+            case Op::FALSE_: a.movAbs(gp(depth), JIT_TAGS | ((uint64_t)2 << JIT_TAG_SHIFT)); otype[depth]=VT_WORD; depth++; break;
+            case Op::TRUE_:  a.movAbs(gp(depth), JIT_TAGS | ((uint64_t)3 << JIT_TAG_SHIFT)); otype[depth]=VT_WORD; depth++; break;
+            case Op::NIL:    a.movAbs(gp(depth), JIT_TAGS | ((uint64_t)1 << JIT_TAG_SHIFT)); otype[depth]=VT_WORD; depth++; break;
+
+            case Op::INDEX_SET: {
+                // [obj, idx, val] -> list[idx] = val. Base is a pinned LIST cell
+                // (VT_OBJ); index int; value a constant word (bool/nil) or a number
+                // (no carried pointer, so no write barrier). A pointer value bails.
+                if (otype[depth-3] != VT_OBJ) { ok = false; break; }
+                ensureInt(depth - 2); if (!ok) break;
+                int vvt = otype[depth-1];
+                if (vvt == VT_OBJ || vvt == VT_CALLEE) { ok = false; break; }  // no barrier here
+                indexAddr(gp(depth-3), gp(depth-2), off, depth);   // &elem -> RAX
+                if (vvt == VT_INT)      { boxTo(RDX, gp(depth-1)); a.movMR(RAX, 0, RDX); }
+                else if (vvt == VT_NUM) { a.movsdMX(RAX, 0, xm(depth-1)); }
+                else                    { a.movMR(RAX, 0, gp(depth-1)); }        // VT_WORD raw
+                depth -= 3; break;
+            }
+
+            case Op::LGET2: {
+                for (int w = 0; w < 2; ++w) {
+                    int ci = localCell[(int)rdU16(off + 1 + w * 2)];
+                    if (cells[ci].vt == VT_NUM) a.movsdRR(xm(depth), xmCell(ci));
+                    else                        a.movRR(gp(depth), gpCell(ci));
+                    otype[depth] = cells[ci].vt; depth++;
+                }
+                break;
+            }
+            case Op::INDEX_GET: {
+                if (otype[depth-2] != VT_OBJ) { ok = false; break; }
+                ensureInt(depth - 1); if (!ok) break;
+                indexAddr(gp(depth-2), gp(depth-1), off, depth);   // &elem -> RAX
+                a.movRM(gp(depth-2), RAX, 0);                       // load raw element word
+                otype[depth-2] = VT_WORD;                           // element type unknown
+                depth--; break;
+            }
+            case Op::JUMP_IF_FALSE: {
+                size_t target = next + rdU16(off + 1);
+                int vt = otype[depth-1];
+                if (vt == VT_INT) {
+                    Reg r = gp(depth-1); depth--;
+                    a.cmpRI(r, 0);
+                    Label fall; a.jcc(NE, fall); branchTo(target); a.bind(fall);
+                } else if (vt == VT_WORD || vt == VT_OBJ) {
+                    // implement bool/nil truthiness; any other tag bails (val intact)
+                    a.movRR(RCX, gp(depth-1)); a.shrRI(RCX, JIT_TAG_SHIFT);
+                    Label okType;
+                    a.cmpRI(RCX, (int32_t)JIT_TOP17_TRUE);  a.jcc(E, okType);
+                    a.cmpRI(RCX, (int32_t)JIT_TOP17_FALSE); a.jcc(E, okType);
+                    a.cmpRI(RCX, (int32_t)JIT_TOP17_NIL);   a.jcc(E, okType);
+                    bailTo(off, depth);                     // unexpected type -> interpreter
+                    a.bind(okType);
+                    depth--;
+                    a.cmpRI(RCX, (int32_t)JIT_TOP17_TRUE);
+                    Label fall; a.jcc(E, fall);             // true -> fall (truthy)
+                    branchTo(target);                       // nil/false -> branch
+                    a.bind(fall);
+                } else {
+                    ok = false;                             // float/other -> decline the region
+                }
+                break;
+            }
+
             case Op::ADD: case Op::ADD_INPLACE: numericBinary(0, depth, off, depth); depth--; break;
             case Op::SUB: numericBinary(1, depth, off, depth); depth--; break;
             case Op::MUL: numericBinary(2, depth, off, depth); depth--; break;
@@ -590,7 +723,7 @@ inline bool RegionCompilerTrace::compile() {
             case Op::EQUAL_JF: case Op::NOT_EQUAL_JF: {
                 uint16_t d = rdU16(off + 1);
                 size_t target = next + d;
-                if (otype[depth-1] == VT_CALLEE || otype[depth-2] == VT_CALLEE) { ok = false; break; }
+                if (!numOperand(depth-2) || !numOperand(depth-1)) { ok = false; break; }
                 if (otype[depth - 2] == VT_INT && otype[depth - 1] == VT_INT) {
                     Reg lhs = gp(depth - 2), rhs = gp(depth - 1);
                     depth -= 2;
