@@ -1,0 +1,43 @@
+# Trace INDEX_SET torture (Stage-6b) — self-verifying. A global list is written
+# in a hot loop (the sieve marking shape) via the trace compiler's pinned VT_OBJ
+# base + bounds-checked store; each result is cross-checked. Runs identically
+# under default (trace on) and --no-trace / --no-jit.
+
+# ---- write a bool array in a hot loop, count the trues left ----
+set flags = []
+for i in range(100000):
+    push(flags, true)
+# mark every 3rd index false (global list + INDEX_SET false in a hot loop)
+set j = 0
+while j < 100000:
+    flags[j] = false
+    j = j + 3
+# count remaining trues two ways
+set trues = 0
+set k = 0
+while k < 100000:
+    if flags[k]:
+        trues = trues + 1
+    k = k + 1
+# indices NOT multiples of 3 in [0,100000): 100000 - ceil(100000/3)
+check(trues == 100000 - 33334, "boolset count")
+say "trues:", trues
+
+# ---- write an int array in a hot loop, checksum ----
+set arr = []
+for i in range(50000):
+    push(arr, 0)
+set m = 0
+while m < 50000:
+    arr[m] = m * 2
+    m = m + 1
+set s = 0
+set n = 0
+while n < 50000:
+    s = s + arr[n]
+    n = n + 1
+# sum of 2*m for m in 0..49999 = 2 * (49999*50000/2)
+check(s == 2 * (49999 * 50000 / 2), "intset sum")
+say "sum:", s
+
+say "84 ok"

@@ -1,5 +1,29 @@
 # Cross-language benchmark
 
+## Stage-6b: list indexing in the trace compiler — 2026-07-30
+
+The trace compiler now handles list indexing on GLOBAL (and local) lists, which
+the RA could not reach (RA is locals-only) — a global list touched only as an
+index base is pinned as a raw object word (VT_OBJ), and INDEX_GET / INDEX_SET are
+bounds-checked (RA's proven `indexAddr`, ported) with a non-pointer value stored
+without a barrier. Added with it: the bool/nil constants (VT_WORD), JUMP_IF_FALSE
+with bool/nil truthiness (anything else declines the region), and the fused LGET2.
+So the sieve marking loop (`flags[j] = false` over a global bool array) traces at
+register quality instead of running the template.
+
+sieve: default 211ms (--no-trace) → **180ms** — the inner marking loop is now
+register-compiled; the outer scan loop stays interpreted because its cell +
+operand count overflows the pool (register spilling is a later step). A modest
+15% here, but real list-index capability the tracer lacked.
+
+This landed with a caught bug: the differential gate (under heavy parallel load,
+which shifted JIT warmup timing) flagged a flaky miscompile of a nested integer
+loop — LGET2 read two locals the pass-1 scan had not registered, so
+`localCell[slot]`'s `operator[]` silently returned cell 0, the wrong register.
+Fixed by registering both LGET2 locals in pass-1. Verified: golden 110/0 (new
+self-verifying 84-jit-trace-indexset), the differential axes (124 programs), a
+400-program nested-loop + global-index fuzz, and ASan+UBSan+GC_STRESS_INC.
+
 ## Stage-6a: numeric-function JIT — recursion compiled to native (fib 273→37ms) — 2026-07-30
 
 A pure-integer recursive or leaf function now compiles to a COMPLETE native
