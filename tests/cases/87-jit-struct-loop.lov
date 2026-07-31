@@ -1,0 +1,60 @@
+# JIT struct-field loops (Stage-8 G2) — self-verifying. Hot loops that read/write
+# struct fields (the game entity-update shape) MUST trace to native code and stay
+# bit-identical to the interpreter. Each result is cross-checked against a closed
+# form. The loops are large enough to trigger the trace JIT.
+
+# ---- float entity update: px/py accumulate exactly over many frames ----
+struct Ent:
+    px = 0.0
+    py = 0.0
+    vx = 0.0
+    vy = 0.0
+set e = Ent(0.0, 0.0, 1.25, -0.5)
+set i = 0
+while i < 500000:
+    e.px = e.px + e.vx
+    e.py = e.py + e.vy
+    i = i + 1
+check(e.px == 1.25 * 500000, "float px")
+check(e.py == -0.5 * 500000, "float py")
+
+# ---- int field counter + mixed field arithmetic ----
+struct Counter:
+    n = 0
+    acc = 0
+set c = Counter(0, 0)
+set j = 0
+while j < 300000:
+    c.n = c.n + 1
+    c.acc = c.acc + c.n
+    j = j + 1
+check(c.n == 300000, "int n")
+check(c.acc == 300000 * 300001 / 2, "int acc (gauss)")
+
+# ---- field-to-field float math (physics-ish integrate) ----
+struct Body:
+    x = 0.0
+    v = 0.0
+    a = 0.0
+set b = Body(0.0, 0.0, 0.5)
+set k = 0
+while k < 200000:
+    b.v = b.v + b.a
+    b.x = b.x + b.v
+    k = k + 1
+# v = a*k ; x = a*(1+2+..+k) = a*k*(k+1)/2
+check(b.v == 0.5 * 200000, "integrate v")
+check(b.x == 0.5 * (200000 * 200001 / 2), "integrate x")
+
+# ---- struct field guarding a hot int loop condition ----
+struct Timer:
+    t = 0
+    lim = 0
+set tm = Timer(0, 250000)
+set s = 0
+while tm.t < tm.lim:
+    s = s + tm.t
+    tm.t = tm.t + 1
+check(s == 249999 * 250000 / 2, "field loop cond")
+
+say "87 ok"
