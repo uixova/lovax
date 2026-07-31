@@ -200,7 +200,7 @@ inline ObjPtr makeRandomModule() {
         }
         auto out = makeObj<ListObject>();
         GcRoot _gr(out.get());
-        std::vector<Value> pool = els;   // partial Fisher-Yates on a copy
+        std::vector<Value> pool(els.begin(), els.end());   // partial Fisher-Yates on a copy
         for (long long i = 0; i < k; ++i) {
             size_t j = (size_t)i + (size_t)rngBounded(pool.size() - (size_t)i);
             std::swap(pool[(size_t)i], pool[j]);

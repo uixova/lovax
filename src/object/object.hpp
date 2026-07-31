@@ -596,19 +596,96 @@ inline std::string valueInspectQuoted(const Value& v) {
     return valueInspect(v);
 }
 
+// Small-buffer-optimized vector for list elements (RFC-Stage-7 P3a). Keeps up to
+// N Values INLINE in the object, so a small list (the gc.lov `[i,i+1,i+2]` temp,
+// most tuples/pairs) is a single allocation with no separate heap buffer; it
+// spills to a heap array only on growth past N. The first two members are begin/
+// end pointers, EXACTLY std::vector's `_M_start`/`_M_finish` layout, so the JIT's
+// list-index codegen (data = begin, size = end-begin) reads them unchanged. Value
+// is trivially copyable + destructible (a raw NaN-box word / a POD tagged union
+// with a GC-owned raw pointer) in both value layouts, so elements move by memcpy
+// and need no per-element destructor.
+template <int N>
+class SmallVec {
+    Value* b_;
+    Value* e_;
+    Value* c_;
+    Value  inln_[N];
+    bool onHeap() const { return b_ != inln_; }
+    void grow(size_t need) {
+        size_t nc = capacity() * 2;
+        if (nc < need) nc = need;
+        if (nc < (size_t)N + 1) nc = (size_t)N + 1;
+        Value* nb = static_cast<Value*>(::operator new(nc * sizeof(Value)));
+        size_t sz = size();
+        std::memcpy(nb, b_, sz * sizeof(Value));
+        if (onHeap()) ::operator delete(b_);
+        b_ = nb; e_ = nb + sz; c_ = nb + nc;
+    }
+    void takeOrCopy(SmallVec& o) {
+        if (o.onHeap()) { b_ = o.b_; e_ = o.e_; c_ = o.c_;
+                          o.b_ = o.inln_; o.e_ = o.inln_; o.c_ = o.inln_ + N; }
+        else { size_t sz = o.size(); std::memcpy(inln_, o.inln_, sz * sizeof(Value)); e_ = b_ + sz; o.e_ = o.b_; }
+    }
+public:
+    SmallVec() : b_(inln_), e_(inln_), c_(inln_ + N) {}
+    ~SmallVec() { if (onHeap()) ::operator delete(b_); }
+    SmallVec(const SmallVec& o) : b_(inln_), e_(inln_), c_(inln_ + N) {
+        size_t sz = o.size(); if (sz > (size_t)N) grow(sz);
+        std::memcpy(b_, o.b_, sz * sizeof(Value)); e_ = b_ + sz;
+    }
+    SmallVec& operator=(const SmallVec& o) {
+        if (this != &o) { clear(); size_t sz = o.size(); if (sz > capacity()) grow(sz);
+                          std::memcpy(b_, o.b_, sz * sizeof(Value)); e_ = b_ + sz; }
+        return *this;
+    }
+    SmallVec(SmallVec&& o) noexcept : b_(inln_), e_(inln_), c_(inln_ + N) { takeOrCopy(o); }
+    SmallVec& operator=(SmallVec&& o) noexcept {
+        if (this != &o) { if (onHeap()) ::operator delete(b_); b_ = inln_; e_ = inln_; c_ = inln_ + N; takeOrCopy(o); }
+        return *this;
+    }
+    size_t size() const { return (size_t)(e_ - b_); }
+    size_t capacity() const { return (size_t)(c_ - b_); }
+    bool empty() const { return e_ == b_; }
+    Value* begin() { return b_; }  Value* end() { return e_; }
+    const Value* begin() const { return b_; }  const Value* end() const { return e_; }
+    Value* data() { return b_; }  const Value* data() const { return b_; }
+    Value& operator[](size_t i) { return b_[i]; }  const Value& operator[](size_t i) const { return b_[i]; }
+    Value& back() { return e_[-1]; }  const Value& back() const { return e_[-1]; }
+    Value& front() { return *b_; }  const Value& front() const { return *b_; }
+    void clear() { e_ = b_; }
+    void insert(Value* pos, const Value& v) {          // single-element insert at pos
+        size_t idx = (size_t)(pos - b_);
+        if (e_ == c_) grow(size() + 1);                // may realloc -> recompute pos
+        pos = b_ + idx;
+        for (Value* p = e_; p > pos; --p) *p = *(p - 1);
+        *pos = v; ++e_;
+    }
+    void reserve(size_t n) { if (n > capacity()) grow(n); }
+    void push_back(const Value& v) { if (e_ == c_) grow(size() + 1); *e_++ = v; }
+    void pop_back() { --e_; }
+    template <class It> void insert(Value* /*pos==end()*/, It first, It last) {  // append range
+        size_t add = (size_t)(last - first);
+        if (size() + add > capacity()) grow(size() + add);
+        for (It p = first; p != last; ++p) *e_++ = *p;
+    }
+    void erase(Value* pos) { for (Value* p = pos; p + 1 < e_; ++p) *p = *(p + 1); --e_; }
+    size_t heapBytes() const { return onHeap() ? capacity() * sizeof(Value) : 0; }
+};
+
 // List object -> [1, 2, "three"]. Elements are UNBOXED Values (RFC: unboxed
 // list storage) — an int/float/bool element is the inline 8-byte word, not a
 // per-element heap object. This is the array fast path (qsort/sieve/index).
 class ListObject : public Object {
 public:
     ListObject() : Object(ObjectType::LIST) {}
-    std::vector<Value> elements;
+    SmallVec<4> elements;
 protected:
     explicit ListObject(ObjectType t) : Object(t) {}   // for TupleObject
 public:
     void gcMark() override { for (auto& e : elements) gcMarkValue(e); }
     size_t gcBytes() const override {
-        return sizeof(*this) + elements.capacity() * sizeof(Value);
+        return sizeof(*this) + elements.heapBytes();
     }
     std::string inspect() const override {
         std::string out = "[";

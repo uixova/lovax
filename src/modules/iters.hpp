@@ -22,7 +22,7 @@ inline ObjPtr makeItersModule() {
     auto isSeq = [](const ObjPtr& o) {
         return o->type() == ObjectType::LIST || o->type() == ObjectType::TUPLE;
     };
-    auto els = [](const ObjPtr& o) -> const std::vector<Value>& {
+    auto els = [](const ObjPtr& o) -> const SmallVec<4>& {
         return static_cast<ListObject*>(o.get())->elements;
     };
     auto isFn = [](const ObjPtr& o) {
