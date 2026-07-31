@@ -63,11 +63,16 @@ public:
     static constexpr int32_t  VEC_START_OFF = 32;    // offsetof(ListObject,elements)
     static constexpr int32_t  VEC_FINISH_OFF= 40;
     static constexpr int      LIST_TAG      = 5;     // ObjectType::LIST
+    // struct instance (Stage-8 G2): shape ptr + inline-Value slots (SmallVec begin).
+    static constexpr int32_t  STRUCT_SHAPE_OFF = 32; // offsetof(StructInstanceObject, shape)
+    static constexpr int32_t  STRUCT_SLOTS_OFF = 40; // offsetof(slots) + SmallVec begin(0)
+    static constexpr int      STRUCT_TAG       = 17; // ObjectType::STRUCT
 
     // unboxed int64 (GP) | raw double in an XMM register | a callee closure word
     // in GP | a pinned list-object raw word (index base, GP) | a raw non-numeric
-    // constant word e.g. a bool (GP, storable into a list, never arithmetic).
-    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2, VT_OBJ = 3, VT_WORD = 4 };
+    // constant word e.g. a bool (GP, storable into a list, never arithmetic) |
+    // a pinned struct-instance raw word (member base, GP, prologue-guarded shape).
+    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2, VT_OBJ = 3, VT_WORD = 4, VT_STRUCT = 5 };
 
     const Chunk& chunk;
     size_t start, end;
@@ -84,10 +89,15 @@ public:
     // poolIdx indexes the GP pool for an INT/CALLEE cell, the XMM pool for a NUM
     // cell. `dirty` = written in the region (a read-only pinned cell needs no
     // writeback — its memory already holds the value).
-    struct Cell { bool isGlobal; int idx; int vt; bool pinned; bool dirty; int poolIdx; };
+    struct Cell { bool isGlobal; int idx; int vt; bool pinned; bool dirty; int poolIdx; const void* shape = nullptr; };
     std::vector<Cell> cells;
     std::unordered_map<int,int> localCell;
     std::unordered_map<int,int> globalCell;
+    // Stage-8 G2 struct member access, resolved per MEMBER op at compile time.
+    std::unordered_set<int> structBaseG, structBaseL;         // cell used as a member base
+    std::unordered_map<int, const void*> gShape, lShape;      // struct-base cell -> shape ptr
+    std::unordered_map<size_t, int> memberSlot;               // MEMBER off -> field slot
+    std::unordered_map<size_t, int> memberFType;              // MEMBER off -> field VT (INT/NUM)
 
     std::vector<Reg> gpPool;      // INT/CALLEE cells (pinned) then INT/CALLEE operands
     std::vector<Xmm> xmmPool;     // NUM cells (pinned) then NUM operands
@@ -348,6 +358,7 @@ inline bool traceSupported(Op op) {
         case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF:
         case Op::CALL:
         case Op::INDEX_SET: case Op::INDEX_GET: case Op::LGET2:
+        case Op::MEMBER_GET: case Op::MEMBER_SET:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
         case Op::JUMP: case Op::LOOP:
             return true;
@@ -364,6 +375,8 @@ inline int traceStackDelta(Op op) {
         case Op::JUMP_IF_FALSE: case Op::INDEX_GET: return -1;
         case Op::INDEX_SET: return -3;
         case Op::LGET2: return +2;
+        case Op::MEMBER_GET: return 0;    // [obj] -> [field]
+        case Op::MEMBER_SET: return -2;   // [obj, val] -> []
         case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
         case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: return -1;
         case Op::ADD_I: case Op::SUB_I: case Op::MUL_I: case Op::MOD_I:
@@ -456,6 +469,30 @@ inline bool RegionCompilerTrace::compile() {
                 else if (o <= -2) objBaseL[-2 - o] = true;
                 else return false;                            // base not a plain cell
             }
+            if (op == Op::MEMBER_GET || op == Op::MEMBER_SET) {
+                // resolve the member from the LIVE struct instance: field slot +
+                // field type + shape (for the prologue monomorphic guard). Numeric
+                // fields only; anything else declines the region.
+                int b = (op == Op::MEMBER_GET) ? (int)orig.size() - 1 : (int)orig.size() - 2;
+                if (b < 0 || b >= (int)orig.size()) return false;
+                int o = orig[b];
+                const Value* bv = (o >= 0) ? &rtGlobals[o] : (o <= -2 ? &rtSlots[-2 - o] : nullptr);
+                if (!bv || !bv->isObjType(ObjectType::STRUCT)) return false;
+                auto* si = static_cast<StructInstanceObject*>(bv->asObj());
+                const Value& nk = chunk.consts[rdU16(off + 1)];
+                if (!nk.isObj()) return false;
+                const std::string& fname = static_cast<StringObject*>(nk.asObj())->value;
+                auto it = si->shape->fieldIndex.find(fname);
+                if (it == si->shape->fieldIndex.end()) return false;
+                int slot = it->second;
+                if (slot < 0 || slot >= (int)si->slots.size()) return false;
+                VKind ft = si->slots[slot].tag();
+                int fvt = (ft == VKind::INT) ? VT_INT : (ft == VKind::FLOAT) ? VT_NUM : -1;
+                if (fvt < 0) return false;                    // numeric fields only
+                memberSlot[off] = slot; memberFType[off] = fvt;
+                if (o >= 0) { structBaseG.insert(o); gShape[o] = si->shape; }
+                else { int s = -2 - o; structBaseL.insert(s); lShape[s] = si->shape; }
+            }
             int d = traceStackDelta(op);
             switch (op) {
                 case Op::GET_GLOBAL: opush((int)rdU16(off + 1)); break;
@@ -467,6 +504,8 @@ inline bool RegionCompilerTrace::compile() {
                 case Op::POP: case Op::JUMP_IF_FALSE: opop(1); break;
                 case Op::INDEX_SET: opop(3); break;
                 case Op::INDEX_GET: opop(2); opush(-1); break;
+                case Op::MEMBER_GET: opop(1); opush(-1); break;   // [obj] -> [field]
+                case Op::MEMBER_SET: opop(2); break;              // [obj, val] -> []
                 case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
                 case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: opop(2); opush(-1); break;
                 case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
@@ -495,8 +534,16 @@ inline bool RegionCompilerTrace::compile() {
         if (isGlobal && !rtDefined[idx]) return false;
         bool dirty = isGlobal ? (bool)dirtyG.count(idx) : (bool)dirtyL.count(idx);
         bool isBase = isGlobal ? (bool)objBaseG.count(idx) : (bool)objBaseL.count(idx);
+        bool isStructBase = isGlobal ? (bool)structBaseG.count(idx) : (bool)structBaseL.count(idx);
+        const void* shape = nullptr;
         int vt;
-        if (isBase) {
+        if (isStructBase) {
+            // struct member base: a STRUCT instance, read-only across the region
+            // (its POINTER is stable; fields mutate via MEMBER_SET into the slots).
+            if (k != VKind::OBJ || !v.isObjType(ObjectType::STRUCT) || dirty) return false;
+            vt = VT_STRUCT;
+            shape = isGlobal ? gShape[idx] : lShape[idx];
+        } else if (isBase) {
             // list index base: a LIST object, read-only across the region (a
             // reassignment mid-region would invalidate the cached pointer).
             if (k != VKind::OBJ || !v.isObjType(ObjectType::LIST) || dirty) return false;
@@ -505,7 +552,7 @@ inline bool RegionCompilerTrace::compile() {
             return false;
         }
         int ci = (int)cells.size();
-        cells.push_back(Cell{isGlobal, idx, vt, (bool)pinned, dirty, -1});
+        cells.push_back(Cell{isGlobal, idx, vt, (bool)pinned, dirty, -1, shape});
         if (isGlobal) globalCell[idx] = ci; else localCell[idx] = ci;
         return true;
     };
@@ -566,6 +613,20 @@ inline bool RegionCompilerTrace::compile() {
             a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);      // Object*
             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
             Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
+        } else if (c.pinned && c.vt == VT_STRUCT) {
+            // struct member base: guard object + STRUCT tag + the EXACT shape ONCE
+            // (monomorphic). The read-only cell then serves every member access as a
+            // fixed-slot load/store — no per-access type/shape check on the base.
+            Reg r = gpCell((int)(&c - &cells[0]));
+            a.movRM(r, (Reg)mBase, disp);
+            a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+            Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
+            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);      // StructInstance*
+            a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, STRUCT_TAG);
+            Label okS; a.jcc(E, okS); a.jmp(prologueBail); a.bind(okS);
+            a.movRM(RCX, RAX, STRUCT_SHAPE_OFF); a.movAbs(RDX, (uint64_t)(uintptr_t)c.shape);
+            a.cmpRR(RCX, RDX);
+            Label okSh; a.jcc(E, okSh); a.jmp(prologueBail); a.bind(okSh);
         } else if (c.pinned) {
             Reg r = gpCell((int)(&c - &cells[0]));
             a.movRM(r, (Reg)mBase, disp); guardUnboxInt(r, prologueBail);
@@ -676,6 +737,41 @@ inline bool RegionCompilerTrace::compile() {
                     otype[depth] = cells[ci].vt; depth++;
                 }
                 break;
+            }
+            case Op::MEMBER_GET: {
+                // [obj] -> obj.field. Base is a pinned VT_STRUCT (shape guarded in
+                // the prologue), so no re-guard: extract the instance, load the
+                // inline-Value slot, and guard the field's recorded numeric type
+                // (fields are dynamically typed, so a type change side-exits).
+                if (otype[depth-1] != VT_STRUCT) { ok = false; break; }
+                int slot = memberSlot[off], fvt = memberFType[off];
+                a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, gp(depth-1)); a.andRR(RAX, RCX);  // StructInstance*
+                a.movRM(RAX, RAX, STRUCT_SLOTS_OFF);              // slots.begin()
+                a.movRM(RCX, RAX, slot * 8);                      // field word
+                if (fvt == VT_INT) {
+                    a.movRR(RDX, RCX); a.shrRI(RDX, JIT_TAG_SHIFT); a.cmpRI(RDX, (int32_t)JIT_TOP17_INT);
+                    Label okI; a.jcc(E, okI); bailTo(off, depth); a.bind(okI);
+                    a.shlRI(RCX, 17); a.sarRI(RCX, 17);           // unbox
+                    a.movRR(gp(depth-1), RCX); otype[depth-1] = VT_INT;
+                } else {                                          // VT_NUM (float field)
+                    a.movRR(RDX, RCX); a.movAbs(RAX, JIT_TAGS); a.andRR(RDX, RAX); a.cmpRR(RDX, RAX);
+                    Label okF; a.jcc(NE, okF); bailTo(off, depth); a.bind(okF);
+                    a.movqXR(xm(depth-1), RCX); otype[depth-1] = VT_NUM;
+                }
+                break;
+            }
+            case Op::MEMBER_SET: {
+                // [obj, val] -> obj.field = val. A numeric/word value stores inline
+                // with no barrier; a pointer value would need a barrier -> decline.
+                if (otype[depth-2] != VT_STRUCT) { ok = false; break; }
+                int slot = memberSlot[off], vvt = otype[depth-1];
+                if (vvt == VT_OBJ || vvt == VT_CALLEE || vvt == VT_STRUCT) { ok = false; break; }
+                a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, gp(depth-2)); a.andRR(RAX, RCX);  // StructInstance*
+                a.movRM(RAX, RAX, STRUCT_SLOTS_OFF);              // slots.begin()
+                if (vvt == VT_NUM)      { a.movsdMX(RAX, slot * 8, xm(depth-1)); }
+                else if (vvt == VT_INT) { boxTo(RDX, gp(depth-1)); a.movMR(RAX, slot * 8, RDX); }
+                else                    { a.movMR(RAX, slot * 8, gp(depth-1)); }  // VT_WORD raw
+                depth -= 2; break;
             }
             case Op::INDEX_GET: {
                 if (otype[depth-2] != VT_OBJ) { ok = false; break; }
