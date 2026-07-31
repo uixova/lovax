@@ -1582,10 +1582,10 @@ private:
                     GcRoot ir(inst.get());
                     inst->shape = static_cast<StructShapeObject*>(factory->structShape.get());
                     inst->slots.reserve(nf);
-                    // Field locals live at base+1..base+nf; boxing may allocate,
-                    // but the locals are stack roots and inst is temp-rooted.
+                    // Field locals live at base+1..base+nf. Fields are unboxed
+                    // Values now (G1) — an int/float field costs no heap object.
                     for (uint16_t i = 0; i < nf; ++i) {
-                        inst->slots.push_back(toObject(*stackAt(frame->base + 1 + i)));
+                        inst->slots.push_back(*stackAt(frame->base + 1 + i));
                     }
                     push(Value::object(inst));
                     VM_NEXT;
@@ -1753,7 +1753,7 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).asObj())->value;
                     Value* top = sp_ - 1;
-                    #define STRUCT_ACT_REPLACE(slotRef) *top = fromObject(slotRef)
+                    #define STRUCT_ACT_REPLACE(slotRef) *top = (slotRef)
                     STRUCT_IC_GET(top, ics, STRUCT_ACT_REPLACE)
                     #undef STRUCT_ACT_REPLACE
                     if (top->isObjType(ObjectType::MAP)) {
@@ -1777,7 +1777,7 @@ private:
                     if (top->isNil()) VM_NEXT_FAST;            // a?.b -> null (in place)
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).asObj())->value;
-                    #define STRUCT_ACT_REPLACE(slotRef) *top = fromObject(slotRef)
+                    #define STRUCT_ACT_REPLACE(slotRef) *top = (slotRef)
                     STRUCT_IC_GET(top, ics, STRUCT_ACT_REPLACE)
                     #undef STRUCT_ACT_REPLACE
                     if (top->isObjType(ObjectType::MAP)) {
@@ -1800,7 +1800,7 @@ private:
                     const std::string& prop =
                         static_cast<StringObject*>(constant(nameC).asObj())->value;
                     Value* top = sp_ - 1;
-                    #define STRUCT_ACT_PUSH(slotRef) push(fromObject(slotRef))
+                    #define STRUCT_ACT_PUSH(slotRef) push(slotRef)
                     STRUCT_IC_GET(top, ics, STRUCT_ACT_PUSH)
                     #undef STRUCT_ACT_PUSH
                     if (top->isObjType(ObjectType::MAP)) {
@@ -1837,9 +1837,8 @@ private:
                             }
                         }
                         if (slot != MapObject::NPOS) {
-                            auto nv = toObject(*pval);
-                            gcShade(nv.get());          // write barrier (RFC-023)
-                            si->slots[slot] = nv;
+                            gcShadeValue(*pval);        // barrier only if the value carries a pointer
+                            si->slots[slot] = *pval;    // unboxed Value store — no allocation
                             pval->wipeObj(); pobj->wipeObj(); sp_ -= 2;
                             VM_NEXT_FAST;
                         }
@@ -2403,8 +2402,8 @@ private:
                 return makeError("struct '" + si->shape->name + "' has no field '" +
                                  prop + "' (fields are fixed at declaration)", line);
             }
-            gcShade(val.get());                          // write barrier (RFC-023)
-            si->slots[it->second] = val;
+            gcShadeValue(fromObject(val));                // barrier if the value carries a pointer
+            si->slots[it->second] = fromObject(val);
             return nullptr;
         }
         return makeError("indexed assignment only works on list and map, got " +
@@ -2464,8 +2463,8 @@ private:
                 return makeError("struct '" + si->shape->name + "' has no field '" +
                                  prop + "' (fields are fixed at declaration)", line);
             }
-            gcShade(val.get());                          // write barrier (RFC-023)
-            si->slots[it->second] = val;
+            gcShadeValue(fromObject(val));                // barrier if the value carries a pointer
+            si->slots[it->second] = fromObject(val);
             return nullptr;
         }
         if (obj->type() != ObjectType::MAP) {
