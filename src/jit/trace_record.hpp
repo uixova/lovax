@@ -151,16 +151,23 @@ public:
     }
     void ensureInt(int d) { if (otype[d] != VT_INT) ok = false; }   // no float->int op
     // &list[idx] -> RAX from a raw list word `objR` and unboxed int `idxR`; bails
-    // on non-object, non-list, or out-of-range (incl. negative). Ported from the
-    // RA compiler. Clobbers RAX/RCX/RDX.
-    void indexAddr(Reg objR, Reg idxR, size_t off, int depth) {
-        a.movRR(RCX, objR); a.shrRI(RCX, JIT_TAG_SHIFT);
-        a.cmpRI(RCX, (int32_t)TOP17_OBJ);
-        Label o1; a.jcc(E, o1); bailTo(off, depth); a.bind(o1);
-        a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object*
-        a.movzxRM8(RCX, RAX, OBJ_TAG_OFF);
-        a.cmpRI(RCX, LIST_TAG);
-        Label o2; a.jcc(E, o2); bailTo(off, depth); a.bind(o2);
+    // out-of-range (incl. negative). `trusted` skips the object + LIST-tag guard —
+    // valid because every VT_OBJ operand originates from a pinned list cell already
+    // guarded as an object AND a LIST in the prologue, and such a cell is read-only
+    // for the whole region, so only the per-access BOUNDS check is needed (this is
+    // the guard-hoisting LICM does for list kernels). Clobbers RAX/RCX/RDX.
+    void indexAddr(Reg objR, Reg idxR, size_t off, int depth, bool trusted) {
+        if (!trusted) {
+            a.movRR(RCX, objR); a.shrRI(RCX, JIT_TAG_SHIFT);
+            a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+            Label o1; a.jcc(E, o1); bailTo(off, depth); a.bind(o1);
+            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object*
+            a.movzxRM8(RCX, RAX, OBJ_TAG_OFF);
+            a.cmpRI(RCX, LIST_TAG);
+            Label o2; a.jcc(E, o2); bailTo(off, depth); a.bind(o2);
+        } else {
+            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object* (guaranteed list)
+        }
         a.movRM(RDX, RAX, VEC_START_OFF);
         a.movRM(RCX, RAX, VEC_FINISH_OFF); a.subRR(RCX, RDX);                // RCX = size*8
         a.movRR(RAX, idxR); a.shlRI(RAX, 3);
@@ -549,12 +556,16 @@ inline bool RegionCompilerTrace::compile() {
             a.movRM(RAX, (Reg)mBase, disp); guardFloat(RAX, prologueBail);
             a.movqXR(xmCell((int)(&c - &cells[0])), RAX);
         } else if (c.pinned && c.vt == VT_OBJ) {
-            // list index base: load the raw word + guard it is a heap object here;
-            // indexAddr re-checks the LIST tag and bounds on every access.
+            // list index base: load the raw word and guard it is a heap object AND
+            // a LIST here, ONCE. The cell is read-only for the region, so every
+            // trusted indexAddr afterwards only needs the per-access bounds check.
             Reg r = gpCell((int)(&c - &cells[0]));
             a.movRM(r, (Reg)mBase, disp);
             a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
             Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
+            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);      // Object*
+            a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
+            Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
         } else if (c.pinned) {
             Reg r = gpCell((int)(&c - &cells[0]));
             a.movRM(r, (Reg)mBase, disp); guardUnboxInt(r, prologueBail);
@@ -650,7 +661,7 @@ inline bool RegionCompilerTrace::compile() {
                 ensureInt(depth - 2); if (!ok) break;
                 int vvt = otype[depth-1];
                 if (vvt == VT_OBJ || vvt == VT_CALLEE) { ok = false; break; }  // no barrier here
-                indexAddr(gp(depth-3), gp(depth-2), off, depth);   // &elem -> RAX
+                indexAddr(gp(depth-3), gp(depth-2), off, depth, true);   // &elem -> RAX
                 if (vvt == VT_INT)      { boxTo(RDX, gp(depth-1)); a.movMR(RAX, 0, RDX); }
                 else if (vvt == VT_NUM) { a.movsdMX(RAX, 0, xm(depth-1)); }
                 else                    { a.movMR(RAX, 0, gp(depth-1)); }        // VT_WORD raw
@@ -669,7 +680,7 @@ inline bool RegionCompilerTrace::compile() {
             case Op::INDEX_GET: {
                 if (otype[depth-2] != VT_OBJ) { ok = false; break; }
                 ensureInt(depth - 1); if (!ok) break;
-                indexAddr(gp(depth-2), gp(depth-1), off, depth);   // &elem -> RAX
+                indexAddr(gp(depth-2), gp(depth-1), off, depth, true);   // &elem -> RAX
                 a.movRM(gp(depth-2), RAX, 0);                       // load raw element word
                 otype[depth-2] = VT_WORD;                           // element type unknown
                 depth--; break;
