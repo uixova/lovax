@@ -256,7 +256,7 @@ inline void installBuiltins(BuiltinTable& out) {
             auto* si = static_cast<StructInstanceObject*>(args[0].get());
             auto list = makeObj<ListObject>();
             GcRoot _grsv(list.get());
-            for (const auto& s : si->slots) list->elements.push_back(fromObject(s));
+            for (const Value& s : si->slots) list->elements.push_back(s);
             return list;
         }
         if (args[0]->type() == ObjectType::SET) {
@@ -983,8 +983,8 @@ inline void installBuiltins(BuiltinTable& out) {
             args[0]->type() == ObjectType::STRUCT &&
             args[1]->type() == ObjectType::STRING) {
             auto* si = static_cast<StructInstanceObject*>(args[0].get());
-            auto v = si->getField(static_cast<StringObject*>(args[1].get())->value);
-            if (v != nullptr) return v;
+            const Value* v = si->getField(static_cast<StringObject*>(args[1].get())->value);
+            if (v != nullptr) return toObject(*v);
             return args.size() == 3 ? args[2] : NULL_OBJ_;
         }
         if (args.size() < 2 || args.size() > 3 || args[0]->type() != ObjectType::MAP) {

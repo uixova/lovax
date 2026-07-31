@@ -1085,24 +1085,28 @@ public:
 class StructInstanceObject : public Object {
 public:
     StructShapeObject* shape = nullptr;   // kept alive by gcMark below
-    std::vector<Ref<Object>> slots;
+    // Fields are UNBOXED inline Values (Stage-8 G1), like list elements: an int/
+    // float field is the 8-byte word, not a per-field heap object — so an entity's
+    // `x`/`vx` cost no allocation to read or write. Inline for <=4 fields (the
+    // common entity), spilling to a heap array only for larger structs.
+    SmallVec<4> slots;
 
     StructInstanceObject() : Object(ObjectType::STRUCT) {}
-    Ref<Object> getField(const std::string& n) const {
+    const Value* getField(const std::string& n) const {
         auto it = shape->fieldIndex.find(n);
-        return it == shape->fieldIndex.end() ? nullptr : slots[it->second];
+        return it == shape->fieldIndex.end() ? nullptr : &slots[it->second];
     }
     void gcMark() override {
         gcMarkObject(shape);
-        for (auto& s : slots) gcMarkObject(s.get());
+        for (auto& s : slots) gcMarkValue(s);
     }
     size_t gcBytes() const override {
-        return sizeof(*this) + slots.capacity() * sizeof(Ref<Object>);
+        return sizeof(*this) + slots.heapBytes();
     }
     std::string inspect() const override {
         std::string out = "{__type__: " + shape->name;
         for (size_t i = 0; i < slots.size(); ++i) {
-            out += ", " + shape->fieldNames[i]->value + ": " + inspectQuoted(slots[i]);
+            out += ", " + shape->fieldNames[i]->value + ": " + valueInspectQuoted(slots[i]);
         }
         return out + "}";
     }
@@ -1340,7 +1344,7 @@ inline bool objectEquals(const Ref<Object>& a, const Ref<Object>& b) {
             auto* sb = static_cast<StructInstanceObject*>(b.get());
             if (sa->shape != sb->shape) return false;   // different struct types
             for (size_t i = 0; i < sa->slots.size(); ++i) {
-                if (!objectEquals(sa->slots[i], sb->slots[i])) return false;
+                if (!valueEquals(sa->slots[i], sb->slots[i])) return false;
             }
             return true;
         }

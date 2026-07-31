@@ -104,10 +104,14 @@ inline ObjPtr deepClone(const ObjPtr& v, int line, int depth) {
         GcRoot _grs(out.get());
         out->shape = src->shape;
         out->slots.reserve(src->slots.size());
-        for (const auto& s : src->slots) {
-            auto c = deepClone(s, line, depth + 1);
-            if (isError(c)) return c;
-            out->slots.push_back(c);
+        for (const Value& s : src->slots) {          // fields are unboxed Values now
+            if (s.hasPtr()) {
+                auto c = deepClone(toObject(s), line, depth + 1);
+                if (isError(c)) return c;
+                out->slots.push_back(fromObject(c));
+            } else {
+                out->slots.push_back(s);             // primitive field copied directly
+            }
         }
         return out;
     }

@@ -24,7 +24,7 @@ namespace Runtime {
                                                     const std::string& prop, int line) {
         if (obj->type() == ObjectType::STRUCT) {
             auto* si = static_cast<StructInstanceObject*>(obj.get());
-            if (auto f = si->getField(prop)) return f;
+            if (const Value* f = si->getField(prop)) return toObject(*f);
             if (auto m = si->shape->getMethod(prop)) return m;
             if (prop == "__type__") return makeObj<StringObject>(si->shape->name);
             std::string avail;

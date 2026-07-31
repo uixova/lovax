@@ -1,0 +1,70 @@
+# Unboxed struct fields (Stage-8 G1) — self-verifying. Struct fields are now inline
+# Values (an int/float field costs no heap object); this cross-checks entity-style
+# field updates, nested structs, methods, mixed field types, and struct equality.
+# Runs identically under every JIT tier and both value layouts (differential covers).
+
+# ---- entity update loop: field writes must accumulate exactly, allocate nothing ----
+struct Ent:
+    px = 0.0
+    py = 0.0
+    vx = 0.0
+    vy = 0.0
+    hp = 0
+set e = Ent(0.0, 0.0, 1.5, -2.0, 1000000)
+set i = 0
+while i < 100000:
+    e.px = e.px + e.vx
+    e.py = e.py + e.vy
+    e.hp = e.hp - 1
+    i = i + 1
+check(e.px == 1.5 * 100000, "px accumulate")
+check(e.py == -2.0 * 100000, "py accumulate")
+check(e.hp == 1000000 - 100000, "hp int field")
+
+# ---- nested struct (linked node), field-of-field access ----
+struct Node:
+    val = 0
+    nxt = null
+set a = Node(1, null)
+set b = Node(2, a)
+set c = Node(3, b)
+check(c.val + c.nxt.val + c.nxt.nxt.val == 6, "linked sum")
+c.nxt.val = 99
+check(c.nxt.val == 99, "nested field write")
+
+# ---- struct with a method + mixed field types ----
+struct Vec:
+    x = 0.0
+    y = 0.0
+    fn lensq():
+        return this.x * this.x + this.y * this.y
+set v = Vec(3.0, 4.0)
+check(v.lensq() == 25.0, "method reads fields")
+
+# ---- struct equality is by-value over fields ----
+set p = Vec(1.0, 2.0)
+set q = Vec(1.0, 2.0)
+set r = Vec(1.0, 9.0)
+check(p == q, "struct equal by value")
+check((p == r) == false, "struct unequal")
+
+# ---- struct holding a string + a list field (pointer fields still work) ----
+struct Bag:
+    name = ""
+    items = null
+set g = Bag("loot", [10, 20, 30])
+check(g.name == "loot", "string field")
+check(g.items[1] == 20, "list field index")
+g.items = [1, 2]
+check(len(g.items) == 2, "list field reassign")
+
+# ---- many small structs (spawn churn, exercises inline slots) ----
+set sum = 0
+set k = 0
+while k < 20000:
+    set t = Node(k, null)
+    sum = sum + t.val
+    k = k + 1
+check(sum == 19999 * 20000 / 2, "spawn churn sum")
+
+say "86 ok"
