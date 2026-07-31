@@ -1,0 +1,61 @@
+# Inline small-list storage (Stage-7 P3a) — self-verifying. Exercises the inline
+# path (<=4 elements, no heap buffer), the spill-to-heap growth path, and the
+# insert/remove/pop/nested-list operations, cross-checking results. Runs identically
+# under every JIT tier and both value layouts (differential covers those).
+
+# ---- inline lists (<=4 elems): sum of small triples == sum via closed form ----
+set total = 0
+set i = 0
+while i < 5000:
+    set t = [i, i + 1, i + 2]
+    total = total + t[0] + t[1] + t[2]
+    i = i + 1
+# sum over i in 0..4999 of (i + i+1 + i+2) = 3*sum(i) + 5000*3
+set n = 4999
+check(total == 3 * (n * (n + 1) / 2) + 15000, "inline triples")
+
+# ---- growth past the inline buffer (spills to heap) ----
+set a = []
+set j = 0
+while j < 1000:
+    push(a, j * 2)
+    j = j + 1
+check(len(a) == 1000, "grown length")
+check(a[0] + a[999] == 0 + 1998, "grown ends")
+set s = 0
+set k = 0
+while k < 1000:
+    s = s + a[k]
+    k = k + 1
+check(s == 2 * (999 * 1000 / 2), "grown sum")
+
+# ---- insert / remove / pop keep the invariant ----
+set b = [10, 20, 30, 40]
+insert(b, 2, 99)          # [10,20,99,30,40]
+check(b[2] == 99, "insert middle")
+check(len(b) == 5, "insert len")
+remove(b, 0)              # [20,99,30,40]
+check(b[0] == 20, "remove front")
+pop(b)                    # [20,99,30]
+check(len(b) == 3, "pop len")
+check(first(b) == 20, "first")
+check(last(b) == 30, "last")
+
+# ---- nested + concatenation ----
+set nested = [[1, 2], [3, 4, 5], [6]]
+check(nested[1][2] == 5, "nested index")
+set cat = [1, 2] + [3, 4, 5]
+check(len(cat) == 5, "concat len")
+check(cat[4] == 5, "concat last")
+
+# ---- sort a spilled list ----
+set u = []
+set m = 0
+while m < 50:
+    push(u, (m * 37 + 11) % 50)
+    m = m + 1
+set sorted = sort(u)
+check(sorted[0] <= sorted[49], "sorted order")
+check(len(sorted) == 50, "sorted len")
+
+say "85 ok"
