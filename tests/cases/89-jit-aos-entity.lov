@@ -1,0 +1,46 @@
+# JIT array-of-structs entity iteration (Stage-8 G2b) — self-verifying. The core
+# game loop `e = ents[j]; e.x = e.x + e.vx` (entity pointer reassigned each
+# iteration, fields mutated) must trace to native code and stay bit-identical.
+# Each result is cross-checked against a closed form.
+
+struct Ent:
+    x = 0.0
+    y = 0.0
+    vx = 0.0
+    vy = 0.0
+    hp = 0
+
+# ---- build a list of entities, update every one over many frames ----
+set ents = []
+set i = 0
+while i < 500:
+    push(ents, Ent(i * 1.0, 0.0, 1.5, -0.5, 100))
+    i = i + 1
+
+set frames = 0
+while frames < 400:
+    set j = 0
+    while j < 500:
+        set e = ents[j]
+        e.x = e.x + e.vx
+        e.y = e.y + e.vy
+        e.hp = e.hp - 1
+        j = j + 1
+    frames = frames + 1
+
+# after 400 frames: e.x = i + 400*1.5 ; e.y = 400*-0.5 ; hp = 100 - 400
+set sx = 0.0
+set sy = 0.0
+set shp = 0
+set k = 0
+while k < 500:
+    set e = ents[k]
+    sx = sx + e.x
+    sy = sy + e.y
+    shp = shp + e.hp
+    k = k + 1
+# sum of x = sum(i for i in 0..499) + 500*(400*1.5)
+check(sx == (499 * 500 / 2) * 1.0 + 500.0 * (400.0 * 1.5), "aos x accumulate")
+check(sy == 500.0 * (400.0 * -0.5), "aos y accumulate")
+check(shp == 500 * (100 - 400), "aos hp int field")
+say "89 ok"

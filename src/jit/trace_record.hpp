@@ -98,6 +98,7 @@ public:
     std::unordered_map<int, const void*> gShape, lShape;      // struct-base cell -> shape ptr
     std::unordered_map<size_t, int> memberSlot;               // MEMBER off -> field slot
     std::unordered_map<size_t, int> memberFType;              // MEMBER off -> field VT (INT/NUM)
+    std::unordered_map<size_t, const void*> memberShape;      // MEMBER off -> shape guarded per access
 
     std::vector<Reg> gpPool;      // INT/CALLEE cells (pinned) then INT/CALLEE operands
     std::vector<Xmm> xmmPool;     // NUM cells (pinned) then NUM operands
@@ -161,6 +162,17 @@ public:
         Label okL; a.jcc(NE, okL); a.jmp(bail); a.bind(okL);
     }
     void ensureInt(int d) { if (otype[d] != VT_INT) ok = false; }   // no float->int op
+    // guard the raw word in `objR` is an object, a STRUCT, and exactly `shape`;
+    // leaves StructInstance* in RAX. Bails otherwise. Clobbers RAX/RCX/RDX.
+    void guardStructPtr(Reg objR, const void* shape, size_t off, int depth) {
+        a.movRR(RCX, objR); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+        Label o1; a.jcc(E, o1); bailTo(off, depth); a.bind(o1);
+        a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);      // StructInstance*
+        a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, STRUCT_TAG);
+        Label o2; a.jcc(E, o2); bailTo(off, depth); a.bind(o2);
+        a.movRM(RCX, RAX, STRUCT_SHAPE_OFF); a.movAbs(RDX, (uint64_t)(uintptr_t)shape); a.cmpRR(RCX, RDX);
+        Label o3; a.jcc(E, o3); bailTo(off, depth); a.bind(o3);
+    }
     // &list[idx] -> RAX from a raw list word `objR` and unboxed int `idxR`; bails
     // out-of-range (incl. negative). `trusted` skips the object + LIST-tag guard —
     // valid because every VT_OBJ operand originates from a pinned list cell already
@@ -474,8 +486,9 @@ inline bool RegionCompilerTrace::compile() {
             depth -= argc;
         } else {
             // origin encoding: global idx >= 0, local slot as -(2+slot), else -1.
-            if (op == Op::INDEX_SET) {
-                int b = (int)orig.size() - 3;                 // [.. base idx val]
+            if (op == Op::INDEX_SET || op == Op::INDEX_GET) {
+                // base is below the index (INDEX_GET: [base idx]; INDEX_SET: [base idx val])
+                int b = (int)orig.size() - (op == Op::INDEX_SET ? 3 : 2);
                 if (b < 0) return false;
                 int o = orig[b];
                 if (o >= 0) objBaseG[o] = true;
@@ -502,7 +515,7 @@ inline bool RegionCompilerTrace::compile() {
                 VKind ft = si->slots[slot].tag();
                 int fvt = (ft == VKind::INT) ? VT_INT : (ft == VKind::FLOAT) ? VT_NUM : -1;
                 if (fvt < 0) return false;                    // numeric fields only
-                memberSlot[off] = slot; memberFType[off] = fvt;
+                memberSlot[off] = slot; memberFType[off] = fvt; memberShape[off] = si->shape;
                 if (o >= 0) { structBaseG.insert(o); gShape[o] = si->shape; }
                 else { int s = -2 - o; structBaseL.insert(s); lShape[s] = si->shape; }
             }
@@ -551,9 +564,11 @@ inline bool RegionCompilerTrace::compile() {
         const void* shape = nullptr;
         int vt;
         if (isStructBase) {
-            // struct member base: a STRUCT instance, read-only across the region
-            // (its POINTER is stable; fields mutate via MEMBER_SET into the slots).
-            if (k != VKind::OBJ || !v.isObjType(ObjectType::STRUCT) || dirty) return false;
+            // struct member base: a STRUCT instance. It MAY be reassigned each
+            // iteration (`e = ents[j]`, array-of-structs), so the pointer is not
+            // stable — every MEMBER access guards the tag+shape per access. The cell
+            // just carries the raw pointer word (pinned or in memory).
+            if (k != VKind::OBJ || !v.isObjType(ObjectType::STRUCT)) return false;
             vt = VT_STRUCT;
             shape = isGlobal ? gShape[idx] : lShape[idx];
         } else if (isBase) {
@@ -627,22 +642,17 @@ inline bool RegionCompilerTrace::compile() {
             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
             Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
         } else if (c.pinned && c.vt == VT_STRUCT) {
-            // struct member base: guard object + STRUCT tag + the EXACT shape ONCE
-            // (monomorphic). The read-only cell then serves every member access as a
-            // fixed-slot load/store — no per-access type/shape check on the base.
+            // struct member base: load the raw pointer word only — it may be
+            // reassigned each iteration, so every MEMBER access guards tag+shape.
+            (void)c.shape;
             Reg r = gpCell((int)(&c - &cells[0]));
             a.movRM(r, (Reg)mBase, disp);
-            a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
-            Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
-            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);      // StructInstance*
-            a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, STRUCT_TAG);
-            Label okS; a.jcc(E, okS); a.jmp(prologueBail); a.bind(okS);
-            a.movRM(RCX, RAX, STRUCT_SHAPE_OFF); a.movAbs(RDX, (uint64_t)(uintptr_t)c.shape);
-            a.cmpRR(RCX, RDX);
-            Label okSh; a.jcc(E, okSh); a.jmp(prologueBail); a.bind(okSh);
         } else if (c.pinned) {
             Reg r = gpCell((int)(&c - &cells[0]));
             a.movRM(r, (Reg)mBase, disp); guardUnboxInt(r, prologueBail);
+        } else if (c.vt == VT_STRUCT) {
+            // memory struct base (e = ents[j] each iteration): no entry guard —
+            // every MEMBER access guards tag+shape on the current value itself.
         } else {
             // memory global: guard its current type matches the recorded type
             a.movRM(RAX, R_GLOBALS, disp);
@@ -673,6 +683,11 @@ inline bool RegionCompilerTrace::compile() {
             case Op::SET_LOCAL: {
                 int ci = localCell[(int)rdU16(off + 1)];
                 if (cells[ci].vt == VT_NUM) { if (otype[depth-1] != VT_NUM) ok = false; else a.movsdRR(xmCell(ci), xm(depth-1)); }
+                else if (cells[ci].vt == VT_STRUCT) {   // reassign the entity pointer (raw word)
+                    if (otype[depth-1] != VT_STRUCT && otype[depth-1] != VT_WORD) ok = false;
+                    else if (cells[ci].pinned) a.movRR(gpCell(ci), gp(depth-1));
+                    else a.movMR(R_SLOTS, cells[ci].idx * 8, gp(depth-1));
+                }
                 else                        { ensureInt(depth - 1); if (ok) a.movRR(gpCell(ci), gp(depth-1)); }
                 depth--; break;
             }
@@ -686,6 +701,9 @@ inline bool RegionCompilerTrace::compile() {
                 if (cells[ci].vt == VT_NUM) {
                     if (cells[ci].pinned) a.movsdRR(xm(depth), xmCell(ci));
                     else                  a.movsdXM(xm(depth), R_GLOBALS, cells[ci].idx * 8);
+                } else if (cells[ci].vt == VT_STRUCT) {
+                    if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
+                    else                  a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);  // raw pointer word
                 } else {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else { a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);
@@ -695,6 +713,12 @@ inline bool RegionCompilerTrace::compile() {
             }
             case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL: {
                 int ci = globalCell[(int)rdU16(off + 1)];
+                if (cells[ci].vt == VT_STRUCT) {         // reassign the entity pointer (raw word)
+                    if (otype[depth-1] != VT_STRUCT && otype[depth-1] != VT_WORD) { ok = false; break; }
+                    if (cells[ci].pinned) a.movRR(gpCell(ci), gp(depth-1));
+                    else                  a.movMR(R_GLOBALS, cells[ci].idx * 8, gp(depth-1));  // global root: no barrier
+                    depth--; break;
+                }
                 if (cells[ci].vt == VT_NUM) {
                     if (otype[depth-1] != VT_NUM) { ok = false; break; }
                     if (cells[ci].pinned) a.movsdRR(xmCell(ci), xm(depth-1));
@@ -756,9 +780,9 @@ inline bool RegionCompilerTrace::compile() {
                 // the prologue), so no re-guard: extract the instance, load the
                 // inline-Value slot, and guard the field's recorded numeric type
                 // (fields are dynamically typed, so a type change side-exits).
-                if (otype[depth-1] != VT_STRUCT) { ok = false; break; }
+                { int vtb = otype[depth-1]; if (vtb != VT_STRUCT && vtb != VT_WORD) { ok = false; break; } }
                 int slot = memberSlot[off], fvt = memberFType[off];
-                a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, gp(depth-1)); a.andRR(RAX, RCX);  // StructInstance*
+                guardStructPtr(gp(depth-1), memberShape[off], off, depth);  // StructInstance* -> RAX
                 a.movRM(RAX, RAX, STRUCT_SLOTS_OFF);              // slots.begin()
                 a.movRM(RCX, RAX, slot * 8);                      // field word
                 if (fvt == VT_INT) {
@@ -776,10 +800,10 @@ inline bool RegionCompilerTrace::compile() {
             case Op::MEMBER_SET: {
                 // [obj, val] -> obj.field = val. A numeric/word value stores inline
                 // with no barrier; a pointer value would need a barrier -> decline.
-                if (otype[depth-2] != VT_STRUCT) { ok = false; break; }
+                { int vtb = otype[depth-2]; if (vtb != VT_STRUCT && vtb != VT_WORD) { ok = false; break; } }
                 int slot = memberSlot[off], vvt = otype[depth-1];
                 if (vvt == VT_OBJ || vvt == VT_CALLEE || vvt == VT_STRUCT) { ok = false; break; }
-                a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, gp(depth-2)); a.andRR(RAX, RCX);  // StructInstance*
+                guardStructPtr(gp(depth-2), memberShape[off], off, depth);  // StructInstance* -> RAX
                 a.movRM(RAX, RAX, STRUCT_SLOTS_OFF);              // slots.begin()
                 if (vvt == VT_NUM)      { a.movsdMX(RAX, slot * 8, xm(depth-1)); }
                 else if (vvt == VT_INT) { boxTo(RDX, gp(depth-1)); a.movMR(RAX, slot * 8, RDX); }
