@@ -112,6 +112,7 @@ public:
     std::unordered_map<size_t, const Proto*> inlineProto;
     std::unordered_map<size_t, uint64_t>     calleeWord;
     std::unordered_map<size_t, int>          calleeArgc;
+    std::unordered_map<size_t, int>          intrinsicAt;   // CALL off -> math intrinsic (1=sqrt)
 
     RegionCompilerTrace(const Chunk& c, size_t s, size_t e,
                         const Value* sl, const Value* gl, const unsigned char* def)
@@ -446,6 +447,18 @@ inline bool RegionCompilerTrace::compile() {
             if (g < 0) return false;
             if (!rtGlobals[g].isObj()) return false;
             Object* ob = rtGlobals[g].asObj();
+            // Math intrinsic: sqrt(x) — a native builtin call in a hot float loop is
+            // emitted as an SSE instruction instead of declining the region. Guarded
+            // that the global still holds this exact builtin at run time.
+            if (ob && ob->tag == ObjectType::BUILTIN &&
+                static_cast<BuiltinObject*>(ob)->name == "sqrt" && argc == 1) {
+                uint64_t w; std::memcpy(&w, &rtGlobals[g], 8);
+                intrinsicAt[off] = 1; calleeWord[off] = w; calleeArgc[off] = argc;
+                calleeGlobals.insert(g);
+                int peak = depth + 1; if (peak > maxDepth) maxDepth = peak;
+                opop(argc + 1); opush(-1); depth -= argc;
+                off += len; continue;                     // handled; next op
+            }
             if (!ob || ob->tag != ObjectType::FUNCTION) return false;
             ClosureObject* clo = static_cast<ClosureObject*>(ob);
             if (clo->moduleGlobals != nullptr || clo->structShape) return false;
@@ -637,7 +650,7 @@ inline bool RegionCompilerTrace::compile() {
             else                guardFloat(RAX, prologueBail);
         }
     }
-
+ 
     // ---- emit pass ----
     depth = 0;
     for (size_t off = start; off < end; ) {
@@ -869,15 +882,28 @@ inline bool RegionCompilerTrace::compile() {
             }
 
             case Op::CALL: {
-                auto it = inlineProto.find(off);
-                if (it == inlineProto.end()) return false;
-                const Proto* p = it->second;
                 int argc = calleeArgc[off];
                 int calleeSlot = depth - argc - 1;
+                // guard the callee global still holds the exact recorded object
                 a.movAbs(RCX, calleeWord[off]);
                 a.cmpRR(gp(calleeSlot), RCX);
                 Label okC; a.jcc(E, okC); bailTo(off, depth); a.bind(okC);
-                emitInlineCallee(p, depth, argc, off);
+                auto ii = intrinsicAt.find(off);
+                if (ii != intrinsicAt.end()) {
+                    // sqrt(x): coerce the arg to a double, guard it is >= 0 (the
+                    // builtin errors on a negative), then sqrtsd into the result slot.
+                    toX(depth - 1);                          // arg -> xm(depth-1)
+                    a.xorpd(XMM0, XMM0);                      // 0.0
+                    a.ucomisd(xm(depth - 1), XMM0);
+                    Label okp; a.jcc(AE, okp); bailTo(off, depth); a.bind(okp);  // arg<0 or NaN -> bail
+                    a.sqrtsd(xm(calleeSlot), xm(depth - 1));
+                    otype[calleeSlot] = VT_NUM;
+                    depth -= argc;
+                    break;
+                }
+                auto it = inlineProto.find(off);
+                if (it == inlineProto.end()) return false;
+                emitInlineCallee(it->second, depth, argc, off);
                 if (!ok) return false;
                 depth -= argc;
                 break;

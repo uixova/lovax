@@ -170,6 +170,10 @@ public:
     void subsd(Xmm d, Xmm s) { sseRR(0x5C, d, s); }
     void mulsd(Xmm d, Xmm s) { sseRR(0x59, d, s); }
     void divsd(Xmm d, Xmm s) { sseRR(0x5E, d, s); }
+    void sqrtsd(Xmm d, Xmm s){ sseRR(0x51, d, s); }     // d = sqrt(s)
+    void minsd(Xmm d, Xmm s) { sseRR(0x5D, d, s); }
+    void maxsd(Xmm d, Xmm s) { sseRR(0x5F, d, s); }
+    void xorpd(Xmm d, Xmm s) { u8(0x66); rex(false,d,s); u8(0x0F); u8(0x57); modrmReg(d,s); } // d ^= s (zero via d,d)
     void movsdRR(Xmm d, Xmm s) { sseRR(0x10, d, s); }   // d <- s (register-register)
     void ucomisd(Xmm d, Xmm s) {                            // 66 0F 2E /r (sets ZF/PF/CF)
         u8(0x66); rex(false, d, s); u8(0x0F); u8(0x2E); modrmReg(d, s);

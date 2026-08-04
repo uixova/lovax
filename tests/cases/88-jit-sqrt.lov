@@ -1,0 +1,37 @@
+# JIT sqrt intrinsic (Stage-8 G5) — self-verifying. A hot float loop calling sqrt
+# emits the SSE sqrtsd instead of declining the region; results must stay bit-identical
+# to std::sqrt via the interpreter. sqrt of a perfect square is exact, so the loop
+# cross-checks against a closed form.
+
+# ---- sum of sqrt(k*k) for k in 1..N == sum of k (sqrt is exact on squares) ----
+set s = 0.0
+set k = 1
+while k < 100000:
+    s = s + sqrt(k * k * 1.0)
+    k = k + 1
+set n = 99999
+check(s == n * (n + 1) / 2 * 1.0, "sqrt of squares exact")
+
+# ---- pythagorean: sqrt(3k^2 + 4k^2 * ... ) hypot of (3m,4m) == 5m ----
+set h = 0.0
+set m = 1
+while m < 50000:
+    set a = 3.0 * m
+    set b = 4.0 * m
+    h = h + sqrt(a * a + b * b)
+    m = m + 1
+# each term = 5m ; sum 5*m for m in 1..49999
+set mm = 49999
+check(h == 5.0 * (mm * (mm + 1) / 2), "hypot 3-4-5")
+
+# ---- sqrt result feeding more float math ----
+set t = 0.0
+set i = 1
+while i < 80000:
+    t = t + sqrt(i * i * 1.0) * 2.0 - i
+    i = i + 1
+# each term = i*2 - i = i ; sum i for 1..79999
+set ii = 79999
+check(t == ii * (ii + 1) / 2 * 1.0, "sqrt feeds math")
+
+say "88 ok"
