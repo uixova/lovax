@@ -8,7 +8,7 @@ generic microbenches. Four new benches (best of 4, ms, lower better):
 | bench | lovax | lovax --no-jit | luajit | lua5.4 | what it measures |
 |---|--:|--:|--:|--:|---|
 | entity_update | 172 | 512 | 11 | 149 | struct-of-arrays float update (parallel lists) |
-| aos_update | 618 | 584 | 58 | 186 | array-of-structs entity update (`e = ents[j]; e.x += e.vx`) |
+| aos_update | **80** | 565 | 58 | 186 | array-of-structs entity update (`e = ents[j]; e.x += e.vx`) — **G2b: 7x, now 1.4x off LuaJIT** |
 | vec_math | 96 | 837 | 41 | 177 | `sqrt(dx*dx+dy*dy)` distance accumulation |
 | particles | 226 | 212 | 88 | 191 | per-frame spawn/update/despawn churn |
 
