@@ -1,0 +1,25 @@
+struct Ent:
+    x = 0.0
+    y = 0.0
+    vx = 0.0
+    vy = 0.0
+set ents = []
+set i = 0
+while i < 20000:
+    push(ents, Ent(i * 1.0, i * 1.0, 1.5, -0.5))
+    i = i + 1
+set frame = 0
+set total = 0.0
+while frame < 200:
+    set j = 0
+    while j < 20000:
+        set e = ents[j]
+        e.x = e.x + e.vx
+        e.y = e.y + e.vy
+        j = j + 1
+    frame = frame + 1
+set k = 0
+while k < 20000:
+    total = total + ents[k].x
+    k = k + 1
+say floor(total)

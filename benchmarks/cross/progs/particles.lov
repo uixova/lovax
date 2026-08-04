@@ -1,0 +1,19 @@
+struct P:
+    x = 0.0
+    y = 0.0
+    life = 0
+set total = 0.0
+set frame = 0
+while frame < 400:
+    set parts = []
+    set i = 0
+    while i < 2000:
+        push(parts, P(i * 1.0, i * 0.5, 60))
+        i = i + 1
+    set j = 0
+    while j < 2000:
+        set p = parts[j]
+        total = total + p.x
+        j = j + 1
+    frame = frame + 1
+say floor(total)
