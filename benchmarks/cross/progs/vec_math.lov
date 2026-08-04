@@ -1,0 +1,8 @@
+set total = 0.0
+set i = 0
+while i < 4000000:
+    set dx = i * 0.001
+    set dy = i * 0.0005
+    total = total + sqrt(dx * dx + dy * dy)
+    i = i + 1
+say total
