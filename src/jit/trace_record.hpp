@@ -99,6 +99,7 @@ public:
     std::unordered_map<size_t, int> memberSlot;               // MEMBER off -> field slot
     std::unordered_map<size_t, int> memberFType;              // MEMBER off -> field VT (INT/NUM)
     std::unordered_map<size_t, const void*> memberShape;      // MEMBER off -> shape guarded per access
+    std::unordered_map<size_t, int> indexEType;               // INDEX_GET off -> speculated element VT (INT/NUM)
 
     std::vector<Reg> gpPool;      // INT/CALLEE cells (pinned) then INT/CALLEE operands
     std::vector<Xmm> xmmPool;     // NUM cells (pinned) then NUM operands
@@ -504,6 +505,21 @@ inline bool RegionCompilerTrace::compile() {
                 if (o >= 0) objBaseG[o] = true;
                 else if (o <= -2) objBaseL[-2 - o] = true;
                 else return false;                            // base not a plain cell
+                // INDEX_GET: speculate the element type from the LIVE list (like a
+                // struct field's recorded type) so a numeric element refines from a
+                // raw word to VT_INT/VT_NUM and downstream arithmetic can trace. A
+                // per-access type guard side-exits if the speculation is ever wrong.
+                if (op == Op::INDEX_GET) {
+                    const Value* bv = (o >= 0) ? &rtGlobals[o] : &rtSlots[-2 - o];
+                    if (bv && bv->isObjType(ObjectType::LIST)) {
+                        auto* lst = static_cast<ListObject*>(bv->asObj());
+                        if (lst->elements.size() > 0) {
+                            VKind et = lst->elements[0].tag();
+                            if (et == VKind::INT)        indexEType[off] = VT_INT;
+                            else if (et == VKind::FLOAT) indexEType[off] = VT_NUM;
+                        }
+                    }
+                }
             }
             if (op == Op::MEMBER_GET || op == Op::MEMBER_SET) {
                 // resolve the member from the LIVE struct instance: field slot +
@@ -605,6 +621,19 @@ inline bool RegionCompilerTrace::compile() {
     if (!haveLocals) gpPool.push_back(RBX);
     xmmPool = { XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7 };
 
+    // Register pressure relief for struct-of-arrays loops (xs[j], ys[j], vxs[j],
+    // vys[j] = four distinct LIST bases). If the pinned GP cells plus the operand
+    // peak overflow the pool, demote read-only GLOBAL list bases to memory cells:
+    // each is reloaded (and obj+LIST guarded) at its GET_GLOBAL instead of held in
+    // a dedicated register. A base pointer is loop-invariant so the reload is an L1
+    // hit — far cheaper than declining the whole region to the template compiler,
+    // which runs at interpreter speed. Counter/accumulator cells stay pinned.
+    auto gpPinnedCount = [&]{ int n = 0; for (auto& c : cells) if (c.pinned && c.vt != VT_NUM) ++n; return n; };
+    for (auto& c : cells) {
+        if (gpPinnedCount() + maxDepth <= (int)gpPool.size()) break;
+        if (c.pinned && c.vt == VT_OBJ && c.isGlobal) c.pinned = false;
+    }
+
     int gi = 0, xi = 0;
     for (auto& c : cells) if (c.pinned) {
         if (c.vt == VT_NUM) { if (xi >= (int)xmmPool.size()) return false; c.poolIdx = xi++; }
@@ -663,6 +692,9 @@ inline bool RegionCompilerTrace::compile() {
         } else if (c.vt == VT_STRUCT) {
             // memory struct base (e = ents[j] each iteration): no entry guard —
             // every MEMBER access guards tag+shape on the current value itself.
+        } else if (c.vt == VT_OBJ) {
+            // memory list base (demoted under register pressure): no entry guard —
+            // obj+LIST is guarded at each GET_GLOBAL reload.
         } else {
             // memory global: guard its current type matches the recorded type
             a.movRM(RAX, R_GLOBALS, disp);
@@ -714,6 +746,20 @@ inline bool RegionCompilerTrace::compile() {
                 } else if (cells[ci].vt == VT_STRUCT) {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else                  a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);  // raw pointer word
+                } else if (cells[ci].vt == VT_OBJ) {
+                    if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
+                    else {
+                        // memory list base: reload the raw word and guard obj+LIST
+                        // here (once per use), so the downstream trusted indexAddr
+                        // only needs its per-access bounds check.
+                        Reg r = gp(depth);
+                        a.movRM(r, R_GLOBALS, cells[ci].idx * 8);
+                        a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+                        Label okO; a.jcc(E, okO); bailTo(off, depth); a.bind(okO);
+                        a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);
+                        a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
+                        Label okL; a.jcc(E, okL); bailTo(off, depth); a.bind(okL);
+                    }
                 } else {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else { a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);
@@ -823,9 +869,27 @@ inline bool RegionCompilerTrace::compile() {
             case Op::INDEX_GET: {
                 if (otype[depth-2] != VT_OBJ) { ok = false; break; }
                 ensureInt(depth - 1); if (!ok) break;
-                indexAddr(gp(depth-2), gp(depth-1), off, depth, true);   // &elem -> RAX
-                a.movRM(gp(depth-2), RAX, 0);                       // load raw element word
-                otype[depth-2] = VT_WORD;                           // element type unknown
+                indexAddr(gp(depth-2), gp(depth-1), off, depth, true);   // &elem -> RAX (base reg preserved)
+                auto ie = indexEType.find(off);
+                if (ie != indexEType.end() && ie->second == VT_NUM) {
+                    // speculated float element: load to scratch, guard it IS a float,
+                    // then move into the XMM slot. Guard bails with the base still
+                    // live in gp(depth-2), so the side-exit snapshot stays correct.
+                    a.movRM(RCX, RAX, 0);                          // element word -> RCX
+                    a.movRR(RDX, RCX); a.movAbs(RAX, JIT_TAGS); a.andRR(RDX, RAX); a.cmpRR(RDX, RAX);
+                    Label okF; a.jcc(NE, okF); bailTo(off, depth); a.bind(okF);   // (w&TAGS)==TAGS -> not float
+                    a.movqXR(xm(depth-2), RCX); otype[depth-2] = VT_NUM;
+                } else if (ie != indexEType.end() && ie->second == VT_INT) {
+                    // speculated int element: guard the INT tag, then unbox in place.
+                    a.movRM(RCX, RAX, 0);                          // element word -> RCX
+                    a.movRR(RDX, RCX); a.shrRI(RDX, JIT_TAG_SHIFT); a.cmpRI(RDX, (int32_t)JIT_TOP17_INT);
+                    Label okI; a.jcc(E, okI); bailTo(off, depth); a.bind(okI);
+                    a.shlRI(RCX, 17); a.sarRI(RCX, 17);            // unbox
+                    a.movRR(gp(depth-2), RCX); otype[depth-2] = VT_INT;
+                } else {
+                    a.movRM(gp(depth-2), RAX, 0);                  // raw word, element type unknown
+                    otype[depth-2] = VT_WORD;
+                }
                 depth--; break;
             }
             case Op::JUMP_IF_FALSE: {

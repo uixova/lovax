@@ -1,0 +1,67 @@
+# JIT struct-of-arrays multi-array update (Stage-8 G4a) — self-verifying. Two
+# things must hold bit-identically to the interpreter:
+#   1. INDEX_GET speculates a numeric element type and refines the raw word to
+#      VT_INT/VT_NUM, so arithmetic on list elements TRACES (was declining to the
+#      template compiler at interpreter speed).
+#   2. With 4+ distinct list bases the GP pool overflows; read-only global list
+#      bases demote to memory cells (reloaded + obj/LIST-guarded per use) instead
+#      of declining. Both int- and float-element arrays are exercised.
+
+# ---- float SoA: four arrays, each += one of the others (forces memory bases) ----
+set xs = []
+set ys = []
+set vxs = []
+set vys = []
+set i = 0
+while i < 1000:
+    push(xs, i * 1.0)
+    push(ys, 0.0)
+    push(vxs, 1.5)
+    push(vys, -0.5)
+    i = i + 1
+set frame = 0
+while frame < 100:
+    set j = 0
+    while j < 1000:
+        xs[j] = xs[j] + vxs[j]
+        ys[j] = ys[j] + vys[j]
+        j = j + 1
+    frame = frame + 1
+set sx = 0.0
+set sy = 0.0
+set k = 0
+while k < 1000:
+    sx = sx + xs[k]
+    sy = sy + ys[k]
+    k = k + 1
+# xs[j] = j + 100*1.5 ; sum = sum(j) + 1000*150 ; ys = 100*-0.5 each
+check(sx == (999.0 * 1000.0 / 2.0) + 1000.0 * (100.0 * 1.5), "float SoA x accumulate")
+check(sy == 1000.0 * (100.0 * -0.5), "float SoA y accumulate")
+
+# ---- int SoA: four int-element arrays summed into one (memory bases + int refine) ----
+set a = []
+set b = []
+set c = []
+set d = []
+set n = 0
+while n < 1000:
+    push(a, n)
+    push(b, 1)
+    push(c, 2)
+    push(d, 3)
+    n = n + 1
+set g = 0
+while g < 50:
+    set m = 0
+    while m < 1000:
+        a[m] = a[m] + b[m] + c[m] + d[m]
+        m = m + 1
+    g = g + 1
+# each frame adds 6 to a[m]; after 50 frames a[m] = m + 300
+set total = 0
+set p = 0
+while p < 1000:
+    total = total + a[p]
+    p = p + 1
+check(total == (999 * 1000 / 2) + 1000 * 300, "int SoA accumulate")
+say "92 ok"
