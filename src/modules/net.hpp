@@ -179,17 +179,33 @@ inline ObjPtr makeNetModule() {
         if (n < 0) return netErr("udp_send", line);
         return makeObj<IntegerObject>(n);
     });
-    // udp_recv(sock, [maxbytes]) -> string
+    // udp_recv(sock, [maxbytes]) -> [data, sender_ip, sender_port]
+    // Returns the sender's address alongside the payload — required for UDP hole
+    // punching / STUN, where the peer's public ip:port is exactly what recvfrom
+    // reveals (a symmetric-NAT mapping is only observable from the received packet).
     def("udp_recv", [](const Args& a, int line, const CallFn&) -> ObjPtr {
         if (a.empty() || a.size() > 2 || !netIsInt(a[0]))
             return makeError("net.udp_recv(sock, [maxbytes]) expects a socket handle", line);
         long long maxb = (a.size() == 2 && netIsInt(a[1])) ? netInt(a[1]) : 4096;
         if (maxb < 1 || maxb > 16 * 1024 * 1024) maxb = 4096;
         std::string buf((size_t)maxb, '\0');
-        long long n = ::recvfrom((int)netInt(a[0]), &buf[0], (int)maxb, 0, nullptr, nullptr);
+        sockaddr_in src{};
+        socklen_t srclen = sizeof(src);
+        long long n = ::recvfrom((int)netInt(a[0]), &buf[0], (int)maxb, 0, (sockaddr*)&src, &srclen);
         if (n < 0) return netErr("udp_recv", line);
         buf.resize((size_t)n);
-        return makeObj<StringObject>(buf);
+        // Decode the sender: dotted-quad ip string + host-order port. inet_ntop
+        // yields "" only on an impossible AF mismatch; guard so ip is always valid.
+        char ipbuf[INET_ADDRSTRLEN] = {0};
+        const char* ipres = ::inet_ntop(AF_INET, &src.sin_addr, ipbuf, sizeof(ipbuf));
+        std::string ip = ipres ? std::string(ipbuf) : std::string("0.0.0.0");
+        long long port = (long long)ntohs(src.sin_port);
+        auto out = makeObj<ListObject>();
+        out->elements.reserve(3);
+        out->elements.push_back(Value::object(makeObj<StringObject>(std::move(buf))));
+        out->elements.push_back(Value::object(makeObj<StringObject>(std::move(ip))));
+        out->elements.push_back(Value::integer(port));
+        return out;
     });
 
     mod->frozen = true;

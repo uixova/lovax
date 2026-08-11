@@ -42,5 +42,31 @@ done
 wait $SRV
 grep -q "served: 3" "$tmp/server.out" && echo "  ok: server served 3 clients" \
     || { echo "  FAIL: server output: $(cat "$tmp/server.out")"; fails=$((fails+1)); }
+
+# ---- UDP: udp_recv must return [data, sender_ip, sender_port] (hole-punch/STUN) ----
+UPORT=$(( (RANDOM % 20000) + 40000 ))
+cat > "$tmp/udp_srv.lov" <<LOV
+use net
+set s = net.udp_socket()
+net.udp_bind(s, $UPORT)
+set r = net.udp_recv(s)
+say "n={len(r)} data={r[0]} ip={r[1]}"
+net.close(s)
+LOV
+cat > "$tmp/udp_cli.lov" <<LOV
+use net
+set c = net.udp_socket()
+net.udp_send(c, "127.0.0.1", $UPORT, "punch")
+net.close(c)
+LOV
+timeout 15 "$LOVAX" "$tmp/udp_srv.lov" > "$tmp/udp.out" 2>&1 &
+USRV=$!
+sleep 0.3
+"$LOVAX" "$tmp/udp_cli.lov" 2>&1
+wait $USRV
+grep -q "n=3 data=punch ip=127.0.0.1" "$tmp/udp.out" \
+    && echo "  ok: udp_recv returned [data, sender_ip, sender_port]" \
+    || { echo "  FAIL: udp output: $(cat "$tmp/udp.out")"; fails=$((fails+1)); }
+
 echo "net_multi: $fails failure(s)"
 [ "$fails" -eq 0 ] && echo "NET MULTI-CLIENT GATE PASSED" || exit 1
