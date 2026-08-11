@@ -693,8 +693,16 @@ inline bool RegionCompilerTrace::compile() {
             // memory struct base (e = ents[j] each iteration): no entry guard —
             // every MEMBER access guards tag+shape on the current value itself.
         } else if (c.vt == VT_OBJ) {
-            // memory list base (demoted under register pressure): no entry guard —
-            // obj+LIST is guarded at each GET_GLOBAL reload.
+            // memory list base (demoted under register pressure): guard obj+LIST
+            // ONCE here. The base variable is read-only in the region, so it stays
+            // a list for every iteration — each GET_GLOBAL then just reloads the
+            // pointer with no re-guard (the expensive part is hoisted to entry).
+            a.movRM(RAX, (Reg)mBase, disp);
+            a.movRR(RCX, RAX); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+            Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
+            a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);
+            a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
+            Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
         } else {
             // memory global: guard its current type matches the recorded type
             a.movRM(RAX, R_GLOBALS, disp);
@@ -747,19 +755,11 @@ inline bool RegionCompilerTrace::compile() {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else                  a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);  // raw pointer word
                 } else if (cells[ci].vt == VT_OBJ) {
+                    // pinned: read the register. memory (demoted): reload the raw
+                    // pointer word — obj+LIST was guarded once in the prologue and
+                    // the base is read-only, so no per-access re-guard is needed.
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
-                    else {
-                        // memory list base: reload the raw word and guard obj+LIST
-                        // here (once per use), so the downstream trusted indexAddr
-                        // only needs its per-access bounds check.
-                        Reg r = gp(depth);
-                        a.movRM(r, R_GLOBALS, cells[ci].idx * 8);
-                        a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
-                        Label okO; a.jcc(E, okO); bailTo(off, depth); a.bind(okO);
-                        a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);
-                        a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
-                        Label okL; a.jcc(E, okL); bailTo(off, depth); a.bind(okL);
-                    }
+                    else                  a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);
                 } else {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else { a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);
