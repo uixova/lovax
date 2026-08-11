@@ -662,6 +662,11 @@ public:
         *pos = v; ++e_;
     }
     void reserve(size_t n) { if (n > capacity()) grow(n); }
+    void resize(size_t n) {                            // grow (nil-fill) or shrink to n
+        if (n > capacity()) grow(n);
+        for (Value* p = e_; p < b_ + n; ++p) *p = Value::nil();
+        e_ = b_ + n;
+    }
     void push_back(const Value& v) { if (e_ == c_) grow(size() + 1); *e_++ = v; }
     void pop_back() { --e_; }
     template <class It> void insert(Value* /*pos==end()*/, It first, It last) {  // append range
