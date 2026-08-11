@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v0.11.0 — value representation: tracing GC + 16-byte tagged value, on top of general-purpose + safe (TCP/UDP `net`, version-pinned packages, capability sandbox). Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v1.0.1 — a three-tier JIT (register allocator → tracing compiler → template compiler, own zero-dependency x86-64 encoder), unboxed inline struct fields, exact int64 on an 8-byte NaN-boxed value, and a C++/C-ABI embedding bridge (RFC-025) for hosting Lovax inside an engine. Game loops now trace to native SSE. Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -101,9 +101,13 @@ irm https://raw.githubusercontent.com/uixova/lovax/main/install.ps1 | iex       
 ```
 
 Then `lovax update` self-updates to the newest release. Prefer to build from source?
-It's one command, zero dependencies:
+Zero dependencies — just a C++17 compiler:
 
 ```bash
+make               # optimized ./lovax  (or: make dev / make asan / make test)
+make install       # copy ./lovax to ~/.local/bin
+
+# no make? one command still works:
 g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp
 ```
 
@@ -326,42 +330,50 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ## Performance — honest baseline
 
 Lovax compiles to bytecode and runs on a direct-threaded stack VM (computed-goto
-dispatch), with immediate numeric values, in-place stack arithmetic, fused
-superinstructions ([RFC-012](rfcs/012-vm-performance.md)), an in-place string
-package, and a member-access inline cache.
+dispatch), and hot loops are then compiled to native x86-64 by a **three-tier
+JIT** (all zero-dependency, our own encoder — no LLVM, no DynASM):
 
-Measured honestly — same machine, same workload (outputs verified identical),
-best-of-5, full harness in [benchmarks/cross/](benchmarks/cross/) — Lovax is
-**not yet fast**:
+1. a **register allocator** takes pure-int local loops,
+2. a **tracing compiler** takes float / global / struct-field loops (runtime-typed,
+   floats in XMM, per-access type guards that side-exit on a surprise), and
+3. a **template compiler** is the always-correct fallback.
 
-| Benchmark | Lovax | Lua 5.4 | LuaJIT | CPython 3.14 | Node |
-|-----------|------:|--------:|-------:|-------------:|-----:|
-| `fib(32)` (recursion) | 389 ms | 190 | 37 | 308 | 73 |
-| string-concat | 102 ms | 19 | 28 | 26 | 45 |
-| binary-tree (alloc) | 653 ms | 179 | 97 | 104 | 75 |
-| hashmap | 240 ms | 279 | 100 | 186 | 409 |
-| startup | **5 ms** | 4 | 3 | 24 | 47 |
+Struct fields are unboxed inline values (an `entity.x` write allocates nothing),
+and math builtins (`sqrt`, `floor`, `ceil`, `abs`) emit SSE inside a trace.
 
-On compute Lovax currently trails Lua 5.4 (~2×), CPython (~1.3×), and LuaJIT
-(~10×); it is competitive on hashmap/gc and **wins startup** (small static
-binary). Earlier "beats CPython/Lua" claims predated the v0.11 tracing GC and no
-longer hold. **"As fast as C++" is the goal a future JIT must earn, not a claim
-we make today.** The current levers are a compact struct layout (structs are
-still map-backed — heavy) and a game-friendly incremental GC; the compute ceiling
-is a v1.x JIT (LuaJIT-inspired, zero-dependency). See
-[benchmarks/cross/RESULTS.md](benchmarks/cross/RESULTS.md) for the full read.
+Because Lovax is a **game** language, the benchmarks that matter are entity/update
+loops, not generic recursion. Same machine, outputs verified identical, best-of-3
+(ms, lower is better; full harness in [benchmarks/cross/](benchmarks/cross/)):
+
+| Game loop | Lovax | LuaJIT | Node | what it is |
+|-----------|------:|-------:|-----:|-----------|
+| entity_update | **39** | 8 | 42 | struct-of-arrays float update (beats Node) |
+| aos_update | **49** | 23 | — | array-of-structs `e = ents[j]; e.x += e.vx` |
+| vec_math | **56** | 22 | — | `sqrt(dx*dx+dy*dy)` distance accumulation |
+| particles | **97** | 42 | — | per-frame spawn/update/despawn churn |
+
+The game loops trace to native and land **2–5× off LuaJIT** (and Lovax wins on
+startup — a small static binary, ~5 ms). LuaJIT is the reference to learn from,
+not a target to match feature-for-feature — it is a mature general-purpose JIT,
+Lovax is a young game-first one. Generic recursion (`fib`) still trails; that is a
+deliberately low priority. The remaining game lever is hoisting per-iteration
+bounds/range checks out of the loop (ABC + LICM). See
+[benchmarks/cross/RESULTS.md](benchmarks/cross/RESULTS.md) for the full read,
+including the generic microbenches.
 
 ## Architecture & Roadmap
 
-`Lexer -> Parser (Pratt) -> AST -> Compiler -> Bytecode -> Stack VM`.
-The language surface is stable (68 golden tests pin every behavior, including
-error messages). Next milestones:
+`Lexer -> Parser (Pratt) -> AST -> Compiler -> Bytecode -> Stack VM -> JIT`.
+The language surface is stable (118 golden tests pin every behavior — including
+error messages — cross-checked against the interpreter across every build axis).
+Milestones:
 
 1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done (v0.8)**.
 2. ~~Coroutines, string speed, inline cache, one-line install~~ **done (v0.9)** ([RFC-014](rfcs/014-coroutines.md)).
 3. ~~Tracing GC + 16-byte value~~ **done (v0.11)** ([RFC-013](rfcs/013-value-representation.md)).
-4. **Now**: compact struct layout (~10× less memory) + incremental GC (≤1 ms pauses); game-first stdlib gaps (set, bytes, random distributions).
-5. **v1.0**: engine embedding API, hot-reload, determinism guarantees. **v1.x**: JIT.
+4. ~~Compact/unboxed struct fields, incremental GC (≤1 ms pauses), stdlib gaps (set, tuple, bytes, regex, random distributions)~~ **done (v0.12–v0.16)**.
+5. ~~8-byte NaN-boxed value (exact int64 kept) + C++/C-ABI embedding bridge for engines~~ **done (v0.18 / v1.0, [RFC-025](rfcs/025-embed-ffi.md))**.
+6. **Now (v1.x JIT):** three-tier native compilation is live (register allocator + tracing + template, own x86-64 encoder). Next: hoist per-iteration bounds/range checks (ABC + LICM) and a young-generation nursery for per-frame allocation churn.
 
 See [lovax.md](lovax.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
 
@@ -392,9 +404,10 @@ geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama 
 ### Hızlı Başlangıç
 
 ```bash
-g++ -std=c++17 -O3 -fno-gcse -fno-crossjumping -o lovax src/main.cpp
+make                                      # optimize edilmiş ./lovax (veya: make dev / make test)
 ./lovax examples/turkish_showcase.lov     # Türkçe tanımlayıcı vitrini
 ./lovax examples/dungeon.lov
+./lovax                                   # argümansız: etkileşimli REPL
 ```
 
 ### Öne çıkan kurallar
