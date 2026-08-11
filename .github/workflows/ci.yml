@@ -123,3 +123,9 @@ jobs:
       # region code generator, proven in isolation.
       - name: JIT gate (assembler + codegen)
         run: ./tests/jit_asm.sh
+
+      # A sustained game frame loop (AoS + SoA + per-frame alloc churn + math
+      # intrinsics) under the incremental GC: bit-identical across every JIT tier
+      # and the interpreter, deterministic and leak-free across repeats, no crash.
+      - name: Load / stability gate (game frame loop under load)
+        run: ./tests/stress.sh
