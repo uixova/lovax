@@ -1,0 +1,38 @@
+# JIT abs() math intrinsic (Stage-8 G5c) — self-verifying. abs(x) in a hot loop
+# emits without an XMM scratch: a float clears its sign bit in a GP register
+# (bit-identical to std::fabs, incl -0.0), an int uses branchless |v|. Both stay
+# bit-identical to the interpreter. Cross-checked against closed forms.
+
+# ---- float abs over symmetric range: sum |i*0.5| for i in [-N, N) ----
+set i = -500
+set sf = 0.0
+while i < 500:
+    sf = sf + abs(i * 0.5)
+    i = i + 1
+# sum_{i=-500}^{499} |i|*0.5 = 0.5 * (sum_{1..500} + sum_{1..499})
+#   = 0.5 * (500*501/2 + 499*500/2)
+check(sf == 0.5 * (500.0 * 501.0 / 2.0 + 499.0 * 500.0 / 2.0), "float abs symmetric sum")
+
+# ---- int abs: sum |j| for j in [-500, 500) ----
+set j = -500
+set si = 0
+while j < 500:
+    si = si + abs(j)
+    j = j + 1
+check(si == 500 * 501 / 2 + 499 * 500 / 2, "int abs symmetric sum")
+
+# ---- abs is idempotent on non-negatives, and abs(-x)==abs(x) ----
+set k = 0
+set d = 0.0
+while k < 300:
+    set v = k * 1.5
+    d = d + (abs(0.0 - v) - abs(v))       # must be exactly 0 every step
+    k = k + 1
+check(d == 0.0, "abs(-x) == abs(x)")
+
+# ---- spot cases including signed zero ----
+check(abs(-0.0) == 0.0, "abs(-0.0)")
+check(abs(-7) == 7, "abs negative int")
+check(abs(7) == 7, "abs positive int")
+check(abs(-3.5) == 3.5, "abs negative float")
+say "91 ok"

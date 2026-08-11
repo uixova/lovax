@@ -471,6 +471,7 @@ inline bool RegionCompilerTrace::compile() {
                 if (bn == "sqrt") mathKind = 1;
                 else if (bn == "floor") mathKind = 2;
                 else if (bn == "ceil") mathKind = 3;
+                else if (bn == "abs") mathKind = 4;   // type-dependent: emit decides int vs float
             }
             if (mathKind) {
                 uint64_t w; std::memcpy(&w, &rtGlobals[g], 8);
@@ -923,6 +924,27 @@ inline bool RegionCompilerTrace::compile() {
                 Label okC; a.jcc(E, okC); bailTo(off, depth); a.bind(okC);
                 auto ii = intrinsicAt.find(off);
                 if (ii != intrinsicAt.end()) {
+                    if (ii->second == 4) {
+                        // abs(x): type-dependent, so do NOT coerce to float first.
+                        // float -> clear the sign bit in a GP register (no XMM scratch,
+                        // so no live NUM cell is clobbered); matches std::fabs bit-for-bit
+                        // incl -0.0/NaN/inf. int -> branchless |v| = (v^(v>>63))-(v>>63),
+                        // and a VT_INT operand is always inline-range so |v| stays in range.
+                        if (otype[depth - 1] == VT_NUM) {
+                            a.movqRX(RAX, xm(depth - 1));
+                            a.movAbs(RCX, 0x7FFFFFFFFFFFFFFFull); a.andRR(RAX, RCX);
+                            a.movqXR(xm(calleeSlot), RAX);
+                            otype[calleeSlot] = VT_NUM;
+                        } else if (otype[depth - 1] == VT_INT) {
+                            Reg s = gp(depth - 1);
+                            a.movRR(RAX, s); a.sarRI(RAX, 63);              // sign mask: 0 or -1
+                            a.movRR(RCX, s); a.xorRR(RCX, RAX); a.subRR(RCX, RAX);
+                            a.movRR(gp(calleeSlot), RCX);
+                            otype[calleeSlot] = VT_INT;
+                        } else { ok = false; break; }        // non-number -> decline region
+                        depth -= argc;
+                        break;
+                    }
                     toX(depth - 1);                          // arg -> xm(depth-1), a double
                     if (ii->second == 1) {
                         // sqrt(x): guard arg >= 0 (the builtin errors on a negative),
