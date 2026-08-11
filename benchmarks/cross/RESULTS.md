@@ -1,33 +1,37 @@
 # Cross-language benchmark
 
-## Stage-8: GAME-FIRST — struct/entity JIT + math intrinsics — 2026-07-31
+## Stage-8: GAME-FIRST — struct/entity JIT + math intrinsics — 2026-08-11
 
 Lovax is a game language, so the targets are now game-representative loops, not
-generic microbenches. Four new benches (best of 4, ms, lower better):
+generic microbenches. Four new benches (best of 3, ms, lower better):
 
-| bench | lovax | lovax --no-jit | luajit | lua5.4 | what it measures |
+| bench | lovax | lovax --no-jit | luajit | vs LuaJIT | what it measures |
 |---|--:|--:|--:|--:|---|
-| entity_update | 172 | 512 | 11 | 149 | struct-of-arrays float update (parallel lists) |
-| aos_update | **80** | 565 | 58 | 186 | array-of-structs entity update (`e = ents[j]; e.x += e.vx`) — **G2b: 7x, now 1.4x off LuaJIT** |
-| vec_math | 96 | 837 | 41 | 177 | `sqrt(dx*dx+dy*dy)` distance accumulation |
-| particles | 226 | 212 | 88 | 191 | per-frame spawn/update/despawn churn |
+| entity_update | **39** | 295 | 8 | 5.1x off | struct-of-arrays float update (parallel lists) — **G4a: 172→39** |
+| aos_update | **49** | 329 | 23 | 2.1x off | array-of-structs entity update (`e = ents[j]; e.x += e.vx`) |
+| vec_math | 56 | 470 | 22 | 2.6x off | `sqrt(dx*dx+dy*dy)` distance accumulation |
+| particles | 97 | 123 | 42 | 2.3x off | per-frame spawn/update/despawn churn |
 
-Stage-8 wins landed so far (each its own commit):
+All four game loops now trace and sit 2.1–5.1x off LuaJIT (entity_update also
+beats Node). Stage-8 wins landed so far (each its own commit):
 - **G1 (unbox + inline struct fields):** struct fields were heap-boxed — an
   `entity.x` float write allocated a FloatObject. Now fields are inline Values in a
-  SmallVec<4>: a 2M-iter entity update went from **4,000,091 allocations → 87**, and
-  btree −18%.
-- **G2 (struct fields in the trace JIT):** a single persistent entity's update loop
-  (`e.x = e.x + e.vx`) now traces to native SSE — **152→9.5ms (16x)**.
-- **G5 (sqrt SSE intrinsic):** a sqrt call in a hot float loop emits `sqrtsd`
-  instead of declining — **vec_math JIT gives 8.7x** (837→96), 2.3x off LuaJIT.
+  SmallVec<4>: a 2M-iter entity update went from **4,000,091 allocations → 87**.
+- **G2 / G2b (struct fields + array-of-structs in the trace JIT):** a persistent
+  entity update (`e.x = e.x + e.vx`) traces to native SSE (**152→9.5ms**), and
+  array-of-structs iteration (`e = ents[j]`) traces via a per-access shape guard.
+- **G5 / G5b / G5c (math intrinsics):** `sqrt`→sqrtsd, `floor`/`ceil`→roundsd+
+  cvttsd2si, `abs`→sign-bit clear / branchless — a hot float loop that calls them
+  stays native instead of declining. vec_math JIT is 8.7x over the interpreter.
+- **G4a (struct-of-arrays traces):** INDEX_GET now speculates+refines the element
+  type (int/float) so list-element arithmetic traces, and 4+ read-only list bases
+  demote to memory cells under register pressure. **entity_update 172→39ms.**
 
-Honest remaining gaps (next): **aos_update** (`e = ents[j]` reassigns the entity
-each iteration — the array-of-structs iteration the JIT does not yet take; needs the
-per-access shape-guard extension) and **entity_update** (the SoA loop traces but the
-per-iteration index bounds + loop-counter range-check aren't hoisted — LICM/narrowing
-on the IR is the lever, and would close most of the LuaJIT gap on both). particles is
-allocation-bound (the temp-list churn per frame). fib/strcat stay LOW game-priority.
+Honest remaining gap (next = G4b): the SoA/AoS loops still carry a per-iteration
+array bounds check and loop-counter range-check that LuaJIT hoists out of the loop
+(ABC + LICM on its IR). Closing that needs an IR-level optimise pass over the trace
+and is the last big LuaJIT lever. particles is also allocation-bound (temp-list
+churn per frame → a nursery, G3). fib/strcat stay LOW game-priority.
 
 ## Stage-6b: list indexing in the trace compiler — 2026-07-30
 
