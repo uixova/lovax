@@ -181,6 +181,12 @@ public:
     void cvtsi2sd(Xmm d, Reg s) {                           // F2 REX.W 0F 2A /r
         u8(0xF2); rex(true, d, s); u8(0x0F); u8(0x2A); modrmReg(d, s);
     }
+    void cvttsd2si(Reg d, Xmm s) {                          // F2 REX.W 0F 2C /r (r64 <- trunc(xmm))
+        u8(0xF2); rex(true, d, s); u8(0x0F); u8(0x2C); modrmReg(d, s);
+    }
+    void roundsd(Xmm d, Xmm s, uint8_t imm) {               // 66 0F 3A 0B /r ib — imm 1=floor 2=ceil
+        u8(0x66); rex(false, d, s); u8(0x0F); u8(0x3A); u8(0x0B); modrmReg(d, s); u8(imm);
+    }
     void movqRX(Reg d, Xmm s) {                             // 66 REX.W 0F 7E /r
         u8(0x66); rex(true, s, d); u8(0x0F); u8(0x7E); modrmReg(s, d);
     }

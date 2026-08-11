@@ -56,6 +56,9 @@ static int dumpCanonical(const char* path) {
     a.cqo();                    // cqto
     a.idivR(RCX);               // idiv   %rcx
     a.pushR(R12); a.popR(R12);  // push %r12 / pop %r12
+    a.roundsd(XMM0, XMM1, 1);    // roundsd $0x1,%xmm1,%xmm0  (floor)
+    a.roundsd(XMM2, XMM3, 2);    // roundsd $0x2,%xmm3,%xmm2  (ceil)
+    a.cvttsd2si(RAX, XMM0);      // cvttsd2si %xmm0,%rax
     a.ret();                    // ret
     FILE* f = std::fopen(path, "wb");
     if (!f) return 1;
@@ -284,6 +287,22 @@ int main(int argc, char** argv) {
         double expect = 7.0;
         uint64_t bits; std::memcpy(&bits, &expect, 8);
         CHECK(f && f(7) == bits, "cvtsi2sd + movq");
+    }
+    // roundsd (floor/ceil) + cvttsd2si — the floor()/ceil() JIT intrinsic path.
+    // floor: roundsd imm=1 toward -inf; ceil: imm=2 toward +inf; cvttsd2si is the
+    // (long long) cast. Verifies the fractional-sign cases truncation would miss.
+    {
+        auto mk = [](uint8_t imm) {
+            Asm a; a.roundsd(XMM0, XMM0, imm); a.cvttsd2si(RAX, XMM0); a.ret();
+            return a;
+        };
+        Asm af = mk(1), ac = mk(2);
+        auto ff = build<long long(*)(double)>(af);
+        auto fc = build<long long(*)(double)>(ac);
+        CHECK(ff && ff(2.5) == 2,   "roundsd floor(2.5)=2 + cvttsd2si");
+        CHECK(ff && ff(-2.5) == -3, "roundsd floor(-2.5)=-3 (not truncation)");
+        CHECK(fc && fc(2.5) == 3,   "roundsd ceil(2.5)=3");
+        CHECK(fc && fc(-2.5) == -2, "roundsd ceil(-2.5)=-2");
     }
 
     // 11. the actual NaN-box tag guard the baseline JIT emits:

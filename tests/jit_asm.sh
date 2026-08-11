@@ -45,6 +45,9 @@ else
         "idiv   %rcx"
         "push   %r12"
         "pop    %r12"
+        "roundsd \$0x1,%xmm1,%xmm0"
+        "roundsd \$0x2,%xmm3,%xmm2"
+        "cvttsd2si %xmm0,%rax"
         "ret"
     )
     for w in "${want[@]}"; do

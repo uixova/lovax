@@ -1,0 +1,46 @@
+# JIT floor/ceil math intrinsics (Stage-8 G5b) — self-verifying. floor(x)/ceil(x)
+# called in a hot float loop must emit roundsd+cvttsd2si and stay bit-identical to
+# the interpreter: floor toward -inf, ceil toward +inf (NOT truncation, NOT
+# round-to-nearest), across positive, negative, fractional, and exact inputs.
+
+# ---- floor toward -inf, ceil toward +inf over signed half-integers ----
+set i = -400
+set sf = 0
+set sc = 0
+while i < 400:
+    set x = i * 0.5           # ..., -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, ...
+    sf = sf + floor(x)
+    sc = sc + ceil(x)
+    i = i + 1
+# for each pair (k, k+0.5): floor = k + k = 2k ; ceil = k + (k+1) = 2k+1.
+# summed over i in [-400, 400): closed forms below.
+# floor(i*0.5) = i//2 (toward -inf); ceil(i*0.5) = -((-i)//2).
+set j = -400
+set cf = 0
+set cc = 0
+while j < 400:
+    set half = j / 2          # integer floor-division (toward -inf) in Lovax
+    cf = cf + half
+    cc = cc + (0 - ((0 - j) / 2))
+    j = j + 1
+check(sf == cf, "floor toward -inf matches integer floor-division")
+check(sc == cc, "ceil toward +inf matches negated floor-division")
+
+# ---- exact integers (fractional part 0): floor == ceil == the value ----
+set k = 0
+set eq = 0
+while k < 500:
+    set v = k * 2.0           # always integral
+    if floor(v) == ceil(v):
+        eq = eq + 1
+    k = k + 1
+check(eq == 500, "floor==ceil on integral floats")
+
+# ---- specific fractional signs (guards against truncation) ----
+check(floor(-2.5) == -3, "floor(-2.5) toward -inf")
+check(ceil(-2.5) == -2,  "ceil(-2.5) toward -inf side")
+check(floor(2.5) == 2,   "floor(2.5)")
+check(ceil(2.5) == 3,    "ceil(2.5)")
+check(floor(-0.1) == -1, "floor(-0.1)")
+check(ceil(-0.1) == 0,   "ceil(-0.1)")
+say "90 ok"

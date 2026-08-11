@@ -459,13 +459,22 @@ inline bool RegionCompilerTrace::compile() {
             if (g < 0) return false;
             if (!rtGlobals[g].isObj()) return false;
             Object* ob = rtGlobals[g].asObj();
-            // Math intrinsic: sqrt(x) — a native builtin call in a hot float loop is
-            // emitted as an SSE instruction instead of declining the region. Guarded
-            // that the global still holds this exact builtin at run time.
-            if (ob && ob->tag == ObjectType::BUILTIN &&
-                static_cast<BuiltinObject*>(ob)->name == "sqrt" && argc == 1) {
+            // Math intrinsic: sqrt/floor/ceil(x) — a native builtin call in a hot
+            // float loop is emitted as an SSE instruction instead of declining the
+            // region. Guarded that the global still holds this exact builtin at run
+            // time. floor/ceil match the interpreter's (long long)std::floor/ceil
+            // bit-for-bit (roundsd then cvttsd2si = the C++ cast on x86-64); round()
+            // is NOT here — its half-away ties differ from roundsd's ties-to-even.
+            int mathKind = 0;
+            if (ob && ob->tag == ObjectType::BUILTIN && argc == 1) {
+                const std::string& bn = static_cast<BuiltinObject*>(ob)->name;
+                if (bn == "sqrt") mathKind = 1;
+                else if (bn == "floor") mathKind = 2;
+                else if (bn == "ceil") mathKind = 3;
+            }
+            if (mathKind) {
                 uint64_t w; std::memcpy(&w, &rtGlobals[g], 8);
-                intrinsicAt[off] = 1; calleeWord[off] = w; calleeArgc[off] = argc;
+                intrinsicAt[off] = mathKind; calleeWord[off] = w; calleeArgc[off] = argc;
                 calleeGlobals.insert(g);
                 int peak = depth + 1; if (peak > maxDepth) maxDepth = peak;
                 opop(argc + 1); opush(-1); depth -= argc;
@@ -914,14 +923,31 @@ inline bool RegionCompilerTrace::compile() {
                 Label okC; a.jcc(E, okC); bailTo(off, depth); a.bind(okC);
                 auto ii = intrinsicAt.find(off);
                 if (ii != intrinsicAt.end()) {
-                    // sqrt(x): coerce the arg to a double, guard it is >= 0 (the
-                    // builtin errors on a negative), then sqrtsd into the result slot.
-                    toX(depth - 1);                          // arg -> xm(depth-1)
-                    a.xorpd(XMM0, XMM0);                      // 0.0
-                    a.ucomisd(xm(depth - 1), XMM0);
-                    Label okp; a.jcc(AE, okp); bailTo(off, depth); a.bind(okp);  // arg<0 or NaN -> bail
-                    a.sqrtsd(xm(calleeSlot), xm(depth - 1));
-                    otype[calleeSlot] = VT_NUM;
+                    toX(depth - 1);                          // arg -> xm(depth-1), a double
+                    if (ii->second == 1) {
+                        // sqrt(x): guard arg >= 0 (the builtin errors on a negative),
+                        // then sqrtsd into the result slot (stays a float).
+                        a.xorpd(XMM0, XMM0);                  // 0.0
+                        a.ucomisd(xm(depth - 1), XMM0);
+                        Label okp; a.jcc(AE, okp); bailTo(off, depth); a.bind(okp);  // arg<0 or NaN -> bail
+                        a.sqrtsd(xm(calleeSlot), xm(depth - 1));
+                        otype[calleeSlot] = VT_NUM;
+                    } else {
+                        // floor/ceil(x) -> int. roundsd to the integral double
+                        // (imm 1=toward -inf, 2=toward +inf), then cvttsd2si — which
+                        // is exactly the interpreter's (long long) cast on x86-64, so
+                        // NaN/inf/out-of-range all land on the same indefinite value.
+                        // Result into RAX first: a VT_INT in the trace must fit the
+                        // 47-bit inline range (the invariant boxTo relies on), so
+                        // range-check and bail BEFORE overwriting the callee slot —
+                        // keeping the snapshot's callee word intact if we exit.
+                        a.roundsd(xm(depth - 1), xm(depth - 1), ii->second == 3 ? 2 : 1);  // floor(2)->1 toward -inf, ceil(3)->2 toward +inf
+                        a.cvttsd2si(RAX, xm(depth - 1));
+                        a.movRR(RCX, RAX); a.shlRI(RCX, 17); a.sarRI(RCX, 17); a.cmpRR(RCX, RAX);
+                        Label okR; a.jcc(E, okR); bailTo(off, depth); a.bind(okR);
+                        a.movRR(gp(calleeSlot), RAX);
+                        otype[calleeSlot] = VT_INT;
+                    }
                     depth -= argc;
                     break;
                 }
