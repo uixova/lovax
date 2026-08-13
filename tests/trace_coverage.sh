@@ -132,5 +132,14 @@ while i<5000:
     i=i+1
 say floor(s)"
 
+check_traces "spawn push struct"     "struct P:
+    x = 0.0
+set parts=[]
+set i=0
+while i<5000:
+    push(parts, P(i*1.0))
+    i=i+1
+say len(parts)"
+
 echo "trace_coverage: $fail failure(s)"
 [ "$fail" -eq 0 ] && echo "TRACE COVERAGE GATE PASSED" || exit 1

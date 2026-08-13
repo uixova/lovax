@@ -1444,14 +1444,17 @@ inline bool RegionCompilerTrace::compile() {
                         break;
                     }
                     if (ii->second == 5) {
-                        // push(list, val): [callee, list, val]. Number value only
-                        // (Part 1) — appends inline; a full backing side-exits so the
-                        // interpreter grows it (so no reallocation ever happens in the
-                        // trace, keeping any cached begin pointer valid). Returns the
-                        // list. No write barrier is needed for a non-object value.
+                        // push(list, val): [callee, list, val]. Appends inline; a full
+                        // backing side-exits so the interpreter grows it (so the trace
+                        // never reallocates, keeping any cached begin pointer valid).
+                        // Values of any type append (Part 3 adds object/struct values,
+                        // e.g. push(parts, P(...))). NO write barrier is needed: the
+                        // entry guard is !gcPending and the LOOP bails on any pending
+                        // collection, so a trace body runs only in the GC IDLE phase —
+                        // a stored object is reached via the list root when MARK later
+                        // runs. push returns the list.
                         if (otype[depth-2] != VT_OBJ) { ok = false; break; }
                         int vt = otype[depth-1];
-                        if (vt != VT_INT && vt != VT_NUM) { ok = false; break; }
                         a.movRR(RAX, gp(depth-2)); a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);  // ListObject*
                         a.movRM(RCX, RAX, VEC_FINISH_OFF);      // e_ (end)
                         a.movRM(RDX, RAX, VEC_CAP_OFF);         // c_ (cap)
@@ -1459,8 +1462,9 @@ inline bool RegionCompilerTrace::compile() {
                         Label okCap; a.jcc(B, okCap); bailTo(off, depth); a.bind(okCap);   // full -> grow -> bail
                         a.movRR(RDX, RCX);                      // RDX = old e_ (store address)
                         a.addRI(RCX, 8); a.movMR(RAX, VEC_FINISH_OFF, RCX);   // e_ += 8
-                        if (vt == VT_NUM) { a.movsdMX(RDX, 0, xm(depth-1)); }
-                        else { boxTo(RAX, gp(depth-1)); a.movMR(RDX, 0, RAX); }   // RAX free after the e_ store
+                        if (vt == VT_NUM)      { a.movsdMX(RDX, 0, xm(depth-1)); }
+                        else if (vt == VT_INT) { boxTo(RAX, gp(depth-1)); a.movMR(RDX, 0, RAX); }  // RAX free after the e_ store
+                        else                   { a.movMR(RDX, 0, gp(depth-1)); }   // VT_WORD/VT_OBJ/VT_STRUCT raw word
                         a.movRR(gp(calleeSlot), gp(depth-2)); otype[calleeSlot] = VT_OBJ;  // push returns the list
                         depth -= argc;
                         break;

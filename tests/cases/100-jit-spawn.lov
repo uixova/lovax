@@ -1,0 +1,27 @@
+# JIT op-coverage (Stage-9, spawn Part 3): object push — the full spawn loop
+# push(parts, P(...)) traces. A struct value appends to a list with NO write
+# barrier: a trace body runs only in the GC IDLE phase (entry is !gcPending and
+# the LOOP bails on any pending collection), so a stored object is reached via the
+# list root when MARK later runs. Must stay bit-identical + GC-safe.
+struct Particle:
+    x = 0.0
+    y = 0.0
+    life = 0
+
+set total = 0.0
+set frame = 0
+while frame < 200:
+    set parts = []
+    set i = 0
+    while i < 500:
+        push(parts, Particle(i * 1.0, i * 0.5, 60))
+        i = i + 1
+    set j = 0
+    while j < 500:
+        set p = parts[j]
+        total = total + p.x + p.y
+        j = j + 1
+    frame = frame + 1
+# per frame: sum(x)+sum(y) = sum(i) + sum(i*0.5) = 1.5 * sum(0..499)
+check(total == 200.0 * 1.5 * (499.0 * 500.0 / 2.0), "spawn: push struct then read fields")
+say "100 ok"
