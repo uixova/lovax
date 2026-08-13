@@ -129,3 +129,8 @@ jobs:
       # and the interpreter, deterministic and leak-free across repeats, no crash.
       - name: Load / stability gate (game frame loop under load)
         run: ./tests/stress.sh
+
+      # Pattern-fragility guard: every common way to write a hot loop must reach
+      # the trace JIT, so a small change in how code is written never loses the JIT.
+      - name: Trace-coverage gate (common patterns must trace)
+        run: ./tests/trace_coverage.sh
