@@ -1,0 +1,82 @@
+# JIT array-bounds-check elision + begin-pointer caching (Stage-8 G4b) — self-
+# verifying. A counting loop `while C < N` whose counter C indexes read-only lists
+# lets each per-access bounds check drop (guarded once at entry: C0>=0 and
+# size>maxIdx) and, when every access to a pinned base is safe, that base caches
+# its elements-begin pointer. Results must stay bit-identical to the interpreter.
+
+# ---- single array, begin-cached, exact-size boundary (max index == size-1) ----
+set a = []
+set i = 0
+while i < 5000:
+    push(a, i)
+    i = i + 1
+set sum = 0
+set r = 0
+while r < 20:
+    set k = 0
+    while k < 5000:              # bound == size: safe, max index 4999
+        sum = sum + a[k]
+        k = k + 1
+    r = r + 1
+check(sum == 20 * (4999 * 5000 / 2), "begin-cached read sum")
+
+# ---- read + write on the same array (both accesses ABC-safe) ----
+set b = []
+set n = 0
+while n < 4000:
+    push(b, n * 1.0)
+    n = n + 1
+set f = 0
+while f < 30:
+    set j = 0
+    while j < 4000:
+        b[j] = b[j] + 2.0
+        j = j + 1
+    f = f + 1
+set sb = 0.0
+set p = 0
+while p < 4000:
+    sb = sb + b[p]
+    p = p + 1
+# each of 30 frames adds 2 to every element: b[j] = j + 60
+check(sb == (3999.0 * 4000.0 / 2.0) + 4000.0 * 60.0, "begin-cached read/write")
+
+# ---- increment by K > 1: only even indices touched, bounds still elided ----
+set c = []
+set q = 0
+while q < 1000:
+    push(c, 1)
+    q = q + 1
+set cnt = 0
+set m = 0
+while m < 1000:
+    cnt = cnt + c[m]
+    m = m + 2                    # step 2
+check(cnt == 500, "counter step 2, bounds elided")
+
+# ---- multi-array (4 bases -> memory demotion + ABC, no begin-cache) ----
+set x = []
+set y = []
+set z = []
+set w = []
+set g = 0
+while g < 800:
+    push(x, g)
+    push(y, 1)
+    push(z, 2)
+    push(w, 3)
+    g = g + 1
+set fr = 0
+while fr < 25:
+    set t = 0
+    while t < 800:
+        x[t] = x[t] + y[t] + z[t] + w[t]
+        t = t + 1
+    fr = fr + 1
+set tot = 0
+set u = 0
+while u < 800:
+    tot = tot + x[u]
+    u = u + 1
+check(tot == (799 * 800 / 2) + 800 * (25 * 6), "multi-array memory bases + ABC")
+say "93 ok"

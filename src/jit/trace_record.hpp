@@ -111,6 +111,25 @@ public:
     std::vector<Snapshot> snaps;
 
     std::unordered_set<int> calleeGlobals;
+
+    // ---- ABC: array bounds check elision for a canonical counting loop ----
+    // A `while C < N` loop whose counter C indexes read-only lists lets each
+    // per-access bounds check drop, guarded ONCE at entry (C0>=0 and size>maxIdx).
+    // Conservative: detected only for the exact shape below; any deviation leaves
+    // every check in. `abcCounterOrig` uses the cell-origin encoding (global>=0,
+    // local as -(2+slot)), valid only when abcActive.
+    bool   abcActive = false;
+    int    abcCounterOrig = 0;
+    long long abcMaxIdx = -1;                    // largest value C reaches at a safe access
+    size_t abcIncOff = 0;                        // bytecode offset of the C = C + K write
+    std::unordered_map<size_t,bool> abcSafeAccess;   // INDEX off -> skip its bounds check
+    std::unordered_set<int> abcBase;                 // base cell origins needing the entry size guard
+    // LICM: a read-only pinned base ALL of whose accesses are ABC-safe caches its
+    // elements-begin pointer in its register at entry (instead of the raw word), so
+    // a per-access address is just begin + idx*8 (no mask, no start load, no bounds).
+    std::unordered_map<int,int> baseAccTotal, baseAccSafe;   // per base origin
+    std::unordered_map<size_t,int> accBaseOrig;              // INDEX off -> base origin
+    std::unordered_set<int> beginBase;                       // origins whose register holds begin
     std::unordered_map<size_t, const Proto*> inlineProto;
     std::unordered_map<size_t, uint64_t>     calleeWord;
     std::unordered_map<size_t, int>          calleeArgc;
@@ -180,7 +199,14 @@ public:
     // guarded as an object AND a LIST in the prologue, and such a cell is read-only
     // for the whole region, so only the per-access BOUNDS check is needed (this is
     // the guard-hoisting LICM does for list kernels). Clobbers RAX/RCX/RDX.
-    void indexAddr(Reg objR, Reg idxR, size_t off, int depth, bool trusted) {
+    // boundsSafe: ABC has proven 0 <= idx < size for this access (guarded once at
+    // entry), so skip the per-access bounds compare — just compute &list[idx].
+    void indexAddr(Reg objR, Reg idxR, size_t off, int depth, bool trusted, bool boundsSafe = false,
+                   bool baseIsBegin = false) {
+        if (baseIsBegin) {                          // objR already holds elements-begin (LICM)
+            a.movRR(RAX, idxR); a.shlRI(RAX, 3); a.addRR(RAX, objR);   // &elem = begin + idx*8
+            return;
+        }
         if (!trusted) {
             a.movRR(RCX, objR); a.shrRI(RCX, JIT_TAG_SHIFT);
             a.cmpRI(RCX, (int32_t)TOP17_OBJ);
@@ -193,10 +219,14 @@ public:
             a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object* (guaranteed list)
         }
         a.movRM(RDX, RAX, VEC_START_OFF);
-        a.movRM(RCX, RAX, VEC_FINISH_OFF); a.subRR(RCX, RDX);                // RCX = size*8
-        a.movRR(RAX, idxR); a.shlRI(RAX, 3);
-        a.cmpRR(RAX, RCX);
-        Label o3; a.jcc(B, o3); bailTo(off, depth); a.bind(o3);              // unsigned: catches <0
+        if (!boundsSafe) {
+            a.movRM(RCX, RAX, VEC_FINISH_OFF); a.subRR(RCX, RDX);            // RCX = size*8
+            a.movRR(RAX, idxR); a.shlRI(RAX, 3);
+            a.cmpRR(RAX, RCX);
+            Label o3; a.jcc(B, o3); bailTo(off, depth); a.bind(o3);          // unsigned: catches <0
+        } else {
+            a.movRR(RAX, idxR); a.shlRI(RAX, 3);                             // idx*8; bounds proven at entry
+        }
         a.addRR(RAX, RDX);                                                   // RAX = &list[idx]
     }
     // ensure operand d is a double in xm(d), converting an unboxed int in place.
@@ -416,6 +446,60 @@ inline bool RegionCompilerTrace::compile() {
         return false;
     };
 
+    // ---- ABC pre-analysis (pure bytecode; before the typed walk so the walk can
+    // mark safe accesses). Find the single loop-exit guard `LT_I_JF/LE_I_JF k` on a
+    // counter loaded immediately before it, then confirm the counter is written
+    // exactly once as `C = C + K` (K>0). Any deviation -> abcActive stays false. ----
+    {
+        auto getOrig = [&](Op pop, size_t poff) -> int {   // cell origin of a GET, or 1 (invalid)
+            if (pop == Op::GET_GLOBAL) return (int)rdU16(poff + 1);
+            if (pop == Op::GET_LOCAL)  return -2 - (int)rdU16(poff + 1);
+            return 1;                                       // 1 is never a valid origin
+        };
+        size_t guardOff = end, prevOff = end; Op prevOp = Op::HALT;
+        long long boundN = 0; bool strict = true; int cOrig = 1; bool multiGuard = false;
+        for (size_t o = start; o < end; ) {
+            Op op = (Op)chunk.code[o]; int l = instrLength(chunk, o);
+            if (op == Op::LT_I_JF || op == Op::LE_I_JF) {
+                size_t tgt = o + l + rdU16(o + 3);
+                if (tgt >= end) {                           // branch exits the region = loop guard
+                    if (guardOff != end) multiGuard = true;
+                    guardOff = o; boundN = (int16_t)rdU16(o + 1); strict = (op == Op::LT_I_JF);
+                    cOrig = (prevOff != end) ? getOrig(prevOp, prevOff) : 1;
+                }
+            }
+            prevOff = o; prevOp = op; o += l;
+        }
+        bool counterIsInt = false;
+        if (cOrig >= 0)         counterIsInt = rtDefined[cOrig] && rtGlobals[cOrig].tag() == VKind::INT;
+        else if (cOrig <= -2)   counterIsInt = rtSlots[-2 - cOrig].tag() == VKind::INT;
+        if (!multiGuard && guardOff != end && cOrig != 1 && counterIsInt) {
+            // confirm exactly one write to C, of the shape `GET C; CONST K; ADD[_INPLACE]; SET C`
+            // or `GET C; ADD_I K; SET C`, with K a positive int.
+            int writes = 0; bool goodInc = false; size_t incOff = end;
+            size_t w0 = end, w1 = end, w2 = end; Op p0 = Op::HALT, p1 = Op::HALT, p2 = Op::HALT;
+            for (size_t o = start; o < end; ) {
+                Op op = (Op)chunk.code[o]; int l = instrLength(chunk, o);
+                bool isSet = (op == Op::SET_GLOBAL && cOrig >= 0 && (int)rdU16(o + 1) == cOrig)
+                          || (op == Op::SET_LOCAL  && cOrig <= -2 && (-2 - (int)rdU16(o + 1)) == cOrig);
+                if (isSet) {
+                    writes++; incOff = o;
+                    if ((p0 == Op::ADD || p0 == Op::ADD_INPLACE) && p1 == Op::CONST && getOrig(p2, w2) == cOrig) {
+                        const Value& kv = chunk.consts[rdU16(w1 + 1)];
+                        if (kv.tag() == VKind::INT && kv.asInt() > 0) goodInc = true;
+                    } else if (p0 == Op::ADD_I && getOrig(p1, w1) == cOrig) {
+                        if ((int16_t)rdU16(w0 + 1) > 0) goodInc = true;
+                    }
+                }
+                w2 = w1; p2 = p1; w1 = w0; p1 = p0; w0 = o; p0 = op; o += l;
+            }
+            long long maxIdx = strict ? boundN - 1 : boundN;
+            if (writes == 1 && goodInc && maxIdx >= 0) {
+                abcActive = true; abcCounterOrig = cOrig; abcMaxIdx = maxIdx; abcIncOff = incOff;
+            }
+        }
+    }
+
     std::vector<int> orig;
     auto opush = [&](int o){ orig.push_back(o); };
     auto opop  = [&](int n){ for (int i=0;i<n && !orig.empty();++i) orig.pop_back(); };
@@ -505,6 +589,19 @@ inline bool RegionCompilerTrace::compile() {
                 if (o >= 0) objBaseG[o] = true;
                 else if (o <= -2) objBaseL[-2 - o] = true;
                 else return false;                            // base not a plain cell
+                // ABC: arr[C] where C is the loop counter and the access precedes
+                // the counter's increment -> 0 <= C < N <= size holds (entry guards),
+                // so this per-access bounds check can be elided. Record it and the
+                // base cell that then needs the one-time entry size guard.
+                if (abcActive) {
+                    baseAccTotal[o]++;
+                    accBaseOrig[off] = o;
+                    if (off < abcIncOff && orig[b + 1] == abcCounterOrig) {
+                        abcSafeAccess[off] = true;
+                        abcBase.insert(o);
+                        baseAccSafe[o]++;
+                    }
+                }
                 // INDEX_GET: speculate the element type from the LIVE list (like a
                 // struct field's recorded type) so a numeric element refines from a
                 // raw word to VT_INT/VT_NUM and downstream arithmetic can trace. A
@@ -644,6 +741,17 @@ inline bool RegionCompilerTrace::compile() {
     if (numXmmPinned + maxDepth > (int)xmmPool.size()) return false;
     if (maxDepth + 1 > (int)otype.size()) otype.assign(maxDepth + 2, VT_INT);
 
+    // LICM begin-caching eligibility (pinned-ness is now final after demotion): a
+    // base qualifies if it is pinned and EVERY one of its accesses is ABC-safe, so
+    // its register can hold the elements-begin pointer with no raw word ever needed.
+    if (abcActive) for (auto& kv : baseAccTotal) {
+        int o = kv.first;
+        if (kv.second > 0 && baseAccSafe[o] == kv.second) {
+            int ci = (o >= 0) ? globalCell[o] : localCell[-2 - o];
+            if (ci >= 0 && cells[ci].pinned && cells[ci].vt == VT_OBJ) beginBase.insert(o);
+        }
+    }
+
     // Record the pinned cells into the IR as typed SLOADs (the value graph's
     // entry points; the recorder keeps the cell->ref map outside the IR).
     for (auto& c : cells)
@@ -710,7 +818,38 @@ inline bool RegionCompilerTrace::compile() {
             else                guardFloat(RAX, prologueBail);
         }
     }
- 
+
+    // ---- ABC entry guards: make the elided per-access bounds checks sound ----
+    // Run once per native entry. The counter only increases from its entry value,
+    // and no traced op can push/shrink a read-only list, so guarding C0 >= 0 and
+    // size(base) > maxIdx here proves 0 <= C <= maxIdx < size for every iteration.
+    if (abcActive) {
+        int cci = (abcCounterOrig >= 0) ? globalCell[abcCounterOrig]
+                                        : localCell[-2 - abcCounterOrig];
+        a.cmpRI(gpCell(cci), 0);                              // counter is a pinned unboxed VT_INT
+        Label okC; a.jcc(GE, okC); a.jmp(prologueBail); a.bind(okC);
+        int needBytes = (int)((abcMaxIdx + 1) * 8);          // size*8 must be at least this
+        for (int bo : abcBase) {
+            int bci = (bo >= 0) ? globalCell[bo] : localCell[-2 - bo];
+            if (cells[bci].pinned) a.movRR(RAX, gpCell(bci));
+            else                   a.movRM(RAX, (Reg)(bo >= 0 ? R_GLOBALS : R_SLOTS), cells[bci].idx * 8);
+            a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);   // Object*
+            a.movRM(RDX, RAX, VEC_START_OFF);
+            a.movRM(RCX, RAX, VEC_FINISH_OFF); a.subRR(RCX, RDX);   // RCX = size*8
+            a.cmpRI(RCX, needBytes);
+            Label okS; a.jcc(AE, okS); a.jmp(prologueBail); a.bind(okS);
+        }
+        // LICM: overwrite each begin-cacheable base register with its elements-begin
+        // pointer (done after the size guards, which still needed the raw word). The
+        // base is read-only and the GC is non-moving, so begin stays valid.
+        for (int o : beginBase) {
+            int ci = (o >= 0) ? globalCell[o] : localCell[-2 - o];
+            Reg r = gpCell(ci);
+            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);   // Object*
+            a.movRM(r, RAX, VEC_START_OFF);                                   // r = begin
+        }
+    }
+
     // ---- emit pass ----
     depth = 0;
     for (size_t off = start; off < end; ) {
@@ -815,7 +954,9 @@ inline bool RegionCompilerTrace::compile() {
                 ensureInt(depth - 2); if (!ok) break;
                 int vvt = otype[depth-1];
                 if (vvt == VT_OBJ || vvt == VT_CALLEE) { ok = false; break; }  // no barrier here
-                indexAddr(gp(depth-3), gp(depth-2), off, depth, true);   // &elem -> RAX
+                { bool safe = abcSafeAccess.count(off) != 0;
+                  bool begin = safe && beginBase.count(accBaseOrig[off]) != 0;
+                  indexAddr(gp(depth-3), gp(depth-2), off, depth, true, safe, begin); }   // &elem -> RAX
                 if (vvt == VT_INT)      { boxTo(RDX, gp(depth-1)); a.movMR(RAX, 0, RDX); }
                 else if (vvt == VT_NUM) { a.movsdMX(RAX, 0, xm(depth-1)); }
                 else                    { a.movMR(RAX, 0, gp(depth-1)); }        // VT_WORD raw
@@ -869,7 +1010,9 @@ inline bool RegionCompilerTrace::compile() {
             case Op::INDEX_GET: {
                 if (otype[depth-2] != VT_OBJ) { ok = false; break; }
                 ensureInt(depth - 1); if (!ok) break;
-                indexAddr(gp(depth-2), gp(depth-1), off, depth, true);   // &elem -> RAX (base reg preserved)
+                { bool safe = abcSafeAccess.count(off) != 0;
+                  bool begin = safe && beginBase.count(accBaseOrig[off]) != 0;
+                  indexAddr(gp(depth-2), gp(depth-1), off, depth, true, safe, begin); }   // &elem -> RAX (base reg preserved)
                 auto ie = indexEType.find(off);
                 if (ie != indexEType.end() && ie->second == VT_NUM) {
                     // speculated float element: load to scratch, guard it IS a float,
