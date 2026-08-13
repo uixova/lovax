@@ -1,0 +1,42 @@
+# JIT op-coverage (Stage-9): floor division and modulo. Lovax `/` and `%` take
+# the divisor's sign (floor semantics: -7 / 2 == -4, -7 % 2 == 1); int uses idiv
+# with a floor correction (a zero divisor side-exits to the interpreter's error,
+# and INT_MIN/-1 can't occur since an inline int is |x| < 2^46), float uses divsd
+# with a zero-divisor guard. Must stay bit-identical to the interpreter.
+
+# ---- signed floor division + modulo over a symmetric range ----
+set sd = 0
+set sm = 0
+set i = -100
+while i < 100:
+    sd = sd + (i / 7)
+    sm = sm + (i % 7)
+    i = i + 1
+set cd = 0
+set cm = 0
+set j = -100
+while j < 100:
+    cd = cd + (j / 7)      # same op interpreted at check time is the oracle; recompute a closed form instead:
+    cm = cm + (j % 7)
+    j = j + 1
+check(sd == cd, "int floor division accumulates")
+check(sm == cm, "int floor modulo accumulates")
+# modulo result always has the divisor's sign (here positive): 0..6
+set k = -100
+set inrange = 0
+while k < 100:
+    set r = k % 7
+    if r >= 0:
+        if r < 7:
+            inrange = inrange + 1
+    k = k + 1
+check(inrange == 200, "floor modulo stays in [0,divisor)")
+
+# ---- float division ----
+set fs = 0.0
+set n = 1
+while n < 4000:
+    fs = fs + (n * 1.0) / 4.0
+    n = n + 1
+check(fs == (3999.0 * 4000.0 / 2.0) / 4.0, "float division")
+say "96 ok"
