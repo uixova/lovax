@@ -423,6 +423,8 @@ inline bool traceSupported(Op op) {
         case Op::INDEX_SET: case Op::INDEX_GET: case Op::LGET2:
         case Op::LGET_ADD_I: case Op::LGET_SUB_I:
         case Op::MEMBER_GET: case Op::MEMBER_SET:
+        case Op::INDEX_GET_KEEP: case Op::MEMBER_GET_KEEP:
+        case Op::NEGATE:
         case Op::LIST:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
         case Op::JUMP: case Op::LOOP:
@@ -443,6 +445,9 @@ inline int traceStackDelta(Op op) {
         case Op::LGET_ADD_I: case Op::LGET_SUB_I: return +1;   // push local +/- k
         case Op::MEMBER_GET: return 0;    // [obj] -> [field]
         case Op::MEMBER_SET: return -2;   // [obj, val] -> []
+        case Op::INDEX_GET_KEEP: return +1;   // [base, idx] -> [base, idx, elem]
+        case Op::MEMBER_GET_KEEP: return +1;  // [obj] -> [obj, field]
+        case Op::NEGATE: return 0;            // [x] -> [-x]
         case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
         case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: return -1;
         case Op::ADD_I: case Op::SUB_I: case Op::MUL_I: case Op::MOD_I:
@@ -604,8 +609,8 @@ inline bool RegionCompilerTrace::compile() {
             depth -= argc;
         } else {
             // origin encoding: global idx >= 0, local slot as -(2+slot), else -1.
-            if (op == Op::INDEX_SET || op == Op::INDEX_GET) {
-                // base is below the index (INDEX_GET: [base idx]; INDEX_SET: [base idx val])
+            if (op == Op::INDEX_SET || op == Op::INDEX_GET || op == Op::INDEX_GET_KEEP) {
+                // base is below the index (INDEX_GET[_KEEP]: [base idx]; INDEX_SET: [base idx val])
                 int b = (int)orig.size() - (op == Op::INDEX_SET ? 3 : 2);
                 if (b < 0) return false;
                 int o = orig[b];
@@ -629,7 +634,7 @@ inline bool RegionCompilerTrace::compile() {
                 // struct field's recorded type) so a numeric element refines from a
                 // raw word to VT_INT/VT_NUM and downstream arithmetic can trace. A
                 // per-access type guard side-exits if the speculation is ever wrong.
-                if (op == Op::INDEX_GET) {
+                if (op == Op::INDEX_GET || op == Op::INDEX_GET_KEEP) {
                     const Value* bv = (o >= 0) ? &rtGlobals[o] : &rtSlots[-2 - o];
                     if (bv && bv->isObjType(ObjectType::LIST)) {
                         auto* lst = static_cast<ListObject*>(bv->asObj());
@@ -641,11 +646,11 @@ inline bool RegionCompilerTrace::compile() {
                     }
                 }
             }
-            if (op == Op::MEMBER_GET || op == Op::MEMBER_SET) {
+            if (op == Op::MEMBER_GET || op == Op::MEMBER_SET || op == Op::MEMBER_GET_KEEP) {
                 // resolve the member from the LIVE struct instance: field slot +
                 // field type + shape (for the prologue monomorphic guard). Numeric
                 // fields only; anything else declines the region.
-                int b = (op == Op::MEMBER_GET) ? (int)orig.size() - 1 : (int)orig.size() - 2;
+                int b = (op == Op::MEMBER_SET) ? (int)orig.size() - 2 : (int)orig.size() - 1;
                 if (b < 0 || b >= (int)orig.size()) return false;
                 int o = orig[b];
                 const Value* bv = (o >= 0) ? &rtGlobals[o] : (o <= -2 ? &rtSlots[-2 - o] : nullptr);
@@ -683,6 +688,9 @@ inline bool RegionCompilerTrace::compile() {
                 case Op::INDEX_SET: opop(3); break;
                 case Op::INDEX_GET: opop(2); opush(-1); break;
                 case Op::MEMBER_GET: opop(1); opush(-1); break;   // [obj] -> [field]
+                case Op::INDEX_GET_KEEP: opush(-1); break;        // keep base+idx, push elem
+                case Op::MEMBER_GET_KEEP: opush(-1); break;       // keep obj, push field
+                case Op::NEGATE: opop(1); opush(-1); break;       // replace top
                 case Op::MEMBER_SET: opop(2); break;              // [obj, val] -> []
                 case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
                 case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: opop(2); opush(-1); break;
@@ -1097,6 +1105,67 @@ inline bool RegionCompilerTrace::compile() {
                     otype[depth-2] = VT_WORD;
                 }
                 depth--; break;
+            }
+            case Op::INDEX_GET_KEEP: {
+                // like INDEX_GET but the base+index stay on the stack (compound assign
+                // a[i] += x); the element lands in a NEW slot on top.
+                if (otype[depth-2] != VT_OBJ) { ok = false; break; }
+                ensureInt(depth - 1); if (!ok) break;
+                { bool safe = abcSafeAccess.count(off) != 0;
+                  bool begin = safe && beginBase.count(accBaseOrig[off]) != 0;
+                  indexAddr(gp(depth-2), gp(depth-1), off, depth, true, safe, begin); }
+                int dst = depth;
+                auto ie = indexEType.find(off);
+                if (ie != indexEType.end() && ie->second == VT_NUM) {
+                    a.movRM(RCX, RAX, 0);
+                    a.movRR(RDX, RCX); a.movAbs(RAX, JIT_TAGS); a.andRR(RDX, RAX); a.cmpRR(RDX, RAX);
+                    Label okF; a.jcc(NE, okF); bailTo(off, depth); a.bind(okF);
+                    a.movqXR(xm(dst), RCX); otype[dst] = VT_NUM;
+                } else if (ie != indexEType.end() && ie->second == VT_INT) {
+                    a.movRM(RCX, RAX, 0);
+                    a.movRR(RDX, RCX); a.shrRI(RDX, JIT_TAG_SHIFT); a.cmpRI(RDX, (int32_t)JIT_TOP17_INT);
+                    Label okI; a.jcc(E, okI); bailTo(off, depth); a.bind(okI);
+                    a.shlRI(RCX, 17); a.sarRI(RCX, 17);
+                    a.movRR(gp(dst), RCX); otype[dst] = VT_INT;
+                } else {
+                    a.movRM(gp(dst), RAX, 0); otype[dst] = VT_WORD;
+                }
+                depth++; break;
+            }
+            case Op::MEMBER_GET_KEEP: {
+                // like MEMBER_GET but the object stays on the stack (obj.f += x); the
+                // field lands in a NEW slot on top.
+                { int vtb = otype[depth-1]; if (vtb != VT_STRUCT && vtb != VT_WORD) { ok = false; break; } }
+                int slot = memberSlot[off], fvt = memberFType[off];
+                guardStructPtr(gp(depth-1), memberShape[off], off, depth);
+                a.movRM(RAX, RAX, STRUCT_SLOTS_OFF);
+                a.movRM(RCX, RAX, slot * 8);
+                int dst = depth;
+                if (fvt == VT_INT) {
+                    a.movRR(RDX, RCX); a.shrRI(RDX, JIT_TAG_SHIFT); a.cmpRI(RDX, (int32_t)JIT_TOP17_INT);
+                    Label okI; a.jcc(E, okI); bailTo(off, depth); a.bind(okI);
+                    a.shlRI(RCX, 17); a.sarRI(RCX, 17);
+                    a.movRR(gp(dst), RCX); otype[dst] = VT_INT;
+                } else {
+                    a.movRR(RDX, RCX); a.movAbs(RAX, JIT_TAGS); a.andRR(RDX, RAX); a.cmpRR(RDX, RAX);
+                    Label okF; a.jcc(NE, okF); bailTo(off, depth); a.bind(okF);
+                    a.movqXR(xm(dst), RCX); otype[dst] = VT_NUM;
+                }
+                depth++; break;
+            }
+            case Op::NEGATE: {
+                int t = otype[depth-1];
+                if (t == VT_INT) {
+                    a.movRR(RAX, gp(depth-1)); a.negR(RAX);        // -x
+                    a.movRR(RCX, RAX); a.shlRI(RCX, 17); a.sarRI(RCX, 17); a.cmpRR(RCX, RAX);
+                    Label okN; a.jcc(E, okN); bailTo(off, depth); a.bind(okN);   // overflow of inline range
+                    a.movRR(gp(depth-1), RAX);
+                } else if (t == VT_NUM) {
+                    a.movqRX(RAX, xm(depth-1));
+                    a.movAbs(RCX, 0x8000000000000000ull); a.xorRR(RAX, RCX);   // flip sign bit
+                    a.movqXR(xm(depth-1), RAX);
+                } else { ok = false; break; }
+                break;
             }
             case Op::LIST: {
                 // Small list literal -> allocate in native code via lovaxJitMakeList.
