@@ -38,6 +38,25 @@
 #include "trace_ir.hpp"         // linear typed SSA IR (the record target)
 
 namespace Lovax {
+
+// JIT allocation helper (RFC-027): a trace calls this to build a small list
+// literal without leaving native code. gcAlloc never collects mid-allocation —
+// it only flags gcPending for the next VM safepoint — so this is GC-safe: the
+// trace bails at its LOOP back-edge, where the value stack is the full root set,
+// and the collection (if due) runs there. `elems` points at n boxed Value words
+// the trace spilled to its native stack; the result is the boxed list word.
+inline uint64_t lovaxJitMakeList(const uint64_t* elems, long long n) {
+    ListObject* lst = gcAlloc<ListObject>();
+    lst->elements.reserve((size_t)n);
+    for (long long i = 0; i < n; ++i) {
+        Value v; std::memcpy(&v, &elems[i], sizeof(uint64_t));
+        lst->elements.push_back(v);
+    }
+    Value ov = Value::object(Ref<Object>(lst));
+    uint64_t w; std::memcpy(&w, &ov, sizeof(uint64_t));
+    return w;
+}
+
 namespace Jit {
 
 // On by default now that the tracer is proven bit-identical to the interpreter
@@ -403,6 +422,7 @@ inline bool traceSupported(Op op) {
         case Op::CALL:
         case Op::INDEX_SET: case Op::INDEX_GET: case Op::LGET2:
         case Op::MEMBER_GET: case Op::MEMBER_SET:
+        case Op::LIST:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
         case Op::JUMP: case Op::LOOP:
             return true;
@@ -643,6 +663,11 @@ inline bool RegionCompilerTrace::compile() {
                 else { int s = -2 - o; structBaseL.insert(s); lShape[s] = si->shape; }
             }
             int d = traceStackDelta(op);
+            if (op == Op::LIST) {                     // small list literal -> traceable alloc
+                int n = (int)rdU16(off + 1);
+                if (n < 1 || n > 8) return false;     // cap the native-stack element buffer
+                opop(n); opush(-1); d = 1 - n;
+            }
             switch (op) {
                 case Op::GET_GLOBAL: opush((int)rdU16(off + 1)); break;
                 case Op::GET_LOCAL: opush(-2 - (int)rdU16(off + 1)); break;
@@ -695,10 +720,13 @@ inline bool RegionCompilerTrace::compile() {
             vt = VT_STRUCT;
             shape = isGlobal ? gShape[idx] : lShape[idx];
         } else if (isBase) {
-            // list index base: a LIST object, read-only across the region (a
-            // reassignment mid-region would invalidate the cached pointer).
-            if (k != VKind::OBJ || !v.isObjType(ObjectType::LIST) || dirty) return false;
+            // list index base: a LIST object. Read-only -> the pointer is stable and
+            // a pinned/prologue-guarded fast path applies. Reassigned (dirty, e.g.
+            // `tmp = [..]` each iteration) -> it must be a memory cell reloaded and
+            // obj/LIST-guarded per use, never a stale cached pointer.
+            if (k != VKind::OBJ || !v.isObjType(ObjectType::LIST)) return false;
             vt = VT_OBJ;
+            if (dirty) pinned = 0;                         // reassigned base -> memory cell
         } else if (!trTypeOf(k, vt)) {
             return false;
         }
@@ -800,17 +828,20 @@ inline bool RegionCompilerTrace::compile() {
         } else if (c.vt == VT_STRUCT) {
             // memory struct base (e = ents[j] each iteration): no entry guard —
             // every MEMBER access guards tag+shape on the current value itself.
-        } else if (c.vt == VT_OBJ) {
-            // memory list base (demoted under register pressure): guard obj+LIST
-            // ONCE here. The base variable is read-only in the region, so it stays
-            // a list for every iteration — each GET_GLOBAL then just reloads the
-            // pointer with no re-guard (the expensive part is hoisted to entry).
+        } else if (c.vt == VT_OBJ && !c.dirty) {
+            // memory list base, read-only (demoted under register pressure): guard
+            // obj+LIST ONCE here. The base stays a list every iteration, so each
+            // GET_GLOBAL just reloads the pointer with no re-guard.
             a.movRM(RAX, (Reg)mBase, disp);
             a.movRR(RCX, RAX); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
             Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
             a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);
             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
             Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
+        } else if (c.vt == VT_OBJ) {
+            // memory list base, reassigned each iteration (dirty): its entry value is
+            // overwritten before use, so no entry guard — each GET_GLOBAL reloads and
+            // obj/LIST-guards the current value per use.
         } else {
             // memory global: guard its current type matches the recorded type
             a.movRM(RAX, R_GLOBALS, disp);
@@ -894,11 +925,21 @@ inline bool RegionCompilerTrace::compile() {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else                  a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);  // raw pointer word
                 } else if (cells[ci].vt == VT_OBJ) {
-                    // pinned: read the register. memory (demoted): reload the raw
-                    // pointer word — obj+LIST was guarded once in the prologue and
-                    // the base is read-only, so no per-access re-guard is needed.
+                    // pinned: read the register. read-only memory: reload the raw word
+                    // (obj+LIST guarded once in the prologue). dirty memory (reassigned
+                    // each iteration): reload and obj/LIST-guard the current value here.
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
-                    else                  a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);
+                    else {
+                        Reg r = gp(depth);
+                        a.movRM(r, R_GLOBALS, cells[ci].idx * 8);
+                        if (cells[ci].dirty) {
+                            a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT); a.cmpRI(RCX, (int32_t)TOP17_OBJ);
+                            Label okO; a.jcc(E, okO); bailTo(off, depth); a.bind(okO);
+                            a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);
+                            a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
+                            Label okL; a.jcc(E, okL); bailTo(off, depth); a.bind(okL);
+                        }
+                    }
                 } else {
                     if (cells[ci].pinned) a.movRR(gp(depth), gpCell(ci));
                     else { a.movRM(gp(depth), R_GLOBALS, cells[ci].idx * 8);
@@ -910,6 +951,12 @@ inline bool RegionCompilerTrace::compile() {
                 int ci = globalCell[(int)rdU16(off + 1)];
                 if (cells[ci].vt == VT_STRUCT) {         // reassign the entity pointer (raw word)
                     if (otype[depth-1] != VT_STRUCT && otype[depth-1] != VT_WORD) { ok = false; break; }
+                    if (cells[ci].pinned) a.movRR(gpCell(ci), gp(depth-1));
+                    else                  a.movMR(R_GLOBALS, cells[ci].idx * 8, gp(depth-1));  // global root: no barrier
+                    depth--; break;
+                }
+                if (cells[ci].vt == VT_OBJ) {            // reassign a list base (raw pointer word)
+                    if (otype[depth-1] != VT_OBJ && otype[depth-1] != VT_WORD) { ok = false; break; }
                     if (cells[ci].pinned) a.movRR(gpCell(ci), gp(depth-1));
                     else                  a.movMR(R_GLOBALS, cells[ci].idx * 8, gp(depth-1));  // global root: no barrier
                     depth--; break;
@@ -1034,6 +1081,46 @@ inline bool RegionCompilerTrace::compile() {
                     otype[depth-2] = VT_WORD;
                 }
                 depth--; break;
+            }
+            case Op::LIST: {
+                // Small list literal -> allocate in native code via lovaxJitMakeList.
+                // The n elements are boxed into a native-stack buffer; the caller-saved
+                // registers the C call would clobber are spilled around it. gcAlloc
+                // never collects mid-call, so no GC can run here — the trace's own
+                // LOOP back-edge is the safepoint that collects, with the value stack
+                // as roots. Frame (192B, 16-aligned): [0]=orig RSP, [8]=result,
+                // [16..64)=6 caller-saved GP, [64..128)=XMM0-7, [128..192)=elem buffer.
+                int n = (int)rdU16(off + 1);
+                for (int k = 0; k < n; ++k) {
+                    int t = otype[depth - n + k];
+                    if (t == VT_STRUCT || t == VT_CALLEE) { ok = false; break; }
+                }
+                if (!ok) break;
+                const int GP_OFF = 16, XMM_OFF = 64, BUF_OFF = 128, FRAME = 192;
+                static const Reg savedGp[6] = { RSI, RDI, R8, R9, R10, R11 };
+                a.movRR(RAX, RSP); a.andRI(RSP, -16); a.subRI(RSP, FRAME);
+                a.movMR(RSP, 0, RAX);                              // save original RSP
+                for (int k = 0; k < n; ++k) {                      // box elements (operands still live)
+                    int slot = depth - n + k, t = otype[slot];
+                    if (t == VT_NUM)      a.movsdMX(RSP, BUF_OFF + k * 8, xm(slot));
+                    else if (t == VT_INT) { boxTo(RDX, gp(slot)); a.movMR(RSP, BUF_OFF + k * 8, RDX); }
+                    else                  a.movMR(RSP, BUF_OFF + k * 8, gp(slot));   // VT_WORD/VT_OBJ raw
+                }
+                for (int k = 0; k < 6; ++k) a.movMR(RSP, GP_OFF + k * 8, savedGp[k]);
+                for (int k = 0; k < 8; ++k) a.movsdMX(RSP, XMM_OFF + k * 8, (Xmm)k);
+                a.movRR(RDI, RSP); a.addRI(RDI, BUF_OFF);          // arg0 = &buffer
+                a.movAbs(RSI, (uint64_t)(int64_t)n);               // arg1 = n
+                a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeList);
+                a.callR(RAX);
+                a.movMR(RSP, 8, RAX);                              // save boxed list word
+                for (int k = 0; k < 8; ++k) a.movsdXM((Xmm)k, RSP, XMM_OFF + k * 8);
+                for (int k = 0; k < 6; ++k) a.movRM(savedGp[k], RSP, GP_OFF + k * 8);
+                a.movRM(RAX, RSP, 8);                              // result
+                a.movRM(RSP, RSP, 0);                             // restore original RSP
+                int res = depth - n;
+                a.movRR(gp(res), RAX); otype[res] = VT_OBJ;
+                depth += 1 - n;
+                break;
             }
             case Op::JUMP_IF_FALSE: {
                 size_t target = next + rdU16(off + 1);
