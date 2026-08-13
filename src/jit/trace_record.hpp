@@ -57,6 +57,22 @@ inline uint64_t lovaxJitMakeList(const uint64_t* elems, long long n) {
     return w;
 }
 
+// Struct construction (spawn Part 2): allocate a StructInstanceObject with the
+// given shape and fill its unboxed-Value slots from `fields`. Same GC-safety as
+// lovaxJitMakeList (gcAlloc never collects mid-call). Returns the boxed word.
+inline uint64_t lovaxJitMakeStruct(void* shapePtr, const uint64_t* fields, long long nf) {
+    auto* inst = gcAlloc<StructInstanceObject>();
+    inst->shape = static_cast<StructShapeObject*>(shapePtr);
+    inst->slots.reserve((size_t)nf);
+    for (long long i = 0; i < nf; ++i) {
+        Value v; std::memcpy(&v, &fields[i], sizeof(uint64_t));
+        inst->slots.push_back(v);
+    }
+    Value ov = Value::object(Ref<Object>(inst));
+    uint64_t w; std::memcpy(&w, &ov, sizeof(uint64_t));
+    return w;
+}
+
 namespace Jit {
 
 // On by default now that the tracer is proven bit-identical to the interpreter
@@ -161,7 +177,8 @@ public:
     std::unordered_map<size_t, const Proto*> inlineProto;
     std::unordered_map<size_t, uint64_t>     calleeWord;
     std::unordered_map<size_t, int>          calleeArgc;
-    std::unordered_map<size_t, int>          intrinsicAt;   // CALL off -> math intrinsic (1=sqrt)
+    std::unordered_map<size_t, int>          intrinsicAt;   // CALL off -> intrinsic (1=sqrt..5=push,6=struct)
+    std::unordered_map<size_t, const void*>  structShapeAt; // CALL off -> StructShapeObject* for make-struct
 
     RegionCompilerTrace(const Chunk& c, size_t s, size_t e,
                         const Value* sl, const Value* gl, const unsigned char* def)
@@ -631,7 +648,23 @@ inline bool RegionCompilerTrace::compile() {
             }
             if (!ob || ob->tag != ObjectType::FUNCTION) return false;
             ClosureObject* clo = static_cast<ClosureObject*>(ob);
-            if (clo->moduleGlobals != nullptr || clo->structShape) return false;
+            // struct constructor P(a,b,c): allocate the instance directly in native
+            // code (spawn Part 2), skipping the auto-generated constructor body, when
+            // every field is provided (argc == field count, so no defaults apply).
+            // The fields are the argc stack values, already in shape order.
+            if (clo->structShape) {
+                auto* shape = static_cast<StructShapeObject*>(clo->structShape.get());
+                if ((int)shape->fieldNames.size() != argc) return false;   // defaults needed -> decline
+                if (argc < 1 || argc > 8) return false;                    // native-stack field buffer cap
+                uint64_t w; std::memcpy(&w, &rtGlobals[g], 8);
+                intrinsicAt[off] = 6; calleeWord[off] = w; calleeArgc[off] = argc;
+                structShapeAt[off] = shape;
+                calleeGlobals.insert(g);
+                int peak = depth + 1; if (peak > maxDepth) maxDepth = peak;
+                opop(argc + 1); opush(-1); depth -= argc;
+                off += len; continue;
+            }
+            if (clo->moduleGlobals != nullptr) return false;
             const Proto* p = clo->proto.get();
             int calleeMaxDepth = 0;
             if (!p || !leafOk(p, argc, calleeMaxDepth)) return false;
@@ -1373,6 +1406,43 @@ inline bool RegionCompilerTrace::compile() {
                 Label okC; a.jcc(E, okC); bailTo(off, depth); a.bind(okC);
                 auto ii = intrinsicAt.find(off);
                 if (ii != intrinsicAt.end()) {
+                    if (ii->second == 6) {
+                        // struct constructor P(...) -> lovaxJitMakeStruct(shape, fields,
+                        // argc). Same spill/box/call frame as a list literal plus the
+                        // shape pointer. Fields are the argc args (already in shape
+                        // order). Result is the raw struct word (VT_WORD), usable as a
+                        // member base (guardStructPtr) or a stored value.
+                        for (int k = 0; k < argc; ++k) {
+                            int t = otype[depth - argc + k];
+                            if (t == VT_STRUCT || t == VT_CALLEE) { ok = false; break; }
+                        }
+                        if (!ok) break;
+                        const int GP_OFF = 16, XMM_OFF = 64, BUF_OFF = 128, FRAME = 192;
+                        static const Reg savedGp[6] = { RSI, RDI, R8, R9, R10, R11 };
+                        a.movRR(RAX, RSP); a.andRI(RSP, -16); a.subRI(RSP, FRAME);
+                        a.movMR(RSP, 0, RAX);
+                        for (int k = 0; k < argc; ++k) {
+                            int slot = depth - argc + k, t = otype[slot];
+                            if (t == VT_NUM)      a.movsdMX(RSP, BUF_OFF + k * 8, xm(slot));
+                            else if (t == VT_INT) { boxTo(RDX, gp(slot)); a.movMR(RSP, BUF_OFF + k * 8, RDX); }
+                            else                  a.movMR(RSP, BUF_OFF + k * 8, gp(slot));
+                        }
+                        for (int k = 0; k < 6; ++k) a.movMR(RSP, GP_OFF + k * 8, savedGp[k]);
+                        for (int k = 0; k < 8; ++k) a.movsdMX(RSP, XMM_OFF + k * 8, (Xmm)k);
+                        a.movAbs(RDI, (uint64_t)(uintptr_t)structShapeAt[off]);   // arg0 = shape
+                        a.movRR(RSI, RSP); a.addRI(RSI, BUF_OFF);                 // arg1 = &fields
+                        a.movAbs(RDX, (uint64_t)(int64_t)argc);                   // arg2 = nf
+                        a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeStruct);
+                        a.callR(RAX);
+                        a.movMR(RSP, 8, RAX);
+                        for (int k = 0; k < 8; ++k) a.movsdXM((Xmm)k, RSP, XMM_OFF + k * 8);
+                        for (int k = 0; k < 6; ++k) a.movRM(savedGp[k], RSP, GP_OFF + k * 8);
+                        a.movRM(RAX, RSP, 8);
+                        a.movRM(RSP, RSP, 0);
+                        a.movRR(gp(calleeSlot), RAX); otype[calleeSlot] = VT_WORD;   // raw struct word
+                        depth -= argc;
+                        break;
+                    }
                     if (ii->second == 5) {
                         // push(list, val): [callee, list, val]. Number value only
                         // (Part 1) — appends inline; a full backing side-exits so the

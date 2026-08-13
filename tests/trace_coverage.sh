@@ -121,5 +121,16 @@ while i<5000:
     i=i+1
 say len(xs)"
 
+check_traces "struct construction"   "struct V:
+    x = 0.0
+    hp = 0
+set s=0.0
+set i=0
+while i<5000:
+    set p = V(i*1.0, i)
+    s = s + p.x
+    i=i+1
+say floor(s)"
+
 echo "trace_coverage: $fail failure(s)"
 [ "$fail" -eq 0 ] && echo "TRACE COVERAGE GATE PASSED" || exit 1
