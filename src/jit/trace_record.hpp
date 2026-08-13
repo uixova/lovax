@@ -86,6 +86,14 @@ public:
     static constexpr int32_t  STRUCT_SHAPE_OFF = 32; // offsetof(StructInstanceObject, shape)
     static constexpr int32_t  STRUCT_SLOTS_OFF = 40; // offsetof(slots) + SmallVec begin(0)
     static constexpr int      STRUCT_TAG       = 17; // ObjectType::STRUCT
+    // for-range iteration (FOR_NEXT). Offsets verified via offsetof for the 8-byte
+    // Value build (the only build the JIT runs in).
+    static constexpr int32_t  ITER_KIND_OFF    = 28; // IterObject::kind (RANGE==1)
+    static constexpr int32_t  ITER_SOURCE_OFF  = 32; // IterObject::source (raw RangeObject*)
+    static constexpr int32_t  ITER_INDEX_OFF   = 64; // IterObject::index
+    static constexpr int32_t  RANGE_END_OFF    = 40; // RangeObject::end
+    static constexpr int32_t  RANGE_STEP_OFF   = 48; // RangeObject::step
+    static constexpr int       ITER_KIND_RANGE  = 1;  // IterObject::Kind::RANGE
 
     // unboxed int64 (GP) | raw double in an XMM register | a callee closure word
     // in GP | a pinned list-object raw word (index base, GP) | a raw non-numeric
@@ -425,6 +433,7 @@ inline bool traceSupported(Op op) {
         case Op::MEMBER_GET: case Op::MEMBER_SET:
         case Op::INDEX_GET_KEEP: case Op::MEMBER_GET_KEEP:
         case Op::NEGATE: case Op::DIV: case Op::MOD:
+        case Op::FOR_NEXT: case Op::CLOSE_UPVALUE:
         case Op::LIST:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
         case Op::JUMP: case Op::LOOP:
@@ -551,6 +560,12 @@ inline bool RegionCompilerTrace::compile() {
             int slot = (int)rdU16(off + 1);
             if (!localCell.count(slot)) { localCell[slot] = -1; localOrder.push_back(slot); }
             if (op == Op::SET_LOCAL) dirtyL[slot] = true;
+        }
+        if (op == Op::FOR_NEXT) {                        // range for-loop: writes the loop var (v1)
+            if (chunk.code[off + 1] & 2) return false;   // pair (for k,v) not traced
+            int slot = (int)rdU16(off + 2);
+            if (!localCell.count(slot)) { localCell[slot] = -1; localOrder.push_back(slot); }
+            dirtyL[slot] = true;                         // FOR_NEXT assigns it each iteration
         }
         if (op == Op::LGET2) {                          // registers BOTH locals it reads
             for (int w = 0; w < 2; ++w) {
@@ -1396,6 +1411,32 @@ inline bool RegionCompilerTrace::compile() {
                 break;
             }
 
+            case Op::CLOSE_UPVALUE: break;   // no-op: a traceable region creates no closures,
+                                             // so nothing captured this slot to close.
+            case Op::FOR_NEXT: {
+                // Range for-loop head. The iterator lives on the VM stack just below
+                // the region operands (at [R_SP-8]) and is invariant across the loop,
+                // so it is read from memory each iteration (all L1 hits). Non-range
+                // iterators and non-positive steps side-exit; the loop variable v1 is
+                // a dirty local cell that this op assigns each iteration.
+                int v1 = localCell[(int)rdU16(off + 2)];
+                Reg v1reg = gpCell(v1);
+                size_t exitOff = next + rdU16(off + 6);
+                a.movRM(RAX, R_SP, -8);
+                a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);          // RAX = IterObject*
+                a.movzxRM8(RCX, RAX, ITER_KIND_OFF); a.cmpRI(RCX, ITER_KIND_RANGE);
+                Label okK; a.jcc(E, okK); bailTo(off, depth); a.bind(okK);   // non-range -> interpreter
+                a.movRM(RCX, RAX, ITER_SOURCE_OFF);                     // RCX = RangeObject*
+                a.movRM(RDX, RCX, RANGE_STEP_OFF); a.cmpRI(RDX, 0);
+                Label okS; a.jcc(G, okS); bailTo(off, depth); a.bind(okS);   // positive step only
+                a.movRM(v1reg, RAX, ITER_INDEX_OFF);                   // v1 = cur = index
+                a.movRM(RCX, RCX, RANGE_END_OFF);                      // RCX = end
+                a.cmpRR(v1reg, RCX);
+                Label okC; a.jcc(L, okC); bailTo(exitOff, depth); a.bind(okC);   // cur >= end -> done
+                a.movRR(RCX, v1reg); a.addRR(RCX, RDX);
+                a.movMR(RAX, ITER_INDEX_OFF, RCX);                     // index += step
+                break;
+            }
             case Op::JUMP: branchTo(next + rdU16(off + 1)); break;
             case Op::LOOP: {
                 size_t target = next - rdU16(off + 1);

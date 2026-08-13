@@ -1,0 +1,27 @@
+# JIT op-coverage (Stage-9): for-range loops. The iterator lives on the VM stack
+# below the region operands; FOR_NEXT reads it there each iteration, drives the
+# loop variable, and side-exits at the end / on a non-range iterator / non-positive
+# step. for-loops must now trace like while-loops (pattern-fragility fix) and stay
+# bit-identical to the interpreter.
+set s = 0
+for i in range(100000):
+    s = s + i
+check(s == 99999 * 100000 / 2, "for i in range(N)")
+
+set t = 0
+for j in range(10, 2000, 3):
+    t = t + j
+set u = 0
+set k = 10
+while k < 2000:
+    u = u + k
+    k = k + 3
+check(t == u, "for i in range(a, b, step)")
+
+# for-loop body that allocates (the gc pattern): must trace + collect cleanly
+set acc = 0
+for m in range(20000):
+    set tmp = [m, m + 1, m + 2]
+    acc = acc + tmp[0] + tmp[2]
+check(acc == 2 * (19999 * 20000 / 2) + 2 * 20000, "for-range with per-iteration list literal")
+say "97 ok"

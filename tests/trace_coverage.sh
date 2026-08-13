@@ -104,5 +104,15 @@ while i<5000:
     i=i+1
 say floor(s)"
 
+check_traces "for-range loop"        "set s=0
+for i in range(5000):
+    s = s + i
+say s"
+check_traces "for-range list body"    "set s=0
+for i in range(5000):
+    set t = [i, i+1]
+    s = s + t[0]
+say s"
+
 echo "trace_coverage: $fail failure(s)"
 [ "$fail" -eq 0 ] && echo "TRACE COVERAGE GATE PASSED" || exit 1
