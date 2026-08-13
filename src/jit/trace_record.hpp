@@ -421,6 +421,7 @@ inline bool traceSupported(Op op) {
         case Op::GE_I_JF: case Op::EQ_I_JF: case Op::NE_I_JF:
         case Op::CALL:
         case Op::INDEX_SET: case Op::INDEX_GET: case Op::LGET2:
+        case Op::LGET_ADD_I: case Op::LGET_SUB_I:
         case Op::MEMBER_GET: case Op::MEMBER_SET:
         case Op::LIST:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
@@ -439,6 +440,7 @@ inline int traceStackDelta(Op op) {
         case Op::JUMP_IF_FALSE: case Op::INDEX_GET: return -1;
         case Op::INDEX_SET: return -3;
         case Op::LGET2: return +2;
+        case Op::LGET_ADD_I: case Op::LGET_SUB_I: return +1;   // push local +/- k
         case Op::MEMBER_GET: return 0;    // [obj] -> [field]
         case Op::MEMBER_SET: return -2;   // [obj, val] -> []
         case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
@@ -538,7 +540,8 @@ inline bool RegionCompilerTrace::compile() {
                 return false;
             }
         }
-        if (op == Op::GET_LOCAL || op == Op::SET_LOCAL) {
+        if (op == Op::GET_LOCAL || op == Op::SET_LOCAL ||
+            op == Op::LGET_ADD_I || op == Op::LGET_SUB_I) {
             int slot = (int)rdU16(off + 1);
             if (!localCell.count(slot)) { localCell[slot] = -1; localOrder.push_back(slot); }
             if (op == Op::SET_LOCAL) dirtyL[slot] = true;
@@ -672,6 +675,7 @@ inline bool RegionCompilerTrace::compile() {
                 case Op::GET_GLOBAL: opush((int)rdU16(off + 1)); break;
                 case Op::GET_LOCAL: opush(-2 - (int)rdU16(off + 1)); break;
                 case Op::LGET2: opush(-2 - (int)rdU16(off + 1)); opush(-2 - (int)rdU16(off + 3)); break;
+                case Op::LGET_ADD_I: case Op::LGET_SUB_I: opush(-1); break;   // computed value
                 case Op::CONST: case Op::FALSE_: case Op::TRUE_: case Op::NIL: opush(-1); break;
                 case Op::DUP: opush(orig.empty() ? -1 : orig.back()); break;
                 case Op::SET_LOCAL: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL:
@@ -1017,6 +1021,18 @@ inline bool RegionCompilerTrace::compile() {
                     else                        a.movRR(gp(depth), gpCell(ci));
                     otype[depth] = cells[ci].vt; depth++;
                 }
+                break;
+            }
+            case Op::LGET_ADD_I: case Op::LGET_SUB_I: {
+                // fused GET_LOCAL + ADD_I/SUB_I. Int locals only (the common loop-
+                // counter case, e.g. a `[i, i+1, i+2]` literal); a float local
+                // declines. Push the local, then reuse the immediate-arith path
+                // (range-checked, side-exits on overflow of the inline int range).
+                int ci = localCell[(int)rdU16(off + 1)];
+                if (cells[ci].vt != VT_INT) { ok = false; break; }
+                a.movRR(gp(depth), gpCell(ci)); otype[depth] = VT_INT; depth++;
+                immBinary(op == Op::LGET_ADD_I ? Op::ADD_I : Op::SUB_I,
+                          (int16_t)rdU16(off + 3), depth, off, depth);
                 break;
             }
             case Op::MEMBER_GET: {
