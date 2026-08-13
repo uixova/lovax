@@ -79,8 +79,9 @@ public:
     static constexpr uint32_t TOP17_OBJ    = 0x1FFF5u;
     static constexpr uint32_t TOP17_BOXINT = 0x1FFF6u;
     static constexpr int32_t  OBJ_TAG_OFF   = 8;
-    static constexpr int32_t  VEC_START_OFF = 32;    // offsetof(ListObject,elements)
-    static constexpr int32_t  VEC_FINISH_OFF= 40;
+    static constexpr int32_t  VEC_START_OFF = 32;    // offsetof(ListObject,elements) = SmallVec b_
+    static constexpr int32_t  VEC_FINISH_OFF= 40;    // SmallVec e_ (end pointer)
+    static constexpr int32_t  VEC_CAP_OFF   = 48;    // SmallVec c_ (capacity pointer)
     static constexpr int      LIST_TAG      = 5;     // ObjectType::LIST
     // struct instance (Stage-8 G2): shape ptr + inline-Value slots (SmallVec begin).
     static constexpr int32_t  STRUCT_SHAPE_OFF = 32; // offsetof(StructInstanceObject, shape)
@@ -609,6 +610,24 @@ inline bool RegionCompilerTrace::compile() {
                 int peak = depth + 1; if (peak > maxDepth) maxDepth = peak;
                 opop(argc + 1); opush(-1); depth -= argc;
                 off += len; continue;                     // handled; next op
+            }
+            // push(list, val): a 2-arg builtin. A number value appends in native code
+            // (fast path; a full backing side-exits so the interpreter grows it), so
+            // building a list in a loop traces. The list variable is read-only (its
+            // pointer is stable — only its contents grow), so it is an objBase cell.
+            if (ob && ob->tag == ObjectType::BUILTIN && argc == 2 &&
+                static_cast<BuiltinObject*>(ob)->name == "push") {
+                int listPos = calleePos + 1;              // [callee, list, val]
+                int lo = (listPos < (int)orig.size()) ? orig[listPos] : -1;
+                if (lo >= 0) objBaseG[lo] = true;
+                else if (lo <= -2) objBaseL[-2 - lo] = true;
+                else return false;                        // list not a plain cell
+                uint64_t w; std::memcpy(&w, &rtGlobals[g], 8);
+                intrinsicAt[off] = 5; calleeWord[off] = w; calleeArgc[off] = argc;
+                calleeGlobals.insert(g);
+                int peak = depth + 1; if (peak > maxDepth) maxDepth = peak;
+                opop(argc + 1); opush(-1); depth -= argc;
+                off += len; continue;
             }
             if (!ob || ob->tag != ObjectType::FUNCTION) return false;
             ClosureObject* clo = static_cast<ClosureObject*>(ob);
@@ -1354,6 +1373,28 @@ inline bool RegionCompilerTrace::compile() {
                 Label okC; a.jcc(E, okC); bailTo(off, depth); a.bind(okC);
                 auto ii = intrinsicAt.find(off);
                 if (ii != intrinsicAt.end()) {
+                    if (ii->second == 5) {
+                        // push(list, val): [callee, list, val]. Number value only
+                        // (Part 1) — appends inline; a full backing side-exits so the
+                        // interpreter grows it (so no reallocation ever happens in the
+                        // trace, keeping any cached begin pointer valid). Returns the
+                        // list. No write barrier is needed for a non-object value.
+                        if (otype[depth-2] != VT_OBJ) { ok = false; break; }
+                        int vt = otype[depth-1];
+                        if (vt != VT_INT && vt != VT_NUM) { ok = false; break; }
+                        a.movRR(RAX, gp(depth-2)); a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);  // ListObject*
+                        a.movRM(RCX, RAX, VEC_FINISH_OFF);      // e_ (end)
+                        a.movRM(RDX, RAX, VEC_CAP_OFF);         // c_ (cap)
+                        a.cmpRR(RCX, RDX);
+                        Label okCap; a.jcc(B, okCap); bailTo(off, depth); a.bind(okCap);   // full -> grow -> bail
+                        a.movRR(RDX, RCX);                      // RDX = old e_ (store address)
+                        a.addRI(RCX, 8); a.movMR(RAX, VEC_FINISH_OFF, RCX);   // e_ += 8
+                        if (vt == VT_NUM) { a.movsdMX(RDX, 0, xm(depth-1)); }
+                        else { boxTo(RAX, gp(depth-1)); a.movMR(RDX, 0, RAX); }   // RAX free after the e_ store
+                        a.movRR(gp(calleeSlot), gp(depth-2)); otype[calleeSlot] = VT_OBJ;  // push returns the list
+                        depth -= argc;
+                        break;
+                    }
                     if (ii->second == 4) {
                         // abs(x): type-dependent, so do NOT coerce to float first.
                         // float -> clear the sign bit in a GP register (no XMM scratch,

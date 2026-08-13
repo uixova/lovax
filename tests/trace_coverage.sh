@@ -114,5 +114,12 @@ for i in range(5000):
     s = s + t[0]
 say s"
 
+check_traces "push number build"     "set xs=[]
+set i=0
+while i<5000:
+    push(xs, i*1.0)
+    i=i+1
+say len(xs)"
+
 echo "trace_coverage: $fail failure(s)"
 [ "$fail" -eq 0 ] && echo "TRACE COVERAGE GATE PASSED" || exit 1

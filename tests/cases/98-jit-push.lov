@@ -1,0 +1,31 @@
+# JIT op-coverage (Stage-9, spawn Part 1): push(list, number). A hot loop that
+# builds a list with push no longer declines — a number value appends in native
+# code, a full backing side-exits so the interpreter grows it (so the trace never
+# reallocates). Must stay bit-identical to the interpreter across the inline->heap
+# growth boundary (inline capacity is 4).
+set xs = []
+set i = 0
+while i < 50000:
+    push(xs, i)
+    i = i + 1
+check(len(xs) == 50000, "push grows the list to N")
+set s = 0
+set k = 0
+while k < 50000:
+    s = s + xs[k]
+    k = k + 1
+check(s == 49999 * 50000 / 2, "pushed int values read back")
+
+# float list, crossing the inline (4) boundary many times via fresh lists
+set frames = 0
+set acc = 0.0
+while frames < 300:
+    set ys = []
+    set j = 0
+    while j < 20:
+        push(ys, j * 0.5)
+        j = j + 1
+    acc = acc + ys[0] + ys[19]
+    frames = frames + 1
+check(acc == 300.0 * (0.0 + 9.5), "fresh float lists via push")
+say "98 ok"
