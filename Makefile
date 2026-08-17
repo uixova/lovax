@@ -16,7 +16,7 @@ ASAN_FLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
 .DEFAULT_GOAL := $(BIN)
 .PHONY: all dev asan clean install uninstall run repl test golden diff \
-        jit robustness unit fuzz sandbox embed net stress cover bench help
+        jit robustness unit fuzz sandbox embed net stress cover bundle bench help
 
 # ---- builds ----
 HEADERS := $(wildcard src/*.hpp src/*/*.hpp)
@@ -51,7 +51,7 @@ clean:
 	@rm -f $(BIN) && echo "cleaned"
 
 # ---- tests (each gate is also runnable on its own) ----
-test: $(BIN) golden diff jit robustness unit sandbox embed stress cover ## the correctness + safety suite
+test: $(BIN) golden diff jit robustness unit sandbox embed stress cover bundle ## the correctness + safety suite
 	@echo "== all core gates passed =="
 
 golden: $(BIN)
@@ -76,6 +76,8 @@ stress: $(BIN)
 	@./tests/stress.sh
 cover: $(BIN)
 	@./tests/trace_coverage.sh
+bundle: $(BIN)
+	@./tests/bundle.sh
 bench: $(BIN)
 	@./tests/bench.sh
 
@@ -88,5 +90,5 @@ help: ## show this help
 	@echo "  make repl     build and start the REPL"
 	@echo "  make install  copy ./lovax to ~/.local/bin"
 	@echo "  make test     full correctness + safety suite"
-	@echo "  make golden|diff|jit|robustness|unit|fuzz|sandbox|embed|net|stress|cover|bench"
+	@echo "  make golden|diff|jit|robustness|unit|fuzz|sandbox|embed|net|stress|cover|bundle|bench"
 	@echo "  make clean"

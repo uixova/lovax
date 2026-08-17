@@ -3,7 +3,12 @@
 #include <sstream>
 #include <memory>
 #include <cstdlib>
+#include <cstring>
+#include <cstdint>
 #include <filesystem>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 #include "lexer/token.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
@@ -13,6 +18,96 @@
 #include "pkg.hpp"
 
 static const char* LOVAX_VERSION = "1.0.1";
+
+// ---- single-binary bundling (RFC-027) ---------------------------------------
+// `lovax bundle app.lov -o app` copies this interpreter and appends the script as
+// a trailer, so the result runs with no separate Lovax install (like Deno compile
+// / Bun --compile). Trailer layout at the very end of the file:
+//     [ script bytes ][ u64 little-endian script length ][ 16-byte magic ]
+// On startup the binary reads its own tail; a matching magic means "run the
+// embedded script", so a bundled executable ignores Lovax's own CLI and treats
+// its argv as the app's arguments.
+static const char LOVAX_BUNDLE_MAGIC[16] = { 'L','O','V','A','X','B','U','N','D','L','E','v','0','0','1' };
+
+// Path to the running executable (for reading our own trailer / copying ourselves).
+static std::string selfExePath(const char* argv0) {
+#if defined(__linux__)
+    char buf[4096];
+    ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n > 0) { buf[n] = '\0'; return std::string(buf); }
+#endif
+    return argv0 ? std::string(argv0) : std::string();
+}
+
+// If this executable has a bundle trailer, return the embedded script; else "".
+static std::string readEmbeddedScript(const char* argv0) {
+    std::string path = selfExePath(argv0);
+    if (path.empty()) return "";
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return "";
+    f.seekg(0, std::ios::end);
+    std::streamoff size = f.tellg();
+    const std::streamoff trailer = (std::streamoff)sizeof(LOVAX_BUNDLE_MAGIC) + 8;
+    if (size < trailer) return "";
+    char magic[sizeof(LOVAX_BUNDLE_MAGIC)];
+    f.seekg(size - (std::streamoff)sizeof(LOVAX_BUNDLE_MAGIC));
+    f.read(magic, sizeof(magic));
+    if (std::memcmp(magic, LOVAX_BUNDLE_MAGIC, sizeof(magic)) != 0) return "";
+    uint64_t len = 0;
+    f.seekg(size - trailer);
+    unsigned char lenb[8];
+    f.read(reinterpret_cast<char*>(lenb), 8);
+    for (int i = 0; i < 8; ++i) len |= (uint64_t)lenb[i] << (8 * i);
+    if (len == 0 || (std::streamoff)len > size - trailer) return "";
+    std::string script(len, '\0');
+    f.seekg(size - trailer - (std::streamoff)len);
+    f.read(&script[0], (std::streamsize)len);
+    return script;
+}
+
+// `lovax bundle <script.lov> -o <out>`: self + script + u64 len + magic, +x.
+static int writeBundle(int argc, char** argv) {
+    std::string scriptPath, outPath;
+    for (int i = 2; i < argc; ++i) {
+        std::string a = argv[i];
+        if ((a == "-o" || a == "--output") && i + 1 < argc) outPath = argv[++i];
+        else if (scriptPath.empty()) scriptPath = a;
+    }
+    if (scriptPath.empty() || outPath.empty()) {
+        std::cerr << "usage: lovax bundle <script.lov> -o <output>\n";
+        return 64;
+    }
+    std::string self = selfExePath(argv[0]);
+    std::ifstream selff(self, std::ios::binary);
+    std::ifstream scriptf(scriptPath, std::ios::binary);
+    if (!selff) { std::cerr << "bundle: cannot read interpreter binary\n"; return 1; }
+    if (!scriptf) { std::cerr << "bundle: cannot read script '" << scriptPath << "'\n"; return 1; }
+    // A bundled binary must not re-bundle its own trailer; strip it if present.
+    std::string base((std::istreambuf_iterator<char>(selff)), std::istreambuf_iterator<char>());
+    if (!readEmbeddedScript(argv[0]).empty()) {
+        std::string embedded = readEmbeddedScript(argv[0]);
+        base.resize(base.size() - sizeof(LOVAX_BUNDLE_MAGIC) - 8 - embedded.size());
+    }
+    std::string script((std::istreambuf_iterator<char>(scriptf)), std::istreambuf_iterator<char>());
+    std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
+    if (!out) { std::cerr << "bundle: cannot write '" << outPath << "'\n"; return 1; }
+    out.write(base.data(), (std::streamsize)base.size());
+    out.write(script.data(), (std::streamsize)script.size());
+    uint64_t len = script.size();
+    unsigned char lenb[8];
+    for (int i = 0; i < 8; ++i) lenb[i] = (unsigned char)(len >> (8 * i));
+    out.write(reinterpret_cast<char*>(lenb), 8);
+    out.write(LOVAX_BUNDLE_MAGIC, sizeof(LOVAX_BUNDLE_MAGIC));
+    out.close();
+    std::error_code ec;
+    std::filesystem::permissions(outPath,
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+        std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+        std::filesystem::perms::others_exec, ec);
+    std::cout << "bundled '" << scriptPath << "' -> '" << outPath << "' ("
+              << (base.size() + script.size()) / 1024 << " KB, self-contained)\n";
+    return 0;
+}
 
 // Evaluate one REPL chunk on a persistent VM. A lone bare expression is echoed
 // (wrapped in 'say') so `2 + 3` or `player.hp` print their value like Python.
@@ -82,11 +177,112 @@ static int runRepl() {
     return 0;
 }
 
+// Flags that affect how a program is run (parsed from the CLI; all default for a
+// bundled app, which just runs with the JIT on).
+struct RunOpts {
+    bool dumpBytecode = false;
+    bool noJit = false, jitRA = false, noRA = false, jitTrace = false,
+         noTrace = false, jitNumFn = false, noNumFn = false;
+    bool jitStats = false, memStats = false;
+};
+
+// Lex, parse, (optionally dump), compile, and run one source string. `scriptArgs`
+// must already be populated by the caller. Returns the process exit code.
+static int runLovaxSource(const std::string& input, const std::string& baseDir, const RunOpts& o) {
+    Lovax::Lexer lexer(input);
+    Lovax::Parser parser(lexer);
+    auto program = parser.parseProgram();
+
+    if (!parser.errors().empty()) {
+        for (const auto& err : parser.errors()) {
+            std::cerr << Lovax::Color::errRed() << err.toString()
+                      << Lovax::Color::errReset() << "\n";
+        }
+        std::cerr << parser.errors().size() << " syntax error(s) found; the program was not run."
+                  << std::endl;
+        return 65; // EX_DATAERR
+    }
+
+    if (o.dumpBytecode) {
+        Lovax::GlobalTable gt;
+        Lovax::Compiler comp(gt);
+        try {
+            auto proto = comp.compileProgram(program.get());
+            std::function<void(const std::shared_ptr<Lovax::Proto>&, const std::string&)> dump =
+                [&](const std::shared_ptr<Lovax::Proto>& p, const std::string& name) {
+                    Lovax::Jit::disassemble(p->chunk, name);
+                    for (const auto& k : p->chunk.consts) {
+                        if (k.isObj() && k.asObj() &&
+                            k.asObj()->type() == Lovax::ObjectType::RETURN_VALUE) {
+                            auto* po = dynamic_cast<Lovax::ProtoObject*>(k.asObj());
+                            if (po) dump(po->proto, "fn " + (po->proto->name.empty()
+                                                             ? "?" : po->proto->name));
+                        }
+                    }
+                };
+            dump(proto, "<script>");
+        } catch (const Lovax::CompileError& ce) {
+            std::cerr << "[Compile Error] line " << ce.line << ": " << ce.message << "\n";
+            return 65;
+        }
+        return 0;
+    }
+
+    Lovax::VM::setBaseDir(baseDir);
+
+    Lovax::VM vm;
+#ifdef LOVAX_JIT_ACTIVE
+    if (o.noJit) vm.jitEnabled_ = false;
+    if (o.jitRA) Lovax::Jit::jitRAEnabled = true;
+    if (o.noRA)  Lovax::Jit::jitRAEnabled = false;
+    if (o.jitTrace) Lovax::Jit::jitTraceEnabled = true;
+    if (o.noTrace)  Lovax::Jit::jitTraceEnabled = false;
+    if (o.jitNumFn) Lovax::Jit::jitNumFnEnabled = true;
+    if (o.noNumFn)  Lovax::Jit::jitNumFnEnabled = false;
+#endif
+    auto result = vm.interpret(program.get());
+
+#ifdef LOVAX_JIT_ACTIVE
+    if (o.jitStats) {
+        std::fprintf(stderr, "[jit] compiled: %zu | blacklisted: %zu | region-enters: %zu\n",
+                     vm.jitCompiled_, vm.jitDead_, vm.jitEnters_);
+    }
+#endif
+    if (o.memStats) {
+        auto& h = Lovax::Heap::get();
+        std::fprintf(stderr,
+            "[mem] allocations: %zu | collections: %zu | peak: %.1f MB | "
+            "gc total: %.2f ms | max pause: %.3f ms\n",
+            h.allocCount, h.collections, h.peakBytes / (1024.0 * 1024.0),
+            h.gcNanos / 1e6, h.maxPauseNanos / 1e6);
+    }
+
+    if (Lovax::isError(result)) {
+        std::cerr << Lovax::Color::errRed() << result->inspect()
+                  << Lovax::Color::errReset() << std::endl;
+        return 70; // EX_SOFTWARE
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
+    // A bundled binary (see `lovax bundle`) carries an embedded script in its
+    // trailer: run it directly, with the whole argv exposed as the app's args and
+    // no Lovax CLI parsing (so `./myapp --foo` passes --foo to the app).
+    {
+        std::string embedded = readEmbeddedScript(argv[0]);
+        if (!embedded.empty()) {
+            for (int i = 1; i < argc; ++i) Lovax::StdLib::scriptArgs().push_back(argv[i]);
+            return runLovaxSource(embedded, ".", RunOpts{});
+        }
+    }
+
     if (argc < 2) {
         // No script given: drop into the interactive REPL.
         return runRepl();
     }
+
+    if (std::string(argv[1]) == "bundle") return writeBundle(argc, argv);
 
     std::string arg = argv[1];
     if (arg == "--version" || arg == "-v") {
@@ -193,96 +389,16 @@ int main(int argc, char* argv[]) {
     buffer << file.rdbuf();
     std::string input = buffer.str();
 
-    // Step 1: tokenize.  Step 2: parse into an AST.
-    Lovax::Lexer lexer(input);
-    Lovax::Parser parser(lexer);
-    auto program = parser.parseProgram();
-
-    // If there are syntax errors, DO NOT run: list them all and exit.
-    if (!parser.errors().empty()) {
-        for (const auto& err : parser.errors()) {
-            std::cerr << Lovax::Color::errRed() << err.toString()
-                      << Lovax::Color::errReset() << "\n";
-        }
-        std::cerr << parser.errors().size() << " syntax error(s) found; the program was not run."
-                  << std::endl;
-        return 65; // EX_DATAERR
-    }
-
-    // --dump-bytecode: compile only and print the bytecode (JIT development
-    // tooling, RFC-026). Recurses into nested function protos.
-    if (dumpBytecode) {
-        Lovax::GlobalTable gt;
-        Lovax::Compiler comp(gt);
-        try {
-            auto proto = comp.compileProgram(program.get());
-            std::function<void(const std::shared_ptr<Lovax::Proto>&, const std::string&)> dump =
-                [&](const std::shared_ptr<Lovax::Proto>& p, const std::string& name) {
-                    Lovax::Jit::disassemble(p->chunk, name);
-                    for (const auto& k : p->chunk.consts) {
-                        if (k.isObj() && k.asObj() &&
-                            k.asObj()->type() == Lovax::ObjectType::RETURN_VALUE) {
-                            auto* po = dynamic_cast<Lovax::ProtoObject*>(k.asObj());
-                            if (po) dump(po->proto, "fn " + (po->proto->name.empty()
-                                                             ? "?" : po->proto->name));
-                        }
-                    }
-                };
-            dump(proto, "<script>");
-        } catch (const Lovax::CompileError& ce) {
-            std::cerr << "[Compile Error] line " << ce.line << ": " << ce.message << "\n";
-            return 65;
-        }
-        return 0;
-    }
-
-    // Relative module paths resolve from the entry script's directory.
-    Lovax::VM::setBaseDir(std::filesystem::path(arg).parent_path().string());
-
-    // Extra CLI arguments after the script path are exposed via os.args()
+    // Extra CLI arguments after the script path are exposed via os.args().
     for (int i = scriptIdx + 1; i < argc; ++i) {
         Lovax::StdLib::scriptArgs().push_back(argv[i]);
     }
 
-    // Step 3: compile to bytecode and run on the VM.
-    Lovax::VM vm;
-#ifdef LOVAX_JIT_ACTIVE
-    if (noJit) vm.jitEnabled_ = false;
-    if (jitRA) Lovax::Jit::jitRAEnabled = true;    // explicit-on (RA is on by default)
-    if (noRA)  Lovax::Jit::jitRAEnabled = false;   // --no-ra: fall back to the template compiler
-    if (jitTrace) Lovax::Jit::jitTraceEnabled = true;  // explicit-on (trace is on by default)
-    if (noTrace)  Lovax::Jit::jitTraceEnabled = false; // --no-trace: fall back to RA / template
-    if (jitNumFn) Lovax::Jit::jitNumFnEnabled = true;  // explicit-on (numfn is on by default)
-    if (noNumFn)  Lovax::Jit::jitNumFnEnabled = false; // --no-numfn: Stage-6a recursion JIT off
-#else
-    (void)noJit; (void)jitRA; (void)noRA; (void)jitTrace; (void)noTrace; (void)jitNumFn; (void)noNumFn;
-#endif
-    auto result = vm.interpret(program.get());
-
-#ifdef LOVAX_JIT_ACTIVE
-    if (jitStats) {
-        std::fprintf(stderr, "[jit] compiled: %zu | blacklisted: %zu | region-enters: %zu\n",
-                     vm.jitCompiled_, vm.jitDead_, vm.jitEnters_);
-    }
-#else
-    (void)jitStats;
-#endif
-
-    // Allocation/GC report (foundation for the incremental-GC pause budget).
-    if (memStats) {
-        auto& h = Lovax::Heap::get();
-        std::fprintf(stderr,
-            "[mem] allocations: %zu | collections: %zu | peak: %.1f MB | "
-            "gc total: %.2f ms | max pause: %.3f ms\n",
-            h.allocCount, h.collections, h.peakBytes / (1024.0 * 1024.0),
-            h.gcNanos / 1e6, h.maxPauseNanos / 1e6);
-    }
-
-    if (Lovax::isError(result)) {
-        std::cerr << Lovax::Color::errRed() << result->inspect()
-                  << Lovax::Color::errReset() << std::endl;
-        return 70; // EX_SOFTWARE
-    }
-
-    return 0;
+    RunOpts opts;
+    opts.dumpBytecode = dumpBytecode;
+    opts.noJit = noJit; opts.jitRA = jitRA; opts.noRA = noRA;
+    opts.jitTrace = jitTrace; opts.noTrace = noTrace;
+    opts.jitNumFn = jitNumFn; opts.noNumFn = noNumFn;
+    opts.jitStats = jitStats; opts.memStats = memStats;
+    return runLovaxSource(input, std::filesystem::path(arg).parent_path().string(), opts);
 }

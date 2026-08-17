@@ -134,3 +134,8 @@ jobs:
       # the trace JIT, so a small change in how code is written never loses the JIT.
       - name: Trace-coverage gate (common patterns must trace)
         run: ./tests/trace_coverage.sh
+
+      # RFC-027: `lovax bundle app.lov -o app` must produce a self-contained
+      # executable that runs with no separate install and passes argv through.
+      - name: Bundle gate (single-binary distribution)
+        run: ./tests/bundle.sh
