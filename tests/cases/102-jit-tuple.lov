@@ -1,0 +1,32 @@
+# JIT op-coverage (Faz B): tuple literals `(a, b, c)`. A tuple is an immutable
+# ListObject subtype (same unboxed-Value SmallVec layout), so a tuple literal
+# allocates in native code like a list, and tuple indexing works via the list
+# index path (the index-base guards now accept LIST or TUPLE). Bit-identical to
+# the interpreter, and the churned tuples are collected without corruption.
+set s = 0
+set i = 0
+while i < 30000:
+    set t = (i, i + 1, i * 2)
+    s = s + t[0] + t[1] + t[2]
+    i = i + 1
+# per iter: i + (i+1) + 2i = 4i+1; sum over 0..29999
+check(s == 4 * (29999 * 30000 // 2) + 30000, "fresh tuple per iteration")
+
+# read-only tuple base indexed in a loop
+set base = (7, 11, 13, 17)
+set acc = 0
+set k = 0
+while k < 20000:
+    acc = acc + base[0] + base[3]
+    k = k + 1
+check(acc == 20000 * (7 + 17), "read-only tuple base indexing")
+
+# float tuple
+set fs = 0.0
+set m = 0
+while m < 10000:
+    set ft = (m * 1.5, m * 0.5)
+    fs = fs + ft[0] - ft[1]
+    m = m + 1
+check(fs == (9999.0 * 10000.0 / 2.0), "float tuple")
+say "102 ok"

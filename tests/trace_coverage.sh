@@ -146,5 +146,12 @@ while i<5000:
     i=i+1
 say len(parts)"
 
+check_traces "tuple literal"         "set s=0
+$H
+    set t = (i, i+1)
+    s = s + t[0]
+$F
+say s"
+
 echo "trace_coverage: $fail failure(s)"
 [ "$fail" -eq 0 ] && echo "TRACE COVERAGE GATE PASSED" || exit 1

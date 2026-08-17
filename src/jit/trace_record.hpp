@@ -57,6 +57,20 @@ inline uint64_t lovaxJitMakeList(const uint64_t* elems, long long n) {
     return w;
 }
 
+// Tuple literal: identical to a list (unboxed Value elements, same SmallVec
+// layout) but an immutable TupleObject. GC-safe like lovaxJitMakeList.
+inline uint64_t lovaxJitMakeTuple(const uint64_t* elems, long long n) {
+    auto* tup = gcAlloc<TupleObject>();
+    tup->elements.reserve((size_t)n);
+    for (long long i = 0; i < n; ++i) {
+        Value v; std::memcpy(&v, &elems[i], sizeof(uint64_t));
+        tup->elements.push_back(v);
+    }
+    Value ov = Value::object(Ref<Object>(tup));
+    uint64_t w; std::memcpy(&w, &ov, sizeof(uint64_t));
+    return w;
+}
+
 // Struct construction (spawn Part 2): allocate a StructInstanceObject with the
 // given shape and fill its unboxed-Value slots from `fields`. Same GC-safety as
 // lovaxJitMakeList (gcAlloc never collects mid-call). Returns the boxed word.
@@ -99,6 +113,7 @@ public:
     static constexpr int32_t  VEC_FINISH_OFF= 40;    // SmallVec e_ (end pointer)
     static constexpr int32_t  VEC_CAP_OFF   = 48;    // SmallVec c_ (capacity pointer)
     static constexpr int      LIST_TAG      = 5;     // ObjectType::LIST
+    static constexpr int      TUPLE_TAG     = 6;     // ObjectType::TUPLE (same SmallVec layout, indexable)
     // struct instance (Stage-8 G2): shape ptr + inline-Value slots (SmallVec begin).
     static constexpr int32_t  STRUCT_SHAPE_OFF = 32; // offsetof(StructInstanceObject, shape)
     static constexpr int32_t  STRUCT_SLOTS_OFF = 40; // offsetof(slots) + SmallVec begin(0)
@@ -259,7 +274,7 @@ public:
             a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object*
             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF);
             a.cmpRI(RCX, LIST_TAG);
-            Label o2; a.jcc(E, o2); bailTo(off, depth); a.bind(o2);
+            Label o2; a.jcc(E, o2); a.cmpRI(RCX, TUPLE_TAG); a.jcc(E, o2); bailTo(off, depth); a.bind(o2);
         } else {
             a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, objR); a.andRR(RAX, RCX);   // RAX = Object* (guaranteed list)
         }
@@ -452,7 +467,7 @@ inline bool traceSupported(Op op) {
         case Op::INDEX_GET_KEEP: case Op::MEMBER_GET_KEEP:
         case Op::NEGATE: case Op::DIV: case Op::MOD: case Op::FLOOR_DIV:
         case Op::FOR_NEXT: case Op::CLOSE_UPVALUE:
-        case Op::LIST:
+        case Op::LIST: case Op::TUPLE:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
         case Op::JUMP: case Op::LOOP:
             return true;
@@ -704,7 +719,7 @@ inline bool RegionCompilerTrace::compile() {
                 // per-access type guard side-exits if the speculation is ever wrong.
                 if (op == Op::INDEX_GET || op == Op::INDEX_GET_KEEP) {
                     const Value* bv = (o >= 0) ? &rtGlobals[o] : &rtSlots[-2 - o];
-                    if (bv && bv->isObjType(ObjectType::LIST)) {
+                    if (bv && (bv->isObjType(ObjectType::LIST) || bv->isObjType(ObjectType::TUPLE))) {
                         auto* lst = static_cast<ListObject*>(bv->asObj());
                         if (lst->elements.size() > 0) {
                             VKind et = lst->elements[0].tag();
@@ -739,7 +754,7 @@ inline bool RegionCompilerTrace::compile() {
                 else { int s = -2 - o; structBaseL.insert(s); lShape[s] = si->shape; }
             }
             int d = traceStackDelta(op);
-            if (op == Op::LIST) {                     // small list literal -> traceable alloc
+            if (op == Op::LIST || op == Op::TUPLE) {  // small list/tuple literal -> traceable alloc
                 int n = (int)rdU16(off + 1);
                 if (n < 1 || n > 8) return false;     // cap the native-stack element buffer
                 opop(n); opush(-1); d = 1 - n;
@@ -805,7 +820,7 @@ inline bool RegionCompilerTrace::compile() {
             // a pinned/prologue-guarded fast path applies. Reassigned (dirty, e.g.
             // `tmp = [..]` each iteration) -> it must be a memory cell reloaded and
             // obj/LIST-guarded per use, never a stale cached pointer.
-            if (k != VKind::OBJ || !v.isObjType(ObjectType::LIST)) return false;
+            if (k != VKind::OBJ || !(v.isObjType(ObjectType::LIST) || v.isObjType(ObjectType::TUPLE))) return false;
             vt = VT_OBJ;
             if (dirty) pinned = 0;                         // reassigned base -> memory cell
         } else if (!trTypeOf(k, vt)) {
@@ -896,7 +911,7 @@ inline bool RegionCompilerTrace::compile() {
             Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
             a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);      // Object*
             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
-            Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
+            Label okL; a.jcc(E, okL); a.cmpRI(RCX, TUPLE_TAG); a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
         } else if (c.pinned && c.vt == VT_STRUCT) {
             // struct member base: load the raw pointer word only — it may be
             // reassigned each iteration, so every MEMBER access guards tag+shape.
@@ -918,7 +933,7 @@ inline bool RegionCompilerTrace::compile() {
             Label okO; a.jcc(E, okO); a.jmp(prologueBail); a.bind(okO);
             a.movAbs(RCX, JIT_PAYLOAD); a.andRR(RAX, RCX);
             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
-            Label okL; a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
+            Label okL; a.jcc(E, okL); a.cmpRI(RCX, TUPLE_TAG); a.jcc(E, okL); a.jmp(prologueBail); a.bind(okL);
         } else if (c.vt == VT_OBJ) {
             // memory list base, reassigned each iteration (dirty): its entry value is
             // overwritten before use, so no entry guard — each GET_GLOBAL reloads and
@@ -1018,7 +1033,7 @@ inline bool RegionCompilerTrace::compile() {
                             Label okO; a.jcc(E, okO); bailTo(off, depth); a.bind(okO);
                             a.movAbs(RCX, JIT_PAYLOAD); a.movRR(RAX, r); a.andRR(RAX, RCX);
                             a.movzxRM8(RCX, RAX, OBJ_TAG_OFF); a.cmpRI(RCX, LIST_TAG);
-                            Label okL; a.jcc(E, okL); bailTo(off, depth); a.bind(okL);
+                            Label okL; a.jcc(E, okL); a.cmpRI(RCX, TUPLE_TAG); a.jcc(E, okL); bailTo(off, depth); a.bind(okL);
                         }
                     }
                 } else {
@@ -1236,8 +1251,8 @@ inline bool RegionCompilerTrace::compile() {
                 } else { ok = false; break; }
                 break;
             }
-            case Op::LIST: {
-                // Small list literal -> allocate in native code via lovaxJitMakeList.
+            case Op::LIST: case Op::TUPLE: {
+                // Small list/tuple literal -> allocate in native code via a helper.
                 // The n elements are boxed into a native-stack buffer; the caller-saved
                 // registers the C call would clobber are spilled around it. gcAlloc
                 // never collects mid-call, so no GC can run here — the trace's own
@@ -1264,7 +1279,7 @@ inline bool RegionCompilerTrace::compile() {
                 for (int k = 0; k < 8; ++k) a.movsdMX(RSP, XMM_OFF + k * 8, (Xmm)k);
                 a.movRR(RDI, RSP); a.addRI(RDI, BUF_OFF);          // arg0 = &buffer
                 a.movAbs(RSI, (uint64_t)(int64_t)n);               // arg1 = n
-                a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeList);
+                a.movAbs(RAX, (uint64_t)(uintptr_t)(op == Op::TUPLE ? &Lovax::lovaxJitMakeTuple : &Lovax::lovaxJitMakeList));
                 a.callR(RAX);
                 a.movMR(RSP, 8, RAX);                              // save boxed list word
                 for (int k = 0; k < 8; ++k) a.movsdXM((Xmm)k, RSP, XMM_OFF + k * 8);
