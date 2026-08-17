@@ -18,7 +18,7 @@ while r < 20:
         sum = sum + a[k]
         k = k + 1
     r = r + 1
-check(sum == 20 * (4999 * 5000 / 2), "begin-cached read sum")
+check(sum == 20 * (4999 * 5000 // 2), "begin-cached read sum")
 
 # ---- read + write on the same array (both accesses ABC-safe) ----
 set b = []
@@ -78,5 +78,5 @@ set u = 0
 while u < 800:
     tot = tot + x[u]
     u = u + 1
-check(tot == (799 * 800 / 2) + 800 * (25 * 6), "multi-array memory bases + ABC")
+check(tot == (799 * 800 // 2) + 800 * (25 * 6), "multi-array memory bases + ABC")
 say "93 ok"

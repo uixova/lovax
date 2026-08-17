@@ -43,7 +43,7 @@ fn sell(name):
     if at == -1:
         say "No '{name}' in the bag."
         return false
-    set earnings = items[name].value / 2
+    set earnings = items[name].value // 2
     gold += earnings
     remove(bag, at)
     say "Sold: {name} (+{earnings} gold, balance: {gold})"

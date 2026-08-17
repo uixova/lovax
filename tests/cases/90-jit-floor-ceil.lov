@@ -19,9 +19,9 @@ set j = -400
 set cf = 0
 set cc = 0
 while j < 400:
-    set half = j / 2          # integer floor-division (toward -inf) in Lovax
+    set half = j // 2          # integer floor-division (toward -inf) in Lovax
     cf = cf + half
-    cc = cc + (0 - ((0 - j) / 2))
+    cc = cc + (0 - ((0 - j) // 2))
     j = j + 1
 check(sf == cf, "floor toward -inf matches integer floor-division")
 check(sc == cc, "ceil toward +inf matches negated floor-division")

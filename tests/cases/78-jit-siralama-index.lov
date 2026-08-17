@@ -197,7 +197,7 @@ fn bsearch(xs, target):
     set lo = 0
     set hi = len(xs) - 1
     while lo <= hi:
-        set mid = (lo + hi) / 2
+        set mid = (lo + hi) // 2
         if xs[mid] == target:
             return mid
         if xs[mid] < target:

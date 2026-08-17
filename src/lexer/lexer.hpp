@@ -216,8 +216,10 @@ public:
                 else                        { tok = makeToken(TokenType::ASTERISK, "*"); }
                 break;
             case '/':
-                if (peekChar() == '=') { tok = twoCharToken(TokenType::SLASH_ASSIGN); }
-                else                   { tok = makeToken(TokenType::SLASH, "/"); }
+                if (peekChar() == '/' && peekChar2() == '=') { tok = threeCharToken(TokenType::SLASH_SLASH_ASSIGN); }
+                else if (peekChar() == '/') { tok = twoCharToken(TokenType::SLASH_SLASH); }
+                else if (peekChar() == '=') { tok = twoCharToken(TokenType::SLASH_ASSIGN); }
+                else                        { tok = makeToken(TokenType::SLASH, "/"); }
                 break;
             case '%':
                 if (peekChar() == '=') { tok = twoCharToken(TokenType::PERCENT_ASSIGN); }

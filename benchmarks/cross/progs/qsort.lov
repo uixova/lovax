@@ -8,7 +8,7 @@ for i in range(N):
 fn qsort(arr, lo, hi):
     if lo >= hi:
         return 0
-    set p = arr[(lo + hi) / 2]
+    set p = arr[(lo + hi) // 2]
     set i = lo
     set j = hi
     while i <= j:
@@ -26,4 +26,4 @@ fn qsort(arr, lo, hi):
     qsort(arr, i, hi)
     return 0
 qsort(a, 0, N - 1)
-say a[0] + a[N / 2] + a[N - 1]
+say a[0] + a[N // 2] + a[N - 1]

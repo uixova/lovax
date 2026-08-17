@@ -7,7 +7,7 @@ set one = (5,)
 say one
 say ()
 fn divmod(a, b):
-    return a / b, a % b
+    return a // b, a % b
 set q, r = divmod(17, 5)
 say q, r
 say divmod(17, 5)

@@ -310,9 +310,14 @@ namespace Runtime {
             if (op == "-") return makeObj<IntegerObject>(wrapSub(l, r));
             if (op == "*") return makeObj<IntegerObject>(wrapMul(l, r));
             if (op == "/") {
+                // True division -> float (Python 3 / Lua 5.4 / JS). Floor is `//`.
+                if (r == 0) return makeError("division by zero", line);
+                return makeObj<FloatObject>((double)l / (double)r);
+            }
+            if (op == "//") {
                 if (r == 0) return makeError("division by zero", line);
                 if (r == -1) return makeObj<IntegerObject>(wrapNeg(l));
-                // Floor division: keeps the identity with floor-mod -> (a / b) * b + a % b == a
+                // Floor division: keeps the identity with floor-mod -> (a // b) * b + a % b == a
                 long long q = l / r;
                 if ((l % r != 0) && ((l < 0) != (r < 0))) q--;
                 return makeObj<IntegerObject>(q);
@@ -366,6 +371,10 @@ namespace Runtime {
             if (op == "/") {
                 if (r == 0.0) return makeError("division by zero", line);
                 return makeObj<FloatObject>(l / r);
+            }
+            if (op == "//") {
+                if (r == 0.0) return makeError("division by zero", line);
+                return makeObj<FloatObject>(std::floor(l / r));
             }
             if (op == "%") {
                 if (r == 0.0) return makeError("modulo by zero", line);

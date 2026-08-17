@@ -13,7 +13,7 @@ fn gauss_loop(n):
     return s
 
 set n = 100000
-check(gauss_loop(n) == n * (n + 1) / 2, "gauss")
+check(gauss_loop(n) == n * (n + 1) // 2, "gauss")
 
 # ---- sum of squares == n(n+1)(2n+1)/6 ----
 fn sumsq(n):
@@ -25,7 +25,7 @@ fn sumsq(n):
     return s
 
 set m = 5000
-check(sumsq(m) == m * (m + 1) * (2 * m + 1) / 6, "sumsq")
+check(sumsq(m) == m * (m + 1) * (2 * m + 1) // 6, "sumsq")
 
 # ---- sum of cubes == (n(n+1)/2)^2 ----
 fn sumcube(n):
@@ -37,7 +37,7 @@ fn sumcube(n):
     return s
 
 set c = 1000
-set tri = c * (c + 1) / 2
+set tri = c * (c + 1) // 2
 check(sumcube(c) == tri * tri, "sumcube")
 
 # ---- nested loop: sum of full multiplication table == (sum 1..n)^2 ----
@@ -53,7 +53,7 @@ fn table_sum(n):
     return total
 
 set t = 300
-set st = t * (t + 1) / 2
+set st = t * (t + 1) // 2
 check(table_sum(t) == st * st, "table")
 
 # ---- modular exponentiation: (base^exp) mod md, verified against repeated mul ----
@@ -65,7 +65,7 @@ fn modpow(base, exp, md):
         if e % 2 == 1:
             result = (result * b) % md
         b = (b * b) % md
-        e = e / 2
+        e = e // 2
     return result
 
 fn modmul_loop(base, exp, md):
@@ -89,7 +89,7 @@ fn popcount_shift(x):
     set v = x
     while v > 0:
         c = c + (v & 1)
-        v = v / 2
+        v = v // 2
     return c
 
 fn popcount_kernighan(x):
@@ -114,7 +114,7 @@ fn collatz_steps(x):
     set v = x
     while v != 1:
         if v % 2 == 0:
-            v = v / 2
+            v = v // 2
         else:
             v = 3 * v + 1
         steps = steps + 1

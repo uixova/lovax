@@ -40,9 +40,14 @@ $H
     s = s + (i * 1.5) - 0.5
 $F
 say floor(s)"
+check_traces "true division"         "set s=0.0
+$H
+    s = s + (i / 7)
+$F
+say floor(s)"
 check_traces "floor div / mod"       "set s=0
 $H
-    s = s + (i / 7) + (i % 3)
+    s = s + (i // 7) + (i % 3)
 $F
 say s"
 check_traces "unary negate"          "set s=0

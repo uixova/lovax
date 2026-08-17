@@ -26,7 +26,8 @@ say 9007199254740993               # exact as int (boxed)
 say 9007199254740993 * 1.0         # * float -> rounds to double
 
 # mixed arithmetic result types
-say 5 / 2                          # int division (language rule)
+say 5 / 2                          # true division -> float (5/2 = 2.5)
+say 5 // 2                         # floor division -> int (5//2 = 2)
 say 2 ** 10                        # int power stays int
 say 2 ** 0.5                       # float power
 say 2.0 ** 3                       # float

@@ -1,0 +1,46 @@
+# Division semantics (v1.x): `/` is true division (always float, matching
+# Python 3 / Lua 5.4 / JS), `//` is floor division (int->int floored toward -inf,
+# float->floor(a/b)), `%` is floor modulo (result takes the divisor's sign). The
+# floor-div/floor-mod identity holds: (a // b) * b + a % b == a.
+
+# ---- true division `/` -> always float ----
+check(7 / 2 == 3.5, "int / int -> float")
+check(1 / 4 == 0.25, "1/4 float")
+check(-7 / 2 == -3.5, "negative / float")
+check(6 / 3 == 2.0, "exact / still float")
+check(7.0 / 2.0 == 3.5, "float / float")
+
+# ---- floor division `//` -> floor toward -inf ----
+check(7 // 2 == 3, "int // int floor")
+check(-7 // 2 == -4, "negative // floors toward -inf")
+check(7 // -2 == -4, "// divisor sign")
+check(1 // 4 == 0, "1 // 4")
+check(7.0 // 2.0 == 3.0, "float // -> floor as float")
+check(-7.5 // 2.0 == -4.0, "negative float //")
+
+# ---- floor modulo `%` (divisor's sign) + the division identity ----
+check(7 % 2 == 1, "positive mod")
+check(-7 % 2 == 1, "floor mod takes divisor sign")
+check(7 % -2 == -1, "mod negative divisor")
+set ai = -37
+set bi = 5
+check((ai // bi) * bi + (ai % bi) == ai, "floor identity int")
+
+# ---- compound assignment ----
+set x = 17
+x //= 5
+check(x == 3, "//=")
+set y = 10.0
+y /= 4
+check(y == 2.5, "/= float")
+
+# ---- traced in a hot loop (JIT path) ----
+set sd = 0.0
+set sf = 0
+set i = -500
+while i < 500:
+    sd = sd + (i / 7)
+    sf = sf + (i // 7)
+    i = i + 1
+check(sf == -500, "traced // accumulate")
+say "101 ok"

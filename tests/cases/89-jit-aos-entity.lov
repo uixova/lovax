@@ -40,7 +40,7 @@ while k < 500:
     shp = shp + e.hp
     k = k + 1
 # sum of x = sum(i for i in 0..499) + 500*(400*1.5)
-check(sx == (499 * 500 / 2) * 1.0 + 500.0 * (400.0 * 1.5), "aos x accumulate")
+check(sx == (499 * 500 // 2) * 1.0 + 500.0 * (400.0 * 1.5), "aos x accumulate")
 check(sy == 500.0 * (400.0 * -0.5), "aos y accumulate")
 check(shp == 500 * (100 - 400), "aos hp int field")
 say "89 ok"

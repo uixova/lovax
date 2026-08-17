@@ -29,7 +29,7 @@ struct Entity:
             base = base * 2
         return base
     fn bar():
-        set filled = math.clamp(this.hp * 10 / this.max_hp, 0, 10)
+        set filled = math.clamp(this.hp * 10 // this.max_hp, 0, 10)
         set out = ""
         for i in 0..10:
             out = out + ("#" if i < filled else ".")

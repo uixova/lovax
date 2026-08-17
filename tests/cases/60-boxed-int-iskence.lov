@@ -11,7 +11,7 @@ say BIG - 1                       # 2^46 - 1 = inline
 say BIG + BIG                     # stays boxed
 say HUGE * 2
 say HUGE % 1000
-say MIN / -1                      # trap-guarded
+say MIN // -1                      # trap-guarded
 say (BIG - 1) + 1 == BIG          # boundary identity
 
 # boxed ints as map keys (hash the UNBOXED value)

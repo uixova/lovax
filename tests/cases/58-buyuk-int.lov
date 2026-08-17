@@ -16,7 +16,7 @@ set l = [big, big + 5]
 say l
 say big == 9007199254740993
 say big > 9007199254740992
-say big / 7
+say big // 7
 say big % 7
 fn double_it(x):
     return x + x

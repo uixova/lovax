@@ -13,7 +13,7 @@ while i < 20000:
     sink = sink + tmp[0] + tmp[2]
     i = i + 1
 # sum over i of (i + (i+2)) = sum(2i+2) = 2*sum(i) + 2*N
-check(sink == 2 * (19999 * 20000 / 2) + 2 * 20000, "int list literal per iteration")
+check(sink == 2 * (19999 * 20000 // 2) + 2 * 20000, "int list literal per iteration")
 
 # ---- float elements ----
 set fs = 0.0
@@ -32,7 +32,7 @@ while k < 8000:
     set a = [k, k, k, k, k, k, k, k]      # 8 elements (buffer cap)
     c = c + a[7]
     k = k + 1
-check(c == 7999 * 8000 / 2, "8-element list literal (buffer cap)")
+check(c == 7999 * 8000 // 2, "8-element list literal (buffer cap)")
 
 # ---- nested list literals ----
 set ns = 0
@@ -44,5 +44,5 @@ while m < 6000:
     ns = ns + lo[0] + hi[1]
     m = m + 1
 # sum of (m + (m+3)) = sum(2m+3)
-check(ns == 2 * (5999 * 6000 / 2) + 3 * 6000, "nested list literals")
+check(ns == 2 * (5999 * 6000 // 2) + 3 * 6000, "nested list literals")
 say "94 ok"

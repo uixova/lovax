@@ -23,6 +23,7 @@ enum class TokenType {
     ASTERISK,        // *
     POWER,           // **
     SLASH,           // /
+    SLASH_SLASH,     // //  (floor division)
     PERCENT,         // %
     AMPERSAND,       // &  (bitwise and)
     PIPE,            // |  (bitwise or)
@@ -36,6 +37,7 @@ enum class TokenType {
     MINUS_ASSIGN,    // -=
     ASTERISK_ASSIGN, // *=
     SLASH_ASSIGN,    // /=
+    SLASH_SLASH_ASSIGN, // //=
     PERCENT_ASSIGN,  // %=
     AMP_ASSIGN,      // &=
     PIPE_ASSIGN,     // |=
@@ -132,6 +134,7 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::ASTERISK:        return "'*'";
         case TokenType::POWER:           return "'**'";
         case TokenType::SLASH:           return "'/'";
+        case TokenType::SLASH_SLASH:     return "'//'";
         case TokenType::PERCENT:         return "'%'";
         case TokenType::AMPERSAND:       return "'&'";
         case TokenType::PIPE:            return "'|'";
@@ -143,6 +146,7 @@ inline std::string tokenTypeName(TokenType t) {
         case TokenType::MINUS_ASSIGN:    return "'-='";
         case TokenType::ASTERISK_ASSIGN: return "'*='";
         case TokenType::SLASH_ASSIGN:    return "'/='";
+        case TokenType::SLASH_SLASH_ASSIGN: return "'//='";
         case TokenType::PERCENT_ASSIGN:  return "'%='";
         case TokenType::AMP_ASSIGN:      return "'&='";
         case TokenType::PIPE_ASSIGN:     return "'|='";

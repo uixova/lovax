@@ -96,6 +96,8 @@ enum class Op : uint8_t {
     STRUCT_MAKE,    // u16 nFields: builds an instance from locals[0..n), pushes it
     TUPLE,          // u16 element count -> builds an immutable tuple
 
+    FLOOR_DIV,      // floor division `//` (int->int floor; float->floor(a/b))
+
     HALT            // end of the top-level script
 };
 

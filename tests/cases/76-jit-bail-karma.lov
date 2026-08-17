@@ -1,4 +1,4 @@
-# JIT boundary / mixed-feature torture — self-verifying. Interleaves JIT-friendly
+# JIT boundary // mixed-feature torture — self-verifying. Interleaves JIT-friendly
 # numeric loops with early-exit (break), overflow-to-boxing, list building and
 # map access, cross-checking each result a second independent way. This is the
 # exact surface Stage-4's snapshot/bail must preserve: a value computed in
@@ -86,7 +86,7 @@ fn digit_sum(x):
     set v = x
     while v > 0:
         s = s + v % 10
-        v = v / 10
+        v = v // 10
     return s
 
 fn reverse_num(x):
@@ -94,7 +94,7 @@ fn reverse_num(x):
     set v = x
     while v > 0:
         r = r * 10 + v % 10
-        v = v / 10
+        v = v // 10
     return r
 
 # a palindrome reversed equals itself; digit sum is reversal-invariant
@@ -116,7 +116,7 @@ fn build_seq(n, seed):
     while i < n:
         s = (s * 1103515245 + 12345) % 2147483648
         # bias toward short runs of small symbols
-        push(xs, (s / 65536) % 4)
+        push(xs, (s // 65536) % 4)
         i = i + 1
     return xs
 
@@ -154,7 +154,7 @@ set i = 0
 while i < len(seq):
     check(dec[i] == seq[i], "rle roundtrip")
     i = i + 1
-say "rle roundtrip ok, symbols =", len(seq), " encoded pairs =", len(enc) / 2
+say "rle roundtrip ok, symbols =", len(seq), " encoded pairs =", len(enc) // 2
 
 # ---- tiny stack-machine interpreter: evaluate RPN, checked against direct calc --
 # program: push constants, add/mul; result cross-checked with a plain formula
@@ -193,7 +193,7 @@ fn accumulate_big(n):
 set big = accumulate_big(20000)
 # closed form: (sum i)^2 for i in 0..n-1 == (m(m-1)/2)^2 with m = n
 set m = 20000 - 1
-set tri = m * (m + 1) / 2
+set tri = m * (m + 1) // 2
 check(big == tri * tri, "cube sum exact int64")
 say "cube sum:", big
 

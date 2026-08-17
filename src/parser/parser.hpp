@@ -92,6 +92,7 @@ private:
         {TokenType::MINUS, Precedence::SUM},
         {TokenType::ASTERISK, Precedence::PRODUCT},
         {TokenType::SLASH, Precedence::PRODUCT},
+        {TokenType::SLASH_SLASH, Precedence::PRODUCT},
         {TokenType::PERCENT, Precedence::PRODUCT},
         {TokenType::LPAREN, Precedence::CALL},
         {TokenType::LBRACKET, Precedence::INDEX},
@@ -237,7 +238,8 @@ private:
         TokenType pt = peekToken.type;
         if (pt == TokenType::ASSIGN || pt == TokenType::PLUS_ASSIGN ||
             pt == TokenType::MINUS_ASSIGN || pt == TokenType::ASTERISK_ASSIGN ||
-            pt == TokenType::SLASH_ASSIGN || pt == TokenType::PERCENT_ASSIGN ||
+            pt == TokenType::SLASH_ASSIGN || pt == TokenType::SLASH_SLASH_ASSIGN ||
+            pt == TokenType::PERCENT_ASSIGN ||
             pt == TokenType::AMP_ASSIGN || pt == TokenType::PIPE_ASSIGN ||
             pt == TokenType::CARET_ASSIGN || pt == TokenType::SHL_ASSIGN ||
             pt == TokenType::SHR_ASSIGN || pt == TokenType::QQ_ASSIGN) {
@@ -890,7 +892,8 @@ private:
                     leftExp = parseMemberExpression(std::move(leftExp), true);
                     break;
                 case TokenType::PLUS: case TokenType::MINUS:
-                case TokenType::ASTERISK: case TokenType::SLASH: case TokenType::PERCENT:
+                case TokenType::ASTERISK: case TokenType::SLASH: case TokenType::SLASH_SLASH:
+                case TokenType::PERCENT:
                 case TokenType::POWER:
                 case TokenType::EQUAL: case TokenType::NOT_EQUAL:
                 case TokenType::LESS_THAN: case TokenType::GREATER_THAN:

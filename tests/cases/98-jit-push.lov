@@ -14,7 +14,7 @@ set k = 0
 while k < 50000:
     s = s + xs[k]
     k = k + 1
-check(s == 49999 * 50000 / 2, "pushed int values read back")
+check(s == 49999 * 50000 // 2, "pushed int values read back")
 
 # float list, crossing the inline (4) boundary many times via fresh lists
 set frames = 0

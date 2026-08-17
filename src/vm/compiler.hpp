@@ -1156,6 +1156,7 @@ private:
         else if (op == "-")  emitOp(Op::SUB, line);
         else if (op == "*")  emitOp(Op::MUL, line);
         else if (op == "/")  emitOp(Op::DIV, line);
+        else if (op == "//") emitOp(Op::FLOOR_DIV, line);
         else if (op == "%")  emitOp(Op::MOD, line);
         else if (op == "**") emitOp(Op::POW, line);
         else if (op == "==") emitOp(Op::EQUAL, line);

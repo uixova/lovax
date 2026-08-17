@@ -28,6 +28,7 @@ inline const char* opName(Op op) {
         case Op::EQUAL: return "EQUAL"; case Op::NOT_EQUAL: return "NOT_EQUAL";
         case Op::ADD: return "ADD"; case Op::SUB: return "SUB"; case Op::MUL: return "MUL";
         case Op::DIV: return "DIV"; case Op::MOD: return "MOD"; case Op::POW: return "POW";
+        case Op::FLOOR_DIV: return "FLOOR_DIV";
         case Op::LESS: return "LESS"; case Op::GREATER: return "GREATER";
         case Op::LESS_EQ: return "LESS_EQ"; case Op::GREATER_EQ: return "GREATER_EQ";
         case Op::BIT_AND: return "BIT_AND"; case Op::BIT_OR: return "BIT_OR";
@@ -82,7 +83,7 @@ inline OpInfo opOperands(Op op) {
         // no operands
         case Op::NIL: case Op::TRUE_: case Op::FALSE_: case Op::POP: case Op::DUP:
         case Op::EQUAL: case Op::NOT_EQUAL: case Op::ADD: case Op::SUB: case Op::MUL:
-        case Op::DIV: case Op::MOD: case Op::POW: case Op::LESS: case Op::GREATER:
+        case Op::DIV: case Op::MOD: case Op::FLOOR_DIV: case Op::POW: case Op::LESS: case Op::GREATER:
         case Op::LESS_EQ: case Op::GREATER_EQ: case Op::BIT_AND: case Op::BIT_OR:
         case Op::BIT_XOR: case Op::SHL: case Op::SHR: case Op::IN: case Op::NEGATE:
         case Op::NOT_: case Op::BIT_NOT: case Op::RETURN: case Op::INDEX_GET:

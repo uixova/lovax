@@ -450,7 +450,7 @@ inline bool traceSupported(Op op) {
         case Op::LGET_ADD_I: case Op::LGET_SUB_I:
         case Op::MEMBER_GET: case Op::MEMBER_SET:
         case Op::INDEX_GET_KEEP: case Op::MEMBER_GET_KEEP:
-        case Op::NEGATE: case Op::DIV: case Op::MOD:
+        case Op::NEGATE: case Op::DIV: case Op::MOD: case Op::FLOOR_DIV:
         case Op::FOR_NEXT: case Op::CLOSE_UPVALUE:
         case Op::LIST:
         case Op::FALSE_: case Op::TRUE_: case Op::NIL: case Op::JUMP_IF_FALSE:
@@ -476,7 +476,7 @@ inline int traceStackDelta(Op op) {
         case Op::MEMBER_GET_KEEP: return +1;  // [obj] -> [obj, field]
         case Op::NEGATE: return 0;            // [x] -> [-x]
         case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
-        case Op::DIV: case Op::MOD:
+        case Op::DIV: case Op::MOD: case Op::FLOOR_DIV:
         case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: return -1;
         case Op::ADD_I: case Op::SUB_I: case Op::MUL_I: case Op::MOD_I:
         case Op::BAND_I: case Op::BOR_I: case Op::BXOR_I: return 0;
@@ -761,7 +761,7 @@ inline bool RegionCompilerTrace::compile() {
                 case Op::NEGATE: opop(1); opush(-1); break;       // replace top
                 case Op::MEMBER_SET: opop(2); break;              // [obj, val] -> []
                 case Op::ADD: case Op::SUB: case Op::MUL: case Op::ADD_INPLACE:
-                case Op::DIV: case Op::MOD:
+                case Op::DIV: case Op::MOD: case Op::FLOOR_DIV:
                 case Op::BIT_AND: case Op::BIT_OR: case Op::BIT_XOR: opop(2); opush(-1); break;
                 case Op::LESS_JF: case Op::LESS_EQ_JF: case Op::GREATER_JF:
                 case Op::GREATER_EQ_JF: case Op::EQUAL_JF: case Op::NOT_EQUAL_JF: opop(2); break;
@@ -1306,36 +1306,47 @@ inline bool RegionCompilerTrace::compile() {
             case Op::ADD: case Op::ADD_INPLACE: numericBinary(0, depth, off, depth); depth--; break;
             case Op::SUB: numericBinary(1, depth, off, depth); depth--; break;
             case Op::MUL: numericBinary(2, depth, off, depth); depth--; break;
-            case Op::DIV: case Op::MOD: {
-                // Floor division / modulo (Lovax spec: result takes the divisor's
-                // sign). int/int -> idiv + a floor correction; a zero divisor bails
-                // to the interpreter (which raises the error). INT_MIN/-1 can't
-                // occur: an inline VT_INT is |x| < 2^46, so idiv never traps.
+            case Op::DIV: {
+                // True division `/` -> ALWAYS float (int operands coerced to double),
+                // matching the interpreter. divsd, guarding a +/-0.0 divisor.
+                if (!numOperand(depth-2) || !numOperand(depth-1)) { ok = false; break; }
+                toX(depth-2); toX(depth-1);
+                // divisor +/-0.0 iff (bits << 1) == 0; NaN doesn't match, so only a
+                // real zero bails (the interpreter errors on it).
+                a.movqRX(RAX, xm(depth-1)); a.shlRI(RAX, 1);
+                Label okZ; a.jcc(NE, okZ); bailTo(off, depth); a.bind(okZ);
+                a.divsd(xm(depth-2), xm(depth-1));
+                otype[depth-2] = VT_NUM;
+                depth--; break;
+            }
+            case Op::FLOOR_DIV: case Op::MOD: {
+                // Floor division `//` and floor modulo `%` (result takes the divisor's
+                // sign). int/int -> idiv + a floor correction; a zero divisor bails to
+                // the interpreter's error. INT_MIN/-1 can't occur (inline VT_INT is
+                // |x| < 2^46, idiv never traps). FLOOR_DIV float -> floor(a/b) via
+                // divsd + roundsd; MOD float (fmod) declines.
                 if (!numOperand(depth-2) || !numOperand(depth-1)) { ok = false; break; }
                 if (otype[depth-2] == VT_INT && otype[depth-1] == VT_INT) {
                     Reg lhs = gp(depth-2), rhs = gp(depth-1);
                     a.cmpRI(rhs, 0);
-                    Label okD; a.jcc(NE, okD); bailTo(off, depth); a.bind(okD);   // divide/mod by zero
-                    a.movRR(RAX, lhs); a.cqo(); a.idivR(rhs);        // RAX=quotient(trunc), RDX=remainder
-                    // floor correction: if remainder != 0 and signs differ, adjust.
+                    Label okD; a.jcc(NE, okD); bailTo(off, depth); a.bind(okD);
+                    a.movRR(RAX, lhs); a.cqo(); a.idivR(rhs);
                     Label done;
                     a.cmpRI(RDX, 0); a.jcc(E, done);
-                    a.movRR(RCX, lhs); a.xorRR(RCX, rhs); a.cmpRI(RCX, 0); a.jcc(GE, done);  // signs same -> skip
-                    if (op == Op::DIV) a.subRI(RAX, 1);             // q-- toward -inf
-                    else               a.addRR(RDX, rhs);           // rem += divisor
+                    a.movRR(RCX, lhs); a.xorRR(RCX, rhs); a.cmpRI(RCX, 0); a.jcc(GE, done);
+                    if (op == Op::FLOOR_DIV) a.subRI(RAX, 1);
+                    else                     a.addRR(RDX, rhs);
                     a.bind(done);
-                    a.movRR(lhs, op == Op::DIV ? RAX : RDX);
-                    otype[depth-2] = VT_INT;                        // |result| <= |lhs| < 2^46, in range
+                    a.movRR(lhs, op == Op::FLOOR_DIV ? RAX : RDX);
+                    otype[depth-2] = VT_INT;
                 } else if (op == Op::MOD) {
                     ok = false; break;                             // float modulo (fmod) not traced
                 } else {
                     toX(depth-2); toX(depth-1);
-                    // guard divisor != +/-0.0 via its bits (no XMM scratch): a value
-                    // is +/-0.0 iff (bits << 1) == 0. NaN divisors don't match, so a
-                    // bail only happens on a real zero (which the interpreter errors on).
                     a.movqRX(RAX, xm(depth-1)); a.shlRI(RAX, 1);
                     Label okZ; a.jcc(NE, okZ); bailTo(off, depth); a.bind(okZ);
                     a.divsd(xm(depth-2), xm(depth-1));
+                    a.roundsd(xm(depth-2), xm(depth-2), 1);        // floor toward -inf
                     otype[depth-2] = VT_NUM;
                 }
                 depth--; break;

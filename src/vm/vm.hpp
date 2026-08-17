@@ -1042,6 +1042,7 @@ private:
             &&L_STRUCT_BIND,
             &&L_STRUCT_MAKE,
             &&L_TUPLE,
+            &&L_FLOOR_DIV,
             &&L_HALT
             };
         #define VM_CASE(name) L_##name:
@@ -1168,18 +1169,9 @@ private:
                 VM_CASE(SUB) { NUMERIC_FAST("-", Value::integer(wrapSub(l, r)), Value::real(l - r)); VM_NEXT; }
                 VM_CASE(MUL) { NUMERIC_FAST("*", Value::integer(wrapMul(l, r)), Value::real(l * r)); VM_NEXT; }
                 VM_CASE(DIV) {
+                    // True division `/`: always a float (int/int -> float too), matching
+                    // Python 3 / Lua 5.4 / JS. Floor division is the separate `//` op.
                     Value* pa = sp_ - 2; Value* pb = sp_ - 1;
-                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
-                        if (pb->asInt() == 0) VM_THROW(makeError("division by zero", currentLine()));
-                        // INT64_MIN / -1 traps (SIGFPE) on x86 — by our wrap
-                        // spec the quotient is the (wrapped) negation.
-                        if (pb->asInt() == -1) {
-                            pa->setInt(wrapNeg(pa->asInt())); --sp_; VM_NEXT_FAST;
-                        }
-                        long long q = pa->asInt() / pb->asInt();
-                        if ((pa->asInt() % pb->asInt() != 0) && ((pa->asInt() < 0) != (pb->asInt() < 0))) q--;
-                        pa->setInt(q); --sp_; VM_NEXT_FAST;
-                    }
                     if (pa->isNumber() && pb->isNumber()) {
                         double r = pb->asDouble();
                         if (r == 0.0) VM_THROW(makeError("division by zero", currentLine()));
@@ -1188,6 +1180,30 @@ private:
                     {
                         Value b = pop(), a = pop();
                         auto res = Runtime::evalInfixExpression("/", toObject(a), toObject(b), currentLine());
+                        if (isError(res)) VM_THROW(res);
+                        push(fromObject(res));
+                    }
+                    VM_NEXT;
+                }
+                VM_CASE(FLOOR_DIV) {
+                    // Floor division `//`: int/int -> int floored toward -inf (keeps the
+                    // identity with floor-mod: (a//b)*b + a%b == a); float -> floor(a/b).
+                    Value* pa = sp_ - 2; Value* pb = sp_ - 1;
+                    if (pa->tag() == VKind::INT && pb->tag() == VKind::INT) {
+                        if (pb->asInt() == 0) VM_THROW(makeError("division by zero", currentLine()));
+                        if (pb->asInt() == -1) { pa->setInt(wrapNeg(pa->asInt())); --sp_; VM_NEXT_FAST; }
+                        long long q = pa->asInt() / pb->asInt();
+                        if ((pa->asInt() % pb->asInt() != 0) && ((pa->asInt() < 0) != (pb->asInt() < 0))) q--;
+                        pa->setInt(q); --sp_; VM_NEXT_FAST;
+                    }
+                    if (pa->isNumber() && pb->isNumber()) {
+                        double r = pb->asDouble();
+                        if (r == 0.0) VM_THROW(makeError("division by zero", currentLine()));
+                        *pa = Value::real(std::floor(pa->asDouble() / r)); --sp_; VM_NEXT_FAST;
+                    }
+                    {
+                        Value b = pop(), a = pop();
+                        auto res = Runtime::evalInfixExpression("//", toObject(a), toObject(b), currentLine());
                         if (isError(res)) VM_THROW(res);
                         push(fromObject(res));
                     }
