@@ -1,0 +1,54 @@
+# Bail-while-temp-live: a sinkable temp whose read triggers a mid-iteration
+# side-exit (type-guard, overflow, or an occasional non-numeric element). If the
+# aggregate was sunk, the JIT MUST materialize a real object before handing back
+# to the interpreter — otherwise the resumed interpreter sees a wrong temp. The
+# differential harness (trace-on vs --no-trace, JIT-on vs --no-jit) is the oracle;
+# each case also parallels the temp path against a direct computation.
+
+# ---- mixed element type: element 0 is int most iters, float sometimes, so the
+#      speculated-INT element read guards and bails on the float iterations ----
+set mTemp = 0.0
+set mDirect = 0.0
+set i = 0
+while i < 6000:
+    set e0 = i
+    if i % 500 == 0:
+        e0 = i + 0.5           # float on 1/500 iterations -> element-type bail
+    set t = [e0, i + 1]
+    mTemp = mTemp + t[0] + t[1]
+    mDirect = mDirect + e0 + (i + 1)
+    i = i + 1
+check(mTemp == mDirect, "mixed int/float temp element, bail materializes")
+
+# ---- occasional overflow: the read feeds an int add that overflows the inline
+#      range on a rare iteration, bailing while the temp is still live ----
+set BIG = 70368744177660         # near 2^46 inline boundary
+set oTemp = 0
+set oDirect = 0
+set j = 0
+while j < 6000:
+    set base = j
+    if j % 777 == 0:
+        base = BIG + j           # pushes the sum across the boxed boundary
+    set t = [base, j + 2]
+    oTemp = oTemp + t[0] + t[1]
+    oDirect = oDirect + base + (j + 2)
+    j = j + 1
+check(oTemp == oDirect, "overflow-boundary temp, bail materializes")
+
+# ---- branch that reads the temp on only one side (temp live across the guard) --
+set bTemp = 0
+set bDirect = 0
+set k = 0
+while k < 6000:
+    set t = [k, k + 1, k + 2]
+    if k % 3 == 0:
+        bTemp = bTemp + t[0]
+        bDirect = bDirect + k
+    else:
+        bTemp = bTemp + t[1] + t[2]
+        bDirect = bDirect + (k + 1) + (k + 2)
+    k = k + 1
+check(bTemp == bDirect, "temp read on one branch arm only")
+
+say "105 ok"

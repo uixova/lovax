@@ -1,0 +1,53 @@
+# Struct temporaries: a struct instance built fresh each iteration and read only
+# by field access is a non-escaping aggregate (the struct analogue of the list
+# sink), while a struct that is pushed/returned/reassigned must stay a real
+# object. Same two-way accumulation cross-check; runs hot so the STRUCT_MAKE +
+# MEMBER_GET body traces.
+
+struct V:
+    x = 0.0
+    y = 0.0
+    hp = 0
+
+# ---- non-escaping struct temp, field reads only ----
+set sTemp = 0.0
+set sDirect = 0.0
+set i = 0
+while i < 6000:
+    set v = V(i * 1.0, i * 2.0, i + 5)
+    sTemp = sTemp + v.x + v.y + v.hp
+    sDirect = sDirect + (i * 1.0) + (i * 2.0) + (i + 5)
+    i = i + 1
+check(sTemp == sDirect, "struct temp field reads == direct")
+
+# ---- escaping struct: pushed into an outer list, read back later ----
+set kept = []
+set j = 0
+while j < 4000:
+    push(kept, V(j * 1.0, j * 3.0, j))
+    j = j + 1
+check(len(kept) == 4000, "escaped struct temps retained")
+set eTemp = 0.0
+set eDirect = 0.0
+set r = 0
+while r < 4000:
+    set e = kept[r]
+    eTemp = eTemp + e.x + e.y
+    eDirect = eDirect + (r * 1.0) + (r * 3.0)
+    r = r + 1
+check(eTemp == eDirect, "escaped struct contents intact")
+
+# ---- struct temp mutated then read (field write keeps it a real object) ----
+set mTemp = 0.0
+set mDirect = 0.0
+set k = 0
+while k < 5000:
+    set v = V(0.0, 0.0, 0)
+    v.x = k * 1.0
+    v.hp = k + 1
+    mTemp = mTemp + v.x + v.hp
+    mDirect = mDirect + (k * 1.0) + (k + 1)
+    k = k + 1
+check(mTemp == mDirect, "mutated struct temp == direct")
+
+say "106 ok"

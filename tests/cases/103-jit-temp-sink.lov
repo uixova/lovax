@@ -1,0 +1,63 @@
+# Sinkable temporaries (Faz C oracle): a list/tuple literal built fresh each
+# iteration and read only by CONSTANT indices, then dropped, is a non-escaping
+# aggregate the trace JIT may scalar-replace (allocation sinking). Correctness is
+# pinned WITHOUT hand-derived closed forms: the same quantity is accumulated two
+# ways — once through the temporary, once by direct arithmetic — and the two must
+# agree bit-for-bit. Runs hot (>5000 iters) so every JIT tier traces the body.
+
+# ---- int list literal, two const-index reads ----
+set viaTemp = 0
+set viaDirect = 0
+set i = 0
+while i < 8000:
+    set t = [i, i * 2, i + 7]
+    viaTemp = viaTemp + t[0] + t[2]
+    viaDirect = viaDirect + i + (i + 7)
+    i = i + 1
+check(viaTemp == viaDirect, "int list temp, const index == direct")
+
+# ---- float list literal ----
+set fTemp = 0.0
+set fDirect = 0.0
+set j = 0
+while j < 6000:
+    set u = [j * 1.5, j * 0.25, j + 0.5]
+    fTemp = fTemp + u[0] - u[1] + u[2]
+    fDirect = fDirect + (j * 1.5) - (j * 0.25) + (j + 0.5)
+    j = j + 1
+check(fTemp == fDirect, "float list temp, const index == direct")
+
+# ---- tuple literal (immutable, same const-index shape) ----
+set tupTemp = 0
+set tupDirect = 0
+set k = 0
+while k < 7000:
+    set p = (k, k + 3, k * 4)
+    tupTemp = tupTemp + p[0] + p[1] + p[2]
+    tupDirect = tupDirect + k + (k + 3) + (k * 4)
+    k = k + 1
+check(tupTemp == tupDirect, "tuple temp, const index == direct")
+
+# ---- nested list literal, read the inner via two const hops ----
+set nTemp = 0
+set nDirect = 0
+set m = 0
+while m < 6000:
+    set pair = [[m, m + 1], [m + 2, m + 3]]
+    set lo = pair[0]
+    set hi = pair[1]
+    nTemp = nTemp + lo[0] + hi[1]
+    nDirect = nDirect + m + (m + 3)
+    m = m + 1
+check(nTemp == nDirect, "nested list temp == direct")
+
+# ---- 8-element temp (native-stack buffer cap) ----
+set wTemp = 0
+set w = 0
+while w < 5000:
+    set a = [w, w, w, w, w, w, w, w]
+    wTemp = wTemp + a[0] + a[7]
+    w = w + 1
+check(wTemp == 2 * (4999 * 5000 // 2), "8-element temp reads first/last")
+
+say "103 ok"

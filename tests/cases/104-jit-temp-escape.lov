@@ -1,0 +1,89 @@
+# Escaping temporaries: an aggregate that leaves the loop body — stored into an
+# outer container, returned, passed to a builtin, aliased, mutated, or read by a
+# VARIABLE index — MUST NOT be scalar-replaced/sunk; the object has to really
+# exist. The interpreter is the oracle (differential runs this with JIT on/off);
+# any over-eager sink corrupts one of these results. Each case cross-checks the
+# escaping path against a direct computation.
+
+# ---- escape: pushed into an outer list (object must persist past the iter) ----
+set kept = []
+set i = 0
+while i < 4000:
+    set t = [i, i + 1]
+    push(kept, t)
+    i = i + 1
+check(len(kept) == 4000, "escaped temps all retained")
+set s1 = 0
+set d1 = 0
+set r = 0
+while r < 4000:
+    set e = kept[r]
+    s1 = s1 + e[0] + e[1]
+    d1 = d1 + r + (r + 1)
+    r = r + 1
+check(s1 == d1, "escaped temp contents intact")
+
+# ---- escape: passed to a builtin (len/sum) each iter ----
+set s2 = 0
+set d2 = 0
+set j = 0
+while j < 5000:
+    set t = [j, j + 2, j + 4]
+    s2 = s2 + sum(t)
+    d2 = d2 + j + (j + 2) + (j + 4)
+    j = j + 1
+check(s2 == d2, "temp passed to sum()")
+
+# ---- escape: mutated via variable index, then read ----
+set s3 = 0
+set d3 = 0
+set k = 0
+while k < 5000:
+    set t = [0, 0, 0]
+    set q = 0
+    while q < 3:
+        t[q] = k + q
+        q = q + 1
+    s3 = s3 + t[0] + t[1] + t[2]
+    d3 = d3 + k + (k + 1) + (k + 2)
+    k = k + 1
+check(s3 == d3, "temp mutated by variable index")
+
+# ---- escape: variable-index read (index not a constant) ----
+set s4 = 0
+set d4 = 0
+set n = 0
+while n < 5000:
+    set t = [n * 2, n * 3, n * 4, n * 5]
+    set idx = n % 4
+    s4 = s4 + t[idx]
+    d4 = d4 + (n * (2 + (n % 4)))
+    n = n + 1
+check(s4 == d4, "temp read by variable index")
+
+# ---- escape: aliased (two names, same object) ----
+set s5 = 0
+set d5 = 0
+set a = 0
+while a < 5000:
+    set t = [a, a + 9]
+    set alias = t
+    s5 = s5 + alias[0] + t[1]
+    d5 = d5 + a + (a + 9)
+    a = a + 1
+check(s5 == d5, "aliased temp")
+
+# ---- escape: returned from a function ----
+fn make(x):
+    return [x, x * x]
+set s6 = 0
+set d6 = 0
+set b = 0
+while b < 5000:
+    set t = make(b)
+    s6 = s6 + t[0] + t[1]
+    d6 = d6 + b + (b * b)
+    b = b + 1
+check(s6 == d6, "temp returned from fn")
+
+say "104 ok"
