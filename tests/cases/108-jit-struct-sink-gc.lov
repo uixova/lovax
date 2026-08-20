@@ -1,0 +1,50 @@
+# Struct sink under real GC pressure (RFC-028 C1): a non-escaping struct temporary
+# read by field access, next to an allocation that fires the collector. The trace
+# must materialize the sunk struct into a real, rooted StructInstance before GC
+# runs at the LOOP safepoint, or a live temp is freed (ASan UAF) / the output
+# corrupts (differential + bit-for-bit). Two-way accumulation cross-check; brutal
+# under GC_STRESS (collect on every allocation).
+
+struct V:
+    x = 0.0
+    y = 0.0
+    hp = 0
+
+set xs = []
+set acc = 0.0
+set direct = 0.0
+set i = 0
+while i < 5000:
+    set v = V(i * 1.0, i * 2.0, i + 3)   # sunk: field reads only, does not escape
+    push(xs, i)                          # allocates -> arms GC -> LOOP bail materializes v
+    acc = acc + v.x + v.y + v.hp
+    direct = direct + (i * 1.0) + (i * 2.0) + (i + 3)
+    i = i + 1
+check(acc == direct, "sunk struct field values survive GC firing each iter")
+check(len(xs) == 5000, "co-allocated list intact")
+
+# sunk struct temp alongside an ESCAPING struct sibling (pushed) — the two paths
+# must not interfere: the escaping one stays a real object, the sunk one is scalar.
+set ys = []
+set s2 = 0.0
+set d2 = 0.0
+set j = 0
+while j < 5000:
+    set a = V(j * 1.0, j + 1.0, j)       # sunk (field reads)
+    set b = V(j * 3.0, j * 4.0, j)       # escapes: pushed
+    push(ys, b)
+    s2 = s2 + a.x + a.hp
+    d2 = d2 + (j * 1.0) + j
+    j = j + 1
+check(s2 == d2, "sunk struct alongside an escaping sibling")
+set chk = 0.0
+set dchk = 0.0
+set r = 0
+while r < 5000:
+    set e = ys[r]
+    chk = chk + e.x + e.y
+    dchk = dchk + (r * 3.0) + (r * 4.0)
+    r = r + 1
+check(chk == dchk, "escaping struct sibling contents correct")
+
+say "108 ok"

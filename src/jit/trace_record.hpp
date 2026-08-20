@@ -213,6 +213,8 @@ public:
     std::unordered_map<int,int> sunkN;                        // orig -> element count
     std::unordered_map<size_t,int> sunkReadK;                 // INDEX_GET off -> constant index
     std::unordered_map<size_t,int> sunkListDest;              // LIST/TUPLE off -> dest orig (sunk)
+    std::unordered_map<size_t,int> sunkCtorDest;             // struct-ctor CALL off -> dest orig (sunk)
+    std::unordered_map<int,const void*> sunkShape;           // orig -> struct shape ptr (absent = list sink)
     std::vector<int> sunkFieldType;                           // scratch word -> field VT (set at LIST emit)
     std::unordered_set<int> definedSunk;                      // emit-time: sunk cells assigned so far
     std::vector<int> sunkOperand;                             // operand depth -> orig (when otype==VT_SUNK)
@@ -277,9 +279,17 @@ public:
         }
         for (int k = 0; k < 6; ++k) a.movMR(RSP, GP_OFF + k * 8, savedGp[k]);
         for (int k = 0; k < 8; ++k) a.movsdMX(RSP, XMM_OFF + k * 8, (Xmm)k);
-        a.movRR(RDI, RSP); a.addRI(RDI, BUF_OFF);
-        a.movAbs(RSI, (uint64_t)(int64_t)n);
-        a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeList);
+        auto sh = sunkShape.find(orig);
+        if (sh != sunkShape.end()) {                                   // struct: make a StructInstance
+            a.movAbs(RDI, (uint64_t)(uintptr_t)sh->second);            // arg0 = shape
+            a.movRR(RSI, RSP); a.addRI(RSI, BUF_OFF);                  // arg1 = &fields
+            a.movAbs(RDX, (uint64_t)(int64_t)n);                       // arg2 = nf
+            a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeStruct);
+        } else {                                                       // list
+            a.movRR(RDI, RSP); a.addRI(RDI, BUF_OFF);                  // arg0 = &fields
+            a.movAbs(RSI, (uint64_t)(int64_t)n);                       // arg1 = n
+            a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeList);
+        }
         a.callR(RAX);
         a.movMR(RSP, 8, RAX);
         for (int k = 0; k < 8; ++k) a.movsdXM((Xmm)k, RSP, XMM_OFF + k * 8);
@@ -856,12 +866,13 @@ inline bool RegionCompilerTrace::compile() {
       globalOrder.swap(keep); }
 
     // ---- allocation-sink detection (RFC-028 C1) ----
-    // A cell is SUNK iff every assignment to it is `LIST/TUPLE n; SET/DEFINE <cell>`
-    // with a fixed n in [1,8], every read is exactly `GET <cell>; CONST k; INDEX_GET`
-    // with k an integer constant in [0,n), it is never read before first assigned in
-    // the region (fresh each iteration), and it appears in no other op. Anything else
-    // makes it ESCAPE and stay on the normal allocating path. Numeric elements only
-    // is enforced later at emit (a non-numeric element declines the sink).
+    // A cell is SUNK iff every assignment to it is a numeric aggregate literal —
+    // `LIST/TUPLE n; SET/DEFINE` (list sink) or `<numeric-struct-ctor>(...); SET/DEFINE`
+    // (struct sink) — every read is exactly the matching constant accessor (`GET;
+    // CONST k; INDEX_GET` for a list, `GET; MEMBER_GET field` for a struct), it is
+    // never read before first assigned (fresh each iteration), and it appears in no
+    // other op. Anything else — pushed, returned, passed to a call, mutated, aliased,
+    // variable-indexed — makes it ESCAPE and stay on the normal allocating path.
     {
         std::vector<size_t> offs;
         for (size_t o = start; o < end; ) { int l = instrLength(chunk, o); if (l==0){offs.clear();break;} offs.push_back(o); o += l; }
@@ -870,8 +881,10 @@ inline bool RegionCompilerTrace::compile() {
             if (op==Op::GET_GLOBAL||op==Op::SET_GLOBAL||op==Op::DEFINE_GLOBAL) return (int)rdU16(o+1);
             return INT_MIN;
         };
-        std::unordered_set<int> escaped, assignedByList, readBeforeAssign, seenAssign;
+        std::unordered_set<int> escaped, assignedByList, assignedByStruct, listRead, structRead,
+                                readBeforeAssign, seenAssign;
         std::unordered_map<int,int> nOf;
+        std::unordered_map<int,const void*> shapeOf;
         std::unordered_map<int,std::vector<std::pair<size_t,int>>> readsOf;
         auto esc = [&](int k){ if (k!=INT_MIN) escaped.insert(k); };
         for (size_t j = 0; j < offs.size(); ++j) {
@@ -880,14 +893,16 @@ inline bool RegionCompilerTrace::compile() {
                 case Op::GET_LOCAL: case Op::GET_GLOBAL: {
                     int k = keyOf(op,o);
                     if (!seenAssign.count(k)) readBeforeAssign.insert(k);
-                    bool okPat = false; int idx = -1; size_t igOff = 0;
+                    bool okPat = false;
                     if (j+2 < offs.size() && (Op)chunk.code[offs[j+1]]==Op::CONST
-                        && (Op)chunk.code[offs[j+2]]==Op::INDEX_GET) {
+                        && (Op)chunk.code[offs[j+2]]==Op::INDEX_GET) {          // list read
                         const Value& cv = chunk.consts[rdU16(offs[j+1]+1)];
-                        if (cv.tag()==VKind::INT) { idx=(int)cv.asInt(); igOff=offs[j+2]; okPat = (idx>=0); }
+                        if (cv.tag()==VKind::INT && cv.asInt()>=0) { okPat=true; listRead.insert(k); readsOf[k].push_back({offs[j+2], (int)cv.asInt()}); }
+                    } else if (j+1 < offs.size() && (Op)chunk.code[offs[j+1]]==Op::MEMBER_GET
+                               && memberSlot.count(offs[j+1])) {                 // struct field read (numeric)
+                        okPat = true; structRead.insert(k);
                     }
-                    if (okPat) readsOf[k].push_back({igOff, idx});
-                    else       esc(k);
+                    if (!okPat) esc(k);
                     break;
                 }
                 case Op::SET_LOCAL: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL: {
@@ -898,6 +913,11 @@ inline bool RegionCompilerTrace::compile() {
                         if (n<1 || n>8) esc(k);
                         else { assignedByList.insert(k);
                                auto it=nOf.find(k); if (it!=nOf.end() && it->second!=n) esc(k); else nOf[k]=n; }
+                    } else if (prev==Op::CALL && structShapeAt.count(offs[j-1])) {
+                        int n = (int)chunk.code[offs[j-1]+1];                     // argc == field count
+                        if (n<1 || n>8) esc(k);
+                        else { assignedByStruct.insert(k); shapeOf[k]=structShapeAt[offs[j-1]];
+                               auto it=nOf.find(k); if (it!=nOf.end() && it->second!=n) esc(k); else nOf[k]=n; }
                     } else esc(k);
                     break;
                 }
@@ -907,31 +927,46 @@ inline bool RegionCompilerTrace::compile() {
                 default: break;
             }
         }
-        std::vector<int> cand(assignedByList.begin(), assignedByList.end());
-        std::sort(cand.begin(), cand.end());
+        std::vector<int> cand;
+        for (int k : assignedByList) cand.push_back(k);
+        for (int k : assignedByStruct) cand.push_back(k);
+        std::sort(cand.begin(), cand.end()); cand.erase(std::unique(cand.begin(),cand.end()), cand.end());
         int wordCursor = 0;
         for (int k : cand) {
             if (escaped.count(k) || readBeforeAssign.count(k)) continue;
+            bool isL = assignedByList.count(k), isS = assignedByStruct.count(k);
+            if (isL == isS) continue;                          // must be exactly one kind
+            if (isL && structRead.count(k)) continue;          // read kind must match assign kind
+            if (isS && listRead.count(k))   continue;
             int n = nOf[k];
-            bool idxOk = true;
-            auto rit = readsOf.find(k);
-            if (rit != readsOf.end()) for (auto& rk : rit->second) if (rk.second >= n) { idxOk = false; break; }
-            if (!idxOk) continue;
-            // numeric elements only (v1): inspect the recorded list so a sunk field is
-            // never a GC pointer. A non-numeric or shape-mismatched temp stays on the
-            // allocating path rather than declining the whole region.
             const Value* bv = (k >= 0) ? &rtGlobals[k] : &rtSlots[-2 - k];
-            if (!bv->isObj() || !(bv->isObjType(ObjectType::LIST) || bv->isObjType(ObjectType::TUPLE))) continue;
-            auto* lst = static_cast<ListObject*>(bv->asObj());
-            if ((int)lst->elements.size() != n) continue;
-            bool allNum = true;
-            for (auto& e : lst->elements) { VKind t = e.tag(); if (t != VKind::INT && t != VKind::FLOAT) { allNum = false; break; } }
-            if (!allNum) continue;
+            if (!bv->isObj()) continue;
+            // numeric fields/elements only (v1): a sunk field is then never a GC
+            // pointer. A non-numeric or shape-mismatched temp stays on the allocating
+            // path rather than declining the whole region.
+            if (isL) {
+                if (!(bv->isObjType(ObjectType::LIST) || bv->isObjType(ObjectType::TUPLE))) continue;
+                auto* lst = static_cast<ListObject*>(bv->asObj());
+                if ((int)lst->elements.size() != n) continue;
+                bool allNum = true, idxOk = true;
+                for (auto& e : lst->elements) { VKind t = e.tag(); if (t != VKind::INT && t != VKind::FLOAT) { allNum=false; break; } }
+                auto rit = readsOf.find(k);
+                if (rit != readsOf.end()) for (auto& rk : rit->second) if (rk.second >= n) { idxOk=false; break; }
+                if (!allNum || !idxOk) continue;
+            } else {
+                if (!bv->isObjType(ObjectType::STRUCT)) continue;
+                auto* si = static_cast<StructInstanceObject*>(bv->asObj());
+                if ((int)si->slots.size() != n) continue;
+                bool allNum = true;
+                for (auto& e : si->slots) { VKind t = e.tag(); if (t != VKind::INT && t != VKind::FLOAT) { allNum=false; break; } }
+                if (!allNum) continue;
+            }
             if (wordCursor + n > SINK_SCRATCH_WORDS) continue;
             sunkBase[k] = wordCursor; sunkN[k] = n; wordCursor += n;
             haveSunk = true;
             if (k <= -2) sunkNeedsSlots = true;
-            if (rit != readsOf.end()) for (auto& rk : rit->second) sunkReadK[rk.first] = rk.second;
+            if (isS) sunkShape[k] = shapeOf[k];
+            if (isL) { auto rit = readsOf.find(k); if (rit != readsOf.end()) for (auto& rk : rit->second) sunkReadK[rk.first] = rk.second; }
         }
         for (size_t j = 0; j < offs.size(); ++j) {
             Op op = (Op)chunk.code[offs[j]];
@@ -940,6 +975,7 @@ inline bool RegionCompilerTrace::compile() {
                 if (sunkBase.count(k)) {
                     Op prev = (Op)chunk.code[offs[j-1]];
                     if (prev==Op::LIST || prev==Op::TUPLE) sunkListDest[offs[j-1]] = k;
+                    else if (prev==Op::CALL)               sunkCtorDest[offs[j-1]] = k;
                 }
             }
         }
@@ -1299,6 +1335,14 @@ inline bool RegionCompilerTrace::compile() {
                 break;
             }
             case Op::MEMBER_GET: {
+                if (otype[depth-1] == VT_SUNK) {   // scalar-replaced struct: read a field from scratch
+                    if (!memberSlot.count(off)) { ok = false; break; }
+                    int w = sunkBase[sunkOperand[depth-1]] + memberSlot[off];
+                    int soff = (int)offsetof(JitCtx, sinkScratch) + w * 8;
+                    if (sunkFieldType[w] == VT_NUM) { a.movsdXM(xm(depth-1), R_CTX, soff); otype[depth-1] = VT_NUM; }
+                    else                            { a.movRM(gp(depth-1), R_CTX, soff); otype[depth-1] = sunkFieldType[w]; }
+                    break;
+                }
                 // [obj] -> obj.field. Base is a pinned VT_STRUCT (shape guarded in
                 // the prologue), so no re-guard: extract the instance, load the
                 // inline-Value slot, and guard the field's recorded numeric type
@@ -1635,6 +1679,23 @@ inline bool RegionCompilerTrace::compile() {
                         // shape pointer. Fields are the argc args (already in shape
                         // order). Result is the raw struct word (VT_WORD), usable as a
                         // member base (guardStructPtr) or a stored value.
+                        if (haveSunk && sunkCtorDest.count(off)) {
+                            // sunk struct: scalar-replace the fields into scratch (in
+                            // shape order == arg order), leave a VT_SUNK placeholder. The
+                            // callee guard above already ran; numeric fields only.
+                            int orig = sunkCtorDest[off], block = sunkBase[orig];
+                            for (int k = 0; k < argc; ++k) {
+                                int slot = depth - argc + k, t = otype[slot];
+                                if (t != VT_INT && t != VT_NUM) { ok = false; break; }
+                                int soff = (int)offsetof(JitCtx, sinkScratch) + (block + k) * 8;
+                                if (t == VT_NUM) a.movsdMX(R_CTX, soff, xm(slot));
+                                else             a.movMR(R_CTX, soff, gp(slot));
+                                sunkFieldType[block + k] = t;
+                            }
+                            if (!ok) break;
+                            otype[calleeSlot] = VT_SUNK; sunkOperand[calleeSlot] = orig;
+                            depth -= argc; break;
+                        }
                         for (int k = 0; k < argc; ++k) {
                             int t = otype[depth - argc + k];
                             if (t == VT_STRUCT || t == VT_CALLEE) { ok = false; break; }
