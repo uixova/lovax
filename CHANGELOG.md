@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.1.0 — true division, `//` floor division, and single-binary bundling
+
+**Breaking — division semantics.** `/` is now **true division** and always yields a
+float: `7 / 2 == 3.5`, `1 / 3 == 0.333…`, `4 / 2 == 2.0`. Integer floor division
+moves to the new **`//`** operator (`7 // 2 == 3`, `-7 // 2 == -4`, toward −∞),
+which stays consistent with the floor `%`: `(a // b) * b + a % b == a`. This
+matches Python 3, Lua 5.4, and JavaScript, and removes the `1 / 3 == 0` footgun.
+`//=` is the matching compound assignment. Migration: any old `/` that meant
+integer floor division becomes `//`; a `/` you wanted as a real quotient now just
+works. (Lexer/parser/compiler gained `//` + a `FLOOR_DIV` opcode; the interpreter,
+the 16-byte fallback, and all three JIT tiers implement both — verified
+bit-identical across the differential matrix.)
+
+**Single-binary distribution — `lovax bundle` (RFC-027).** A Lovax program (net
+apps included) can ship as one self-contained executable:
+
+```bash
+lovax bundle game.lov -o game
+./game arg1 arg2      # no separate Lovax install; argv reach the app via os.args()
+```
+
+`bundle` copies the ~1.6 MB zero-dependency interpreter and appends the script as a
+trailer (`[binary][script][u64 length][magic]`); on startup the binary reads its own
+tail and, if the magic matches, runs the embedded script with the whole argv passed
+through — no Lovax CLI parsing. A plain interpreter has no trailer and behaves
+exactly as before. The model Deno `compile` / Bun `--compile` / Node SEA use, natural
+here because the interpreter is already a static binary. New `make bundle` gate + CI.
+
+**JIT.** Tuple literals `(a, b)` now trace (traceable allocation, like list/struct
+literals), closing another op-coverage tail; the trace-coverage gate guards it.
+
 ## v1.0.1 — test-hardening pass: four real bugs fixed
 
 A challenging-test round (torture goldens 60-69 + a differential harness +

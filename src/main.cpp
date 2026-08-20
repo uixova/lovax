@@ -17,7 +17,7 @@
 #include "utils/colors.hpp"
 #include "pkg.hpp"
 
-static const char* LOVAX_VERSION = "1.0.1";
+static const char* LOVAX_VERSION = "1.1.0";
 
 // ---- single-binary bundling (RFC-027) ---------------------------------------
 // `lovax bundle app.lov -o app` copies this interpreter and appends the script as

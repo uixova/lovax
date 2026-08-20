@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v1.0.1 — a three-tier JIT (register allocator → tracing compiler → template compiler, own zero-dependency x86-64 encoder), unboxed inline struct fields, exact int64 on an 8-byte NaN-boxed value, and a C++/C-ABI embedding bridge (RFC-025) for hosting Lovax inside an engine. Game loops now trace to native SSE. Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v1.1.0 — true division (`/`) with a new `//` floor operator, single-binary bundling (`lovax bundle`), a three-tier JIT (register allocator → tracing compiler → template compiler, own zero-dependency x86-64 encoder), unboxed inline struct fields, exact int64 on an 8-byte NaN-boxed value, and a C++/C-ABI embedding bridge (RFC-025) for hosting Lovax inside an engine. Game loops now trace to native SSE. Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 
@@ -120,6 +120,17 @@ lovax examples/dungeon.lov        # loot table + signals + save system
 lovax --version
 ```
 
+**Ship a single binary (RFC-027):**
+
+```bash
+lovax bundle game.lov -o game    # one self-contained executable — no install needed
+./game arg1 arg2                  # runs the embedded script; argv reach it via os.args()
+```
+
+`bundle` copies the interpreter and appends your script as a trailer, so an end
+user runs the result with nothing else installed — the model Deno `compile` and
+Bun `--compile` use. A plain `lovax` binary has no trailer and behaves as usual.
+
 ## Language Tour
 
 ### Variables — `set` defines, bare assignment updates
@@ -127,7 +138,7 @@ lovax --version
 ```lovax
 set speed = 10      # DEFINES a new variable
 speed = 20          # UPDATES an existing one
-speed += 5          # compound: += -= *= /= %=
+speed += 5          # compound: += -= *= /= //= %=
 
 score = 1           # ERROR! 'score' is not defined (typo protection)
 ```
@@ -206,7 +217,7 @@ error (call-depth limit 500) instead of a segfault.
 
 | Type | Example | Notes |
 |------|---------|-------|
-| `int` | `42`, `0xFF`, `0b1010`, `1_000_000` | 64-bit; `/` is floor division, consistent with floor `%`: `(a / b) * b + a % b == a` |
+| `int` | `42`, `0xFF`, `0b1010`, `1_000_000` | 64-bit; `/` is true division (always float: `7 / 2 == 3.5`), `//` is floor division consistent with floor `%`: `(a // b) * b + a % b == a` |
 | `float` | `3.14`, `1e6`, `2.5e-3` | 64-bit, scientific notation |
 | `string` | `"hi"`, `"""multi\nline"""` | UTF-8; indexing/length by code point |
 | `bool`, `null` | `true`, `false`, `null` | |
@@ -216,12 +227,12 @@ error (call-depth limit 500) instead of a segfault.
 
 | Category | Operators |
 |----------|-----------|
-| Arithmetic | `+ - * / % **` (`**` right-assoc: `2 ** 3 ** 2` = `512`) |
+| Arithmetic | `+ - * / // % **` (`/` true division → float; `//` floor division → int; `**` right-assoc: `2 ** 3 ** 2` = `512`) |
 | Comparison | `== != < > <= >=` (deep equality: `[1,[2]] == [1,[2]]`) |
 | Logic | `and or not` (short-circuit; `x or default` idiom works) |
 | Membership | `in` — `2 in [1,2]`, `"a" in "cat"`, `"k" in map`, `4 in range(0,10,2)` |
 | Bitwise | `& \| ^ ~ << >>` (ints only, Python precedence) |
-| Assignment | `= += -= *= /= %=` |
+| Assignment | `= += -= *= /= //= %=` |
 
 Truthiness (Python model): `null`, `false`, `0`, `0.0`, `""`, `[]`, `{}` → false.
 
