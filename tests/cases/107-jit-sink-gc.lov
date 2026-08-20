@@ -1,0 +1,49 @@
+# Sink under real GC pressure (RFC-028 C1): a sunk temporary co-existing with an
+# allocation in the same hot body. The push() grows a list and arms the collector,
+# so the trace's LOOP back-edge bails to run GC WHILE the sunk temp is live — the
+# JIT must materialize it into a real, rooted object first, or a collection frees
+# something still in use (ASan UAF) or corrupts the output (differential/bit-for-bit).
+# Two-way accumulation cross-check; heavy enough (>1000 iters) to trace and to make
+# GC fire many times, brutal under GC_STRESS (collect on every allocation).
+
+# ---- sunk temp [i, i*2] read by const index, next to a growing list ----
+set xs = []
+set acc = 0
+set direct = 0
+set i = 0
+while i < 5000:
+    set t = [i, i * 2]           # sunk: const-index reads only, does not escape
+    push(xs, i)                  # allocates -> arms GC -> LOOP bail materializes t
+    acc = acc + t[0] + t[1]
+    direct = direct + i + (i * 2)
+    i = i + 1
+check(acc == direct, "sunk temp value survives GC firing each iter")
+check(len(xs) == 5000, "the co-allocated list is intact")
+
+# ---- sunk temp whose materialized object would be observed if it escaped: prove
+#      the const-index path and the escaping path (push of a SEPARATE list) don't
+#      interfere ----
+set ys = []
+set s2 = 0
+set d2 = 0
+set j = 0
+while j < 5000:
+    set a = [j + 1, j + 2, j + 3]   # sunk (const reads)
+    set b = [j, j]                  # escapes: pushed
+    push(ys, b)
+    s2 = s2 + a[0] + a[2]
+    d2 = d2 + (j + 1) + (j + 3)
+    j = j + 1
+check(s2 == d2, "sunk temp alongside an escaping sibling temp")
+check(len(ys) == 5000, "escaping sibling retained")
+set chk = 0
+set dchk = 0
+set r = 0
+while r < 5000:
+    set e = ys[r]
+    chk = chk + e[0] + e[1]
+    dchk = dchk + r + r
+    r = r + 1
+check(chk == dchk, "escaping sibling contents correct")
+
+say "107 ok"

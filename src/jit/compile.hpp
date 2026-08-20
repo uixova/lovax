@@ -52,6 +52,10 @@ struct JitCtx {
     const Value* consts;   // chunk constant pool
     const unsigned char* globalDefined;
     void* vm;              // VM* — the CALL trampoline needs it (Stage 3)
+    // Scratch for the trace JIT's allocation-sinking (RFC-028 C1): scalar-replaced
+    // aggregate fields live here for the duration of one native trace execution.
+    // Written before read within a single entry; never a GC root (numeric only).
+    uint64_t sinkScratch[32];
 };
 
 // The CALL trampoline (Stage 3): compiled code calls this to perform a call whose

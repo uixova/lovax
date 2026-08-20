@@ -34,6 +34,8 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <algorithm>
+#include <climits>
 #include "compile.hpp"          // JitCtx, Region, JitFn, JIT_* constants, Asm
 #include "trace_ir.hpp"         // linear typed SSA IR (the record target)
 
@@ -131,7 +133,8 @@ public:
     // in GP | a pinned list-object raw word (index base, GP) | a raw non-numeric
     // constant word e.g. a bool (GP, storable into a list, never arithmetic) |
     // a pinned struct-instance raw word (member base, GP, prologue-guarded shape).
-    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2, VT_OBJ = 3, VT_WORD = 4, VT_STRUCT = 5 };
+    enum VT { VT_INT = 0, VT_NUM = 1, VT_CALLEE = 2, VT_OBJ = 3, VT_WORD = 4, VT_STRUCT = 5,
+              VT_SUNK = 6 };   // a scalar-replaced (sunk) aggregate operand: fields live in scratch
 
     const Chunk& chunk;
     size_t start, end;
@@ -195,10 +198,31 @@ public:
     std::unordered_map<size_t, int>          intrinsicAt;   // CALL off -> intrinsic (1=sqrt..5=push,6=struct)
     std::unordered_map<size_t, const void*>  structShapeAt; // CALL off -> StructShapeObject* for make-struct
 
+    // ---- allocation sinking (RFC-028 C1): a cell assigned ONLY by a numeric
+    // list/tuple literal and read ONLY by a constant index (then dropped) is a
+    // non-escaping aggregate. Instead of allocating a heap list per iteration, its
+    // fields are scalar-replaced into a per-region scratch buffer (JitCtx.sinkScratch);
+    // a constant-index read pulls the field straight from scratch (no alloc, no C
+    // call, no per-read type guard). On a side-exit where the cell is live, the
+    // aggregate is MATERIALIZED into a real list and written to its interpreter slot,
+    // so the resumed interpreter sees exactly the object it expects. Numeric elements
+    // only (int/float), so a sunk field is never a GC pointer -> no rooting concern.
+    // Keyed by the cell-origin encoding (global idx >= 0, local as -(2+slot)).
+    static constexpr int SINK_SCRATCH_WORDS = 32;             // must match JitCtx.sinkScratch[]
+    std::unordered_map<int,int> sunkBase;                     // orig -> first scratch word index
+    std::unordered_map<int,int> sunkN;                        // orig -> element count
+    std::unordered_map<size_t,int> sunkReadK;                 // INDEX_GET off -> constant index
+    std::unordered_map<size_t,int> sunkListDest;              // LIST/TUPLE off -> dest orig (sunk)
+    std::vector<int> sunkFieldType;                           // scratch word -> field VT (set at LIST emit)
+    std::unordered_set<int> definedSunk;                      // emit-time: sunk cells assigned so far
+    std::vector<int> sunkOperand;                             // operand depth -> orig (when otype==VT_SUNK)
+    bool haveSunk = false, sunkNeedsSlots = false;
+
     RegionCompilerTrace(const Chunk& c, size_t s, size_t e,
                         const Value* sl, const Value* gl, const unsigned char* def)
         : chunk(c), start(s), end(e), rtSlots(sl), rtGlobals(gl), rtDefined(def),
-          otype(16, VT_INT) {}
+          otype(16, VT_INT), sunkOperand(16, -1),
+          sunkFieldType(SINK_SCRATCH_WORDS, VT_INT) {}
 
     Label& labelAt(size_t off) { return labels[off]; }
     uint16_t rdU16(size_t off) const {
@@ -228,8 +252,42 @@ public:
             }
         }
         if (depth > 0) a.addRI(R_SP, depth * 8);
+        // materialize-on-exit: every sunk aggregate defined so far becomes a real
+        // list rooted in its interpreter slot, so the resumed interpreter sees the
+        // object it expects. Operands are already flushed above; the framed make
+        // call protects the pinned cells (bailTail reads them next). Cold path.
+        if (haveSunk) for (int orig : definedSunk) materializeSunk(orig);
         a.movAbs(RAX, (uint64_t)bytecodeOff);
         a.jmp(bailTail);
+    }
+    // Rebuild a sunk aggregate `orig` from its scratch fields into a real list and
+    // store the boxed word to the cell's interpreter memory (global root or frame
+    // local). Frame mirrors the LIST op so pinned cells + the XMM file survive the
+    // C call; R_CTX/R_GLOBALS/R_SLOTS are callee-saved and survive it too.
+    void materializeSunk(int orig) {
+        int n = sunkN[orig], block = sunkBase[orig];
+        const int GP_OFF = 16, XMM_OFF = 64, BUF_OFF = 128, FRAME = 192;
+        static const Reg savedGp[6] = { RSI, RDI, R8, R9, R10, R11 };
+        a.movRR(RAX, RSP); a.andRI(RSP, -16); a.subRI(RSP, FRAME);
+        a.movMR(RSP, 0, RAX);
+        for (int k = 0; k < n; ++k) {
+            int soff = (int)offsetof(JitCtx, sinkScratch) + (block + k) * 8;
+            if (sunkFieldType[block + k] == VT_INT) { a.movRM(RAX, R_CTX, soff); boxTo(RDX, RAX); a.movMR(RSP, BUF_OFF + k * 8, RDX); }
+            else                                    { a.movRM(RDX, R_CTX, soff); a.movMR(RSP, BUF_OFF + k * 8, RDX); }  // VT_NUM: double bits are the value word
+        }
+        for (int k = 0; k < 6; ++k) a.movMR(RSP, GP_OFF + k * 8, savedGp[k]);
+        for (int k = 0; k < 8; ++k) a.movsdMX(RSP, XMM_OFF + k * 8, (Xmm)k);
+        a.movRR(RDI, RSP); a.addRI(RDI, BUF_OFF);
+        a.movAbs(RSI, (uint64_t)(int64_t)n);
+        a.movAbs(RAX, (uint64_t)(uintptr_t)&Lovax::lovaxJitMakeList);
+        a.callR(RAX);
+        a.movMR(RSP, 8, RAX);
+        for (int k = 0; k < 8; ++k) a.movsdXM((Xmm)k, RSP, XMM_OFF + k * 8);
+        for (int k = 0; k < 6; ++k) a.movRM(savedGp[k], RSP, GP_OFF + k * 8);
+        a.movRM(RAX, RSP, 8);
+        a.movRM(RSP, RSP, 0);
+        if (orig >= 0) a.movMR(R_GLOBALS, orig * 8, RAX);
+        else           a.movMR(R_SLOTS, (-2 - orig) * 8, RAX);
     }
     void guardUnboxInt(Reg r, Label& bail) {
         a.movRR(RCX, r); a.shrRI(RCX, JIT_TAG_SHIFT);
@@ -797,6 +855,103 @@ inline bool RegionCompilerTrace::compile() {
       for (int g : globalOrder) if (!calleeGlobals.count(g)) keep.push_back(g);
       globalOrder.swap(keep); }
 
+    // ---- allocation-sink detection (RFC-028 C1) ----
+    // A cell is SUNK iff every assignment to it is `LIST/TUPLE n; SET/DEFINE <cell>`
+    // with a fixed n in [1,8], every read is exactly `GET <cell>; CONST k; INDEX_GET`
+    // with k an integer constant in [0,n), it is never read before first assigned in
+    // the region (fresh each iteration), and it appears in no other op. Anything else
+    // makes it ESCAPE and stay on the normal allocating path. Numeric elements only
+    // is enforced later at emit (a non-numeric element declines the sink).
+    {
+        std::vector<size_t> offs;
+        for (size_t o = start; o < end; ) { int l = instrLength(chunk, o); if (l==0){offs.clear();break;} offs.push_back(o); o += l; }
+        auto keyOf = [&](Op op, size_t o)->int {
+            if (op==Op::GET_LOCAL||op==Op::SET_LOCAL) return -2 - (int)rdU16(o+1);
+            if (op==Op::GET_GLOBAL||op==Op::SET_GLOBAL||op==Op::DEFINE_GLOBAL) return (int)rdU16(o+1);
+            return INT_MIN;
+        };
+        std::unordered_set<int> escaped, assignedByList, readBeforeAssign, seenAssign;
+        std::unordered_map<int,int> nOf;
+        std::unordered_map<int,std::vector<std::pair<size_t,int>>> readsOf;
+        auto esc = [&](int k){ if (k!=INT_MIN) escaped.insert(k); };
+        for (size_t j = 0; j < offs.size(); ++j) {
+            size_t o = offs[j]; Op op = (Op)chunk.code[o];
+            switch (op) {
+                case Op::GET_LOCAL: case Op::GET_GLOBAL: {
+                    int k = keyOf(op,o);
+                    if (!seenAssign.count(k)) readBeforeAssign.insert(k);
+                    bool okPat = false; int idx = -1; size_t igOff = 0;
+                    if (j+2 < offs.size() && (Op)chunk.code[offs[j+1]]==Op::CONST
+                        && (Op)chunk.code[offs[j+2]]==Op::INDEX_GET) {
+                        const Value& cv = chunk.consts[rdU16(offs[j+1]+1)];
+                        if (cv.tag()==VKind::INT) { idx=(int)cv.asInt(); igOff=offs[j+2]; okPat = (idx>=0); }
+                    }
+                    if (okPat) readsOf[k].push_back({igOff, idx});
+                    else       esc(k);
+                    break;
+                }
+                case Op::SET_LOCAL: case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL: {
+                    int k = keyOf(op,o); seenAssign.insert(k);
+                    Op prev = (j>0) ? (Op)chunk.code[offs[j-1]] : Op::HALT;
+                    if (prev==Op::LIST || prev==Op::TUPLE) {
+                        int n = (int)rdU16(offs[j-1]+1);
+                        if (n<1 || n>8) esc(k);
+                        else { assignedByList.insert(k);
+                               auto it=nOf.find(k); if (it!=nOf.end() && it->second!=n) esc(k); else nOf[k]=n; }
+                    } else esc(k);
+                    break;
+                }
+                case Op::FOR_NEXT: esc(-2 - (int)rdU16(o+2)); break;
+                case Op::LGET2: esc(-2 - (int)rdU16(o+1)); esc(-2 - (int)rdU16(o+3)); break;
+                case Op::LGET_ADD_I: case Op::LGET_SUB_I: esc(-2 - (int)rdU16(o+1)); break;
+                default: break;
+            }
+        }
+        std::vector<int> cand(assignedByList.begin(), assignedByList.end());
+        std::sort(cand.begin(), cand.end());
+        int wordCursor = 0;
+        for (int k : cand) {
+            if (escaped.count(k) || readBeforeAssign.count(k)) continue;
+            int n = nOf[k];
+            bool idxOk = true;
+            auto rit = readsOf.find(k);
+            if (rit != readsOf.end()) for (auto& rk : rit->second) if (rk.second >= n) { idxOk = false; break; }
+            if (!idxOk) continue;
+            // numeric elements only (v1): inspect the recorded list so a sunk field is
+            // never a GC pointer. A non-numeric or shape-mismatched temp stays on the
+            // allocating path rather than declining the whole region.
+            const Value* bv = (k >= 0) ? &rtGlobals[k] : &rtSlots[-2 - k];
+            if (!bv->isObj() || !(bv->isObjType(ObjectType::LIST) || bv->isObjType(ObjectType::TUPLE))) continue;
+            auto* lst = static_cast<ListObject*>(bv->asObj());
+            if ((int)lst->elements.size() != n) continue;
+            bool allNum = true;
+            for (auto& e : lst->elements) { VKind t = e.tag(); if (t != VKind::INT && t != VKind::FLOAT) { allNum = false; break; } }
+            if (!allNum) continue;
+            if (wordCursor + n > SINK_SCRATCH_WORDS) continue;
+            sunkBase[k] = wordCursor; sunkN[k] = n; wordCursor += n;
+            haveSunk = true;
+            if (k <= -2) sunkNeedsSlots = true;
+            if (rit != readsOf.end()) for (auto& rk : rit->second) sunkReadK[rk.first] = rk.second;
+        }
+        for (size_t j = 0; j < offs.size(); ++j) {
+            Op op = (Op)chunk.code[offs[j]];
+            if ((op==Op::SET_LOCAL||op==Op::SET_GLOBAL||op==Op::DEFINE_GLOBAL) && j>0) {
+                int k = keyOf(op, offs[j]);
+                if (sunkBase.count(k)) {
+                    Op prev = (Op)chunk.code[offs[j-1]];
+                    if (prev==Op::LIST || prev==Op::TUPLE) sunkListDest[offs[j-1]] = k;
+                }
+            }
+        }
+        for (auto& kv : sunkBase) {
+            int k = kv.first;
+            if (k <= -2) { int s = -2 - k; objBaseL.erase(s); dirtyL.erase(s); structBaseL.erase(s); localCell.erase(s);
+                           localOrder.erase(std::remove(localOrder.begin(),localOrder.end(),s), localOrder.end()); }
+            else         { objBaseG.erase(k); dirtyG.erase(k); structBaseG.erase(k); globalCell.erase(k);
+                           globalOrder.erase(std::remove(globalOrder.begin(),globalOrder.end(),k), globalOrder.end()); }
+        }
+    }
+
     // Build cells with their runtime-observed types.
     auto addCell = [&](bool isGlobal, int idx, int pinned) -> bool {
         const Value& v = isGlobal ? rtGlobals[idx] : rtSlots[idx];
@@ -864,6 +1019,7 @@ inline bool RegionCompilerTrace::compile() {
     if (numGpPinned + maxDepth > (int)gpPool.size())  return false;
     if (numXmmPinned + maxDepth > (int)xmmPool.size()) return false;
     if (maxDepth + 1 > (int)otype.size()) otype.assign(maxDepth + 2, VT_INT);
+    if (maxDepth + 1 > (int)sunkOperand.size()) sunkOperand.assign(maxDepth + 2, -1);
 
     // LICM begin-caching eligibility (pinned-ness is now final after demotion): a
     // base qualifies if it is pinned and EVERY one of its accesses is ABC-safe, so
@@ -885,7 +1041,7 @@ inline bool RegionCompilerTrace::compile() {
     // ---- prologue: save regs, load ctx, guard + load pinned cells ----
     a.pushR(RBX); a.pushR(RBP); a.pushR(R12); a.pushR(R13); a.pushR(R14); a.pushR(R15);
     a.movRR(R_CTX, RDI);
-    if (haveLocals) a.movRM(R_SLOTS, R_CTX, offsetof(JitCtx, slots));
+    if (haveLocals || sunkNeedsSlots) a.movRM(R_SLOTS, R_CTX, offsetof(JitCtx, slots));
     a.movRM(R_SP,      R_CTX, offsetof(JitCtx, sp));
     a.movRM(R_GLOBALS, R_CTX, offsetof(JitCtx, globals));
 
@@ -991,13 +1147,21 @@ inline bool RegionCompilerTrace::compile() {
 
         switch (op) {
             case Op::GET_LOCAL: {
-                int ci = localCell[(int)rdU16(off + 1)];
+                int slot = (int)rdU16(off + 1);
+                if (haveSunk && sunkBase.count(-2 - slot)) {   // sunk aggregate: virtual push
+                    otype[depth] = VT_SUNK; sunkOperand[depth] = -2 - slot; depth++; break;
+                }
+                int ci = localCell[slot];
                 if (cells[ci].vt == VT_NUM) a.movsdRR(xm(depth), xmCell(ci));
                 else                        a.movRR(gp(depth), gpCell(ci));
                 otype[depth] = cells[ci].vt; depth++; break;
             }
             case Op::SET_LOCAL: {
-                int ci = localCell[(int)rdU16(off + 1)];
+                int sslot = (int)rdU16(off + 1);
+                if (haveSunk && sunkBase.count(-2 - sslot)) {  // store the sunk list: scratch already holds it
+                    definedSunk.insert(-2 - sslot); depth--; break;
+                }
+                int ci = localCell[sslot];
                 if (cells[ci].vt == VT_NUM) { if (otype[depth-1] != VT_NUM) ok = false; else a.movsdRR(xmCell(ci), xm(depth-1)); }
                 else if (cells[ci].vt == VT_STRUCT) {   // reassign the entity pointer (raw word)
                     if (otype[depth-1] != VT_STRUCT && otype[depth-1] != VT_WORD) ok = false;
@@ -1009,6 +1173,9 @@ inline bool RegionCompilerTrace::compile() {
             }
             case Op::GET_GLOBAL: {
                 int g = (int)rdU16(off + 1);
+                if (haveSunk && sunkBase.count(g)) {           // sunk aggregate: virtual push
+                    otype[depth] = VT_SUNK; sunkOperand[depth] = g; depth++; break;
+                }
                 if (calleeGlobals.count(g)) {
                     a.movRM(gp(depth), R_GLOBALS, g * 8);
                     otype[depth] = VT_CALLEE; depth++; break;
@@ -1044,7 +1211,11 @@ inline bool RegionCompilerTrace::compile() {
                 otype[depth] = cells[ci].vt; depth++; break;
             }
             case Op::SET_GLOBAL: case Op::DEFINE_GLOBAL: {
-                int ci = globalCell[(int)rdU16(off + 1)];
+                int gslot = (int)rdU16(off + 1);
+                if (haveSunk && sunkBase.count(gslot)) {  // store the sunk list: scratch already holds it
+                    definedSunk.insert(gslot); depth--; break;
+                }
+                int ci = globalCell[gslot];
                 if (cells[ci].vt == VT_STRUCT) {         // reassign the entity pointer (raw word)
                     if (otype[depth-1] != VT_STRUCT && otype[depth-1] != VT_WORD) { ok = false; break; }
                     if (cells[ci].pinned) a.movRR(gpCell(ci), gp(depth-1));
@@ -1163,6 +1334,14 @@ inline bool RegionCompilerTrace::compile() {
                 depth -= 2; break;
             }
             case Op::INDEX_GET: {
+                if (otype[depth-2] == VT_SUNK) {   // scalar-replaced field: read straight from scratch
+                    if (!sunkReadK.count(off)) { ok = false; break; }
+                    int w = sunkBase[sunkOperand[depth-2]] + sunkReadK[off];
+                    int soff = (int)offsetof(JitCtx, sinkScratch) + w * 8;
+                    if (sunkFieldType[w] == VT_NUM) { a.movsdXM(xm(depth-2), R_CTX, soff); otype[depth-2] = VT_NUM; }
+                    else                            { a.movRM(gp(depth-2), R_CTX, soff); otype[depth-2] = sunkFieldType[w]; }
+                    depth--; break;
+                }
                 if (otype[depth-2] != VT_OBJ) { ok = false; break; }
                 ensureInt(depth - 1); if (!ok) break;
                 { bool safe = abcSafeAccess.count(off) != 0;
@@ -1260,6 +1439,24 @@ inline bool RegionCompilerTrace::compile() {
                 // as roots. Frame (192B, 16-aligned): [0]=orig RSP, [8]=result,
                 // [16..64)=6 caller-saved GP, [64..128)=XMM0-7, [128..192)=elem buffer.
                 int n = (int)rdU16(off + 1);
+                if (haveSunk && sunkListDest.count(off)) {
+                    // sunk aggregate: no alloc, no C call. Scalar-replace the elements
+                    // into the region scratch (native form; type statically known), and
+                    // leave a virtual VT_SUNK placeholder. Numeric elements only.
+                    int orig = sunkListDest[off], block = sunkBase[orig];
+                    for (int k = 0; k < n; ++k) {
+                        int slot = depth - n + k, t = otype[slot];
+                        if (t != VT_INT && t != VT_NUM) { ok = false; break; }
+                        int soff = (int)offsetof(JitCtx, sinkScratch) + (block + k) * 8;
+                        if (t == VT_NUM) a.movsdMX(R_CTX, soff, xm(slot));   // store double bits
+                        else             a.movMR(R_CTX, soff, gp(slot));     // store unboxed int
+                        sunkFieldType[block + k] = t;
+                    }
+                    if (!ok) break;
+                    int res = depth - n;
+                    otype[res] = VT_SUNK; sunkOperand[res] = orig; depth += 1 - n;
+                    break;
+                }
                 for (int k = 0; k < n; ++k) {
                     int t = otype[depth - n + k];
                     if (t == VT_STRUCT || t == VT_CALLEE) { ok = false; break; }
@@ -1596,6 +1793,9 @@ inline bool RegionCompilerTrace::compile() {
     }
 
     // ---- normal exit + shared writeback tail ----
+    // materialize every sunk aggregate so code after the region sees real objects
+    // in their slots (same rooting guarantee as the side-exit path).
+    if (haveSunk) for (int orig : definedSunk) materializeSunk(orig);
     a.movAbs(RAX, (uint64_t)end);
     a.jmp(bailTail);
 
