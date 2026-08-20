@@ -153,5 +153,23 @@ $H
 $F
 say s"
 
+# Allocation-sinking shapes (RFC-028 C1): a non-escaping temp read only by a
+# constant accessor must still trace (the region compiles; the sink runs inside it).
+check_traces "sunk list temp"        "set s=0
+$H
+    set t = [i, i+1, i+2]
+    s = s + t[0] + t[2]
+$F
+say s"
+check_traces "sunk struct temp"      "struct V:
+    x = 0.0
+    hp = 0
+set s=0.0
+$H
+    set v = V(i*1.0, i+1)
+    s = s + v.x + v.hp
+$F
+say floor(s)"
+
 echo "trace_coverage: $fail failure(s)"
 [ "$fail" -eq 0 ] && echo "TRACE COVERAGE GATE PASSED" || exit 1
