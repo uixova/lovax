@@ -6,7 +6,7 @@
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
-*Current version: v1.1.0 — true division (`/`) with a new `//` floor operator, single-binary bundling (`lovax bundle`), a three-tier JIT (register allocator → tracing compiler → template compiler, own zero-dependency x86-64 encoder), unboxed inline struct fields, exact int64 on an 8-byte NaN-boxed value, and a C++/C-ABI embedding bridge (RFC-025) for hosting Lovax inside an engine. Game loops now trace to native SSE. Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
+*Current version: v1.2.0 — a three-tier JIT (register allocator → tracing compiler → template compiler, own zero-dependency x86-64 encoder) with **allocation sinking** so per-frame temporaries stop allocating, true division (`/`) with a new `//` floor operator, single-binary bundling (`lovax bundle`), unboxed inline struct fields, exact int64 on an 8-byte NaN-boxed value, and a C++/C-ABI embedding bridge (RFC-025) for hosting Lovax inside an engine. Game loops now trace to native SSE. Honest speed baseline below · [Türkçe aşağıda ⬇](#-türkçe)*
 
 </div>
 

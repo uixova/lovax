@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.2.0 — allocation sinking: per-frame temporaries stop allocating
+
+The trace JIT now performs **allocation sinking** (escape analysis + scalar
+replacement, the LuaJIT `lj_opt_sink` principle, our own implementation). A
+temporary aggregate that is built fresh each iteration and read only by a constant
+accessor, then dropped — the shape at the heart of per-frame game code — no longer
+allocates at all:
+
+- **List/tuple temp** — `tmp = [i, i+1, i+2]; sink += tmp[0] + tmp[2]`
+- **Struct temp** — `v = V(i*1.0, i*2.0, i+3); sink += v.x + v.hp`
+
+Such a cell (local OR global) is *sunk*: its numeric fields are scalar-replaced into
+a per-region scratch buffer, a constant-index / constant-field read pulls the value
+straight from scratch with no allocation, no C call, and no per-read type guard, and
+the loop body becomes pure register arithmetic. On any side-exit where the temp is
+live it is materialized back into a real, rooted object, so the interpreter always
+sees exactly what it expects. Anything that lets the aggregate escape — pushed into
+a list, returned, passed to a builtin, mutated, aliased, or variable-indexed — keeps
+it a real heap object, unchanged.
+
+Impact: the allocation-bound loops go from barely faster than the interpreter to
+register speed — a 3M-iteration list-temp loop drops **0.117s → 0.009s (~13×)** and
+the struct-temp equivalent **0.200s → 0.014s (~14×)**.
+
+Verified bit-identical to the interpreter across the whole battery — golden,
+differential (8B/16B/switch, JIT-on/off, RA/template/trace/numfn), GC_STRESS_INC
+bit-for-bit over every golden, GC_STRESS + ASan/UBSan, fuzz — with six new goldens
+(103–108) covering sinkable, escaping, bail-while-live, and sink-under-GC-pressure
+shapes as the oracle.
+
 ## v1.1.0 — true division, `//` floor division, and single-binary bundling
 
 **Breaking — division semantics.** `/` is now **true division** and always yields a
