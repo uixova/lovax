@@ -134,6 +134,8 @@ Bun `--compile` use. A plain `lovax` binary has no trailer and behaves as usual.
 
 > 📖 **Full documentation:** **[uixova.github.io/lovax](https://uixova.github.io/lovax/)** — a complete, bilingual (EN/TR) language reference with runnable examples (also at [docs/index.html](docs/index.html)).
 
+> 🎨 **Editor support:** a VS Code extension in [`editors/vscode`](editors/vscode) gives `.lov` files full syntax highlighting (also attached to each release as a `.vsix`).
+
 ## Language Tour
 
 ### Variables — `set` defines, bare assignment updates

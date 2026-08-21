@@ -56,8 +56,25 @@ jobs:
             ${{ matrix.asset }}
             ${{ matrix.asset }}.sha256
 
+  # Package the VS Code syntax-highlighting extension into a .vsix and ship it
+  # with the release, so `.lov` files get colours in the editor too.
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Package extension
+        working-directory: editors/vscode
+        run: npx --yes @vscode/vsce package
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lovax-vscode-extension
+          path: editors/vscode/*.vsix
+
   publish:
-    needs: build
+    needs: [build, extension]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
