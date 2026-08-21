@@ -201,6 +201,7 @@ footer a:hover{color:var(--accent-ink)}
     <nav class="nav-group">
       <div class="lbl">Runtime</div>
       <a href="#performance">Performance</a>
+      <a href="#internals">Under the hood</a>
       <a href="#embedding">Embedding</a>
       <a href="#bundle">Ship a binary</a>
     </nav>
@@ -518,6 +519,21 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
 <pre>lovax bundle game.lov -o game
 ./game arg1 arg2      # no Lovax install; argv reaches the app via os.args()</pre></div>
       <p>The same model behind Deno <code>compile</code> and Bun <code>--compile</code>, natural here because there was never a runtime to ship separately.</p>
+    </div></section>
+
+    <!-- UNDER THE HOOD -->
+    <section id="internals"><div class="wrap">
+      <div class="kicker">Runtime</div>
+      <h2>Under the hood</h2>
+      <p>Lovax is one C++17 translation unit with no third-party code. Source flows through a short, legible pipeline — each stage a small header you can read end to end:</p>
+      <ul>
+        <li><strong>Lexer → Parser</strong> turn <code>.lov</code> text into an AST, with located, fix-suggesting errors and a bounded recursion depth so pathological source can't smash the stack.</li>
+        <li><strong>Compiler</strong> lowers the AST to bytecode for a stack VM; <strong>the VM</strong> runs it on a computed-goto dispatch loop.</li>
+        <li><strong>Three-tier JIT</strong> lifts hot loops to native x86-64 through its own encoder: a register allocator for integer loops, a tracing compiler for float / struct / list loops (with allocation sinking), and a template compiler as the always-correct fallback.</li>
+        <li><strong>Garbage collector</strong> is a tracing, incremental collector with sub-millisecond pauses and a write barrier — tuned for a frame budget, not a batch job.</li>
+      </ul>
+      <p>Values are <strong>NaN-boxed</strong> into 8 bytes (a 16-byte tagged-union fallback exists for platforms without the pointer guarantee), and integers stay <strong>exact 64-bit</strong> — never silently demoted to a double. Every JIT tier is proven bit-identical to the interpreter across a differential matrix, sanitizers, and an adversarial torture suite; the interpreter is always the oracle.</p>
+      <div class="note"><span class="ic">✳</span><p>The JIT, GC and value model were <strong>studied, not copied</strong>, from the <a href="https://www.lua.org/">Lua 5.5</a> and <a href="https://github.com/python/cpython">CPython</a> source trees — reading how they solve a problem, then writing our own zero-dependency answer. <a href="https://luajit.org/">LuaJIT</a> is the north star for the tracing JIT.</p></div>
     </div></section>
 
     <footer><div class="wrap">
