@@ -19,16 +19,16 @@ jobs:
         include:
           - os: ubuntu-latest
             asset: lovax-linux-x64
-            flags: "-O3 -fno-gcse -fno-crossjumping -static"
+            flags: "-O3 -fno-gcse -fno-crossjumping -static -s"
           - os: macos-13          # Intel runner
             asset: lovax-macos-x64
-            flags: "-O3 -fno-gcse -fno-crossjumping"
+            flags: "-O3 -fno-gcse -fno-crossjumping -s"
           - os: macos-latest      # Apple Silicon runner
             asset: lovax-macos-arm64
-            flags: "-O3 -fno-gcse -fno-crossjumping"
+            flags: "-O3 -fno-gcse -fno-crossjumping -s"
           - os: windows-latest
             asset: lovax-windows-x64.exe
-            flags: "-O2"
+            flags: "-O2 -s"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
