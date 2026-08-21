@@ -326,22 +326,31 @@ say [1, 2] + [3]         # [1, 2, 3]
 say "cat" in "concat"    # true
 say 4 in range(0, 10, 2) # true</pre></div>
       <p>Comparison is deep: <code>[1,[2]] == [1,[2]]</code> is <code>true</code>. Logic (<code>and or not</code>) short-circuits, and truthiness follows Python — <code>null</code>, <code>false</code>, <code>0</code>, <code>""</code>, <code>[]</code>, <code>{}</code> are falsy.</p>
+      <h3>Null safety</h3>
+      <p><code>?.</code> reads a field only when the value isn't <code>null</code> (otherwise the whole chain is <code>null</code>), and <code>??</code> supplies a fallback for a <code>null</code> — together they replace a pile of guards.</p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">null-safety.lov</span></div>
+<pre>set weapon = player?.equipped?.name ?? "bare hands"
+
+set x = null
+say x ?? "fallback"          # fallback
+say has(map, "key")         # test a map key without throwing</pre></div>
     </div></section>
 
     <!-- CONTROL -->
     <section id="control"><div class="wrap">
       <div class="kicker">Language tour</div>
       <h2>Control flow</h2>
-      <p><code>if</code>/<code>else</code>, <code>while</code>, and <code>for … in</code> over any iterable — a range, list, string, or map's keys. <code>break</code> and <code>continue</code> work as you'd expect.</p>
+      <p><code>if</code> / <code>else if</code> / <code>else</code>, <code>while</code>, and <code>for … in</code> over any iterable — a range, list, string, or map's keys. <code>break</code> and <code>continue</code> work as you'd expect, and a one-line <strong>ternary</strong> is an expression.</p>
       <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">control.lov</span></div>
 <pre>set hp = 72
 if hp > 66:
     say "healthy"
+else if hp > 33:
+    say "hurt"
 else:
-    if hp > 33:
-        say "hurt"
-    else:
-        say "critical"
+    say "critical"
+
+set label = "low" if hp < 20 else "ok"    # ternary expression
 
 for item in ["sword", "shield", "potion"]:
     say item
@@ -351,20 +360,28 @@ while n < 5:
     if n == 3:
         break
     n += 1</pre></div>
+      <h3>Match</h3>
+      <p><code>match</code> tests a value against patterns — several per arm, with <code>_</code> as the catch-all.</p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">match.lov</span></div>
+<pre>match state:
+    "running":
+        say "active"
+    "paused", "waiting":     # multiple patterns share an arm
+        say "idle"
+    _:                       # wildcard
+        say "unknown"</pre></div>
     </div></section>
 
     <!-- FUNCTIONS -->
     <section id="functions"><div class="wrap">
       <div class="kicker">Language tour</div>
       <h2>Functions</h2>
-      <p>Declared with <code>fn</code>. They're first-class values, close over their scope, and return with <code>return</code> (or <code>null</code> by default).</p>
+      <p>Declared with <code>fn</code>. They're first-class values, close over their scope, take <strong>default parameters</strong>, and return with <code>return</code> (or <code>null</code> by default). Wrong argument counts are errors — arity is strict.</p>
       <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">functions.lov</span></div>
-<pre>fn clamp(x, lo, hi):
-    if x < lo:
-        return lo
-    if x > hi:
-        return hi
-    return x
+<pre>fn heal(target, amount = 10):        # default parameter
+    return "{target} +{amount} hp"
+say heal("hero")                     # hero +10 hp
+say heal("hero", 25)                 # hero +25 hp
 
 fn make_counter():
     set n = 0
@@ -376,6 +393,15 @@ fn make_counter():
 set next = make_counter()
 say next()   # 1
 say next()   # 2</pre></div>
+      <h3>Anonymous &amp; arrow</h3>
+      <p>Functions are values, so they pass into higher-order builtins like <code>filter</code> and <code>sort</code>. A single-expression body can use the arrow form.</p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">lambdas.lov</span></div>
+<pre>set is_even = fn(n):
+    return n % 2 == 0
+say filter([1, 2, 3, 4], is_even)    # [2, 4]
+
+set double = fn(x) -> x * 2          # arrow: single expression
+say double(21)                       # 42</pre></div>
     </div></section>
 
     <!-- STRUCTS -->
@@ -543,11 +569,11 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)obs.observe(el);});
 
   // ---- lightweight Lovax syntax highlighter ----
-  var KW=['set','fn','if','else','while','for','in','return','struct','enum','try','catch',
+  var KW=['set','fn','if','else','while','for','in','return','struct','enum','match','try','catch',
           'finally','throw','yield','spawn','resume','use','and','or','not','break','continue','this'];
   var LIT=['true','false','null'];
-  var BUILT=['say','len','push','range','sort','max','min','sum','floor','ceil','abs','sqrt',
-             'check','signal','connect','emit','pick_weighted','co_status','co_done'];
+  var BUILT=['say','len','push','range','sort','max','min','sum','floor','ceil','abs','sqrt','filter',
+             'has','text','check','signal','connect','emit','pick_weighted','co_status','co_done'];
   var kwRe=new RegExp('\\b('+KW.concat(LIT).join('|')+')\\b','g');
   var builtRe=new RegExp('\\b('+BUILT.join('|')+')\\b','g');
   function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
