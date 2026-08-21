@@ -9,218 +9,274 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
 :root{
-  --ground:#FBFAF7; --surface:#FFFFFF; --surface-2:#F5F2EC;
-  --ink:#221E17; --muted:#6E6656; --faint:#948B7B;
-  --accent:#B26E12; --accent-ink:#8A5307; --accent-soft:#F4E7CF; --accent-line:#E4CFA6;
-  --on-accent:#FFFFFF;
-  --border:#E8E2D6; --border-strong:#D9D1C2;
-  --k:#B26E12; --str:#3F7A4A; --num:#A35A1E; --com:#9A9384;
-  --shadow:0 1px 2px rgba(40,32,16,.04),0 8px 28px -12px rgba(60,44,16,.14);
-  --radius:14px; --maxread:760px;
+  --ground:#F4EFE3; --surface:#FFFFFF; --surface-2:#EDE6D5; --surface-3:#F9F5EC;
+  --ink:#1B160D; --muted:#655C49; --faint:#938974;
+  --accent:#B4530A; --accent-ink:#98430A; --accent-bri:#D9781E;
+  --accent-soft:#F6E1BF; --accent-line:#E6C48E; --accent-glow:rgba(180,83,10,.10);
+  --ember:#6E2C0B;
+  --on-accent:#FFF7EC;
+  --border:#E1D8C5; --border-strong:#CFC3A9;
+  --k:#B4530A; --str:#2F7A44; --num:#9A4E12; --com:#A79A80;
+  --shadow-sm:0 1px 2px rgba(60,42,14,.06);
+  --shadow:0 2px 4px rgba(60,42,14,.05),0 14px 34px -14px rgba(90,58,16,.24);
+  --radius:14px; --maxread:768px;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --ground:#141210; --surface:#1C1915; --surface-2:#22201A;
-    --ink:#ECE7DC; --muted:#9C9484; --faint:#736B5C;
-    --accent:#F0A63D; --accent-ink:#F4B85E; --accent-soft:#33291A; --accent-line:#4A3B23; --on-accent:#1A1408;
-    --border:#2C2820; --border-strong:#3A352B;
-    --k:#F0A63D; --str:#8FCF8F; --num:#E0A96A; --com:#7C7565;
-    --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 34px -14px rgba(0,0,0,.6);
+    --ground:#120F0B; --surface:#1B1712; --surface-2:#241F17; --surface-3:#171310;
+    --ink:#F1EADB; --muted:#A99E88; --faint:#776E5B;
+    --accent:#F0A63D; --accent-ink:#F5B95E; --accent-bri:#FFC169;
+    --accent-soft:#372A17; --accent-line:#523F20; --accent-glow:rgba(240,166,61,.12);
+    --ember:#F6C88C;
+    --on-accent:#1B1206;
+    --border:#2B2519; --border-strong:#3D3524;
+    --k:#F0A63D; --str:#93D293; --num:#E7AC6C; --com:#7E7560;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow:0 2px 4px rgba(0,0,0,.4),0 16px 40px -16px rgba(0,0,0,.7);
   }
 }
 :root[data-theme="dark"]{
-  --ground:#141210; --surface:#1C1915; --surface-2:#22201A;
-  --ink:#ECE7DC; --muted:#9C9484; --faint:#736B5C;
-  --accent:#F0A63D; --accent-ink:#F4B85E; --accent-soft:#33291A; --accent-line:#4A3B23; --on-accent:#1A1408;
-  --border:#2C2820; --border-strong:#3A352B;
-  --k:#F0A63D; --str:#8FCF8F; --num:#E0A96A; --com:#7C7565;
-  --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 34px -14px rgba(0,0,0,.6);
+  --ground:#120F0B; --surface:#1B1712; --surface-2:#241F17; --surface-3:#171310;
+  --ink:#F1EADB; --muted:#A99E88; --faint:#776E5B;
+  --accent:#F0A63D; --accent-ink:#F5B95E; --accent-bri:#FFC169;
+  --accent-soft:#372A17; --accent-line:#523F20; --accent-glow:rgba(240,166,61,.12);
+  --ember:#F6C88C;
+  --on-accent:#1B1206;
+  --border:#2B2519; --border-strong:#3D3524;
+  --k:#F0A63D; --str:#93D293; --num:#E7AC6C; --com:#7E7560;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow:0 2px 4px rgba(0,0,0,.4),0 16px 40px -16px rgba(0,0,0,.7);
 }
+/* i18n visibility */
+.lang-tr{display:none}
+:root[data-lang="tr"] .lang-en{display:none}
+:root[data-lang="tr"] .lang-tr{display:revert}
+
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:2rem}
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+html{scroll-behavior:smooth;scroll-padding-top:1.6rem}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 body{
-  margin:0;background:var(--ground);color:var(--ink);
+  margin:0;color:var(--ink);
+  background:
+    radial-gradient(1100px 520px at 78% -8%, var(--accent-glow), transparent 60%),
+    var(--ground);
   font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
-  font-size:16.5px;line-height:1.65;-webkit-font-smoothing:antialiased;
-  font-feature-settings:"liga" 1;
+  font-size:16.5px;line-height:1.66;-webkit-font-smoothing:antialiased;font-feature-settings:"liga" 1;
 }
 code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace}
 a{color:var(--accent-ink);text-decoration:none}
 a:hover{text-decoration:underline;text-underline-offset:3px}
-:focus-visible{outline:2.5px solid var(--accent);outline-offset:3px;border-radius:3px}
-h1,h2,h3{font-family:"Bricolage Grotesque",system-ui,sans-serif;text-wrap:balance;line-height:1.12;letter-spacing:-.015em}
+:focus-visible{outline:2.5px solid var(--accent);outline-offset:3px;border-radius:4px}
+h1,h2,h3,h4{font-family:"Bricolage Grotesque",system-ui,sans-serif;text-wrap:balance;line-height:1.12;letter-spacing:-.016em}
 
-/* ---- shell layout ---- */
-.shell{display:grid;grid-template-columns:264px minmax(0,1fr);gap:0;max-width:1240px;margin:0 auto}
-.sidebar{
-  position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
-  padding:1.9rem 1.3rem 3rem 1.9rem;border-right:1px solid var(--border);
-}
-.brand{display:flex;align-items:center;gap:.6rem;margin-bottom:.2rem}
-.brand .mark{font-size:1.55rem;line-height:1}
-.brand .word{font-family:"Bricolage Grotesque";font-weight:800;font-size:1.5rem;letter-spacing:-.02em}
-.brand .ver{font-size:.72rem;font-family:"IBM Plex Mono";color:var(--accent-ink);background:var(--accent-soft);
-  border:1px solid var(--accent-line);padding:.05rem .4rem;border-radius:999px;margin-left:.1rem}
-.tagline-side{color:var(--muted);font-size:.86rem;margin:.1rem 0 1.4rem}
-.nav-group{margin-top:1.3rem}
-.nav-group .lbl{font-size:.7rem;text-transform:uppercase;letter-spacing:.13em;color:var(--faint);
-  font-weight:600;margin-bottom:.5rem}
-.nav-group a{display:block;color:var(--muted);font-size:.9rem;padding:.24rem 0;border:0}
-.nav-group a:hover{color:var(--ink);text-decoration:none}
-.nav-group a.active{color:var(--accent-ink);font-weight:500}
-.themebtn{margin-top:1.7rem;display:inline-flex;align-items:center;gap:.45rem;cursor:pointer;
-  background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
-  font:inherit;font-size:.82rem;padding:.4rem .7rem;border-radius:999px}
-.themebtn:hover{color:var(--ink);border-color:var(--border-strong)}
+.shell{display:grid;grid-template-columns:278px minmax(0,1fr);max-width:1280px;margin:0 auto}
 
-.main{min-width:0;padding:0 clamp(1.1rem,4vw,3.4rem)}
+/* ---- sidebar ---- */
+.sidebar{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+  padding:1.7rem 1.1rem 3rem 1.8rem;border-right:1px solid var(--border);
+  background:linear-gradient(180deg,var(--surface-3),transparent 30%)}
+.brand{display:flex;align-items:center;gap:.55rem}
+.brand .mark{font-size:1.5rem;line-height:1;filter:drop-shadow(0 2px 6px var(--accent-glow))}
+.brand .word{font-family:"Bricolage Grotesque";font-weight:800;font-size:1.5rem;letter-spacing:-.03em}
+.brand .ver{font-size:.68rem;font-family:"IBM Plex Mono";color:var(--accent-ink);background:var(--accent-soft);
+  border:1px solid var(--accent-line);padding:.06rem .42rem;border-radius:999px}
+.tagline-side{color:var(--muted);font-size:.85rem;margin:.55rem 0 .2rem}
+.switchrow{display:flex;gap:.5rem;margin:1.2rem 0 .4rem}
+.pill{display:inline-flex;align-items:center;gap:.4rem;cursor:pointer;background:var(--surface-2);
+  border:1px solid var(--border);color:var(--muted);font:inherit;font-size:.78rem;font-weight:500;
+  padding:.34rem .7rem;border-radius:999px;transition:.15s}
+.pill:hover{color:var(--ink);border-color:var(--border-strong)}
+.pill .seg{padding:.05rem .3rem;border-radius:999px}
+.pill .seg.on{background:var(--accent);color:var(--on-accent);font-weight:600}
+
+nav.toc{margin-top:1.1rem}
+.toc .grp{font-size:.68rem;text-transform:uppercase;letter-spacing:.14em;color:var(--faint);
+  font-weight:700;margin:1.15rem 0 .45rem}
+.toc .item>a{display:flex;align-items:center;justify-content:space-between;gap:.4rem;
+  color:var(--muted);font-size:.9rem;padding:.32rem .55rem;border-radius:8px;position:relative}
+.toc .item>a:hover{color:var(--ink);background:var(--surface-2);text-decoration:none}
+.toc .item>a.active{color:var(--accent-ink);background:var(--accent-soft);font-weight:600}
+.toc .item>a .chev{font-size:.62rem;color:var(--faint);transition:transform .2s;flex-shrink:0}
+.toc .item.open>a .chev{transform:rotate(90deg);color:var(--accent-ink)}
+.toc .sub{overflow:hidden;max-height:0;transition:max-height .25s ease;
+  margin:.1rem 0 .1rem .95rem;border-left:1.5px solid var(--border);padding-left:.2rem}
+.toc .item.open .sub{max-height:280px}
+.toc .sub a{display:block;color:var(--faint);font-size:.83rem;padding:.24rem .55rem}
+.toc .sub a:hover{color:var(--ink);text-decoration:none}
+.toc .sub a.active{color:var(--accent-ink);font-weight:500}
+
+/* ---- main ---- */
+.main{min-width:0;padding:0 clamp(1.1rem,4vw,3.6rem)}
 .wrap{max-width:var(--maxread);margin:0 auto}
+section{padding:3.1rem 0;border-bottom:1px solid var(--border)}
+.kicker{display:inline-flex;align-items:center;gap:.5rem;font-family:"IBM Plex Mono";font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.12em;color:var(--accent-ink);font-weight:600;margin-bottom:.8rem}
+.kicker::before{content:"";width:22px;height:2px;background:var(--accent);border-radius:2px}
+section h2{font-size:2rem;font-weight:700;margin:0 0 .4rem}
+section h3{font-size:1.22rem;font-weight:600;margin:2.3rem 0 .5rem;scroll-margin-top:1.6rem;
+  padding-left:.7rem;border-left:3px solid var(--accent-line)}
+p{margin:.9rem 0}
+.main p,.main li{max-width:68ch}
+ul,ol{padding-left:1.25rem}li{margin:.4rem 0}
+strong{color:var(--ink);font-weight:600}
+p code,li code,td code{background:var(--surface-2);border:1px solid var(--border);
+  padding:.06em .4em;border-radius:5px;font-size:.85em;color:var(--accent-ink)}
 
 /* ---- hero ---- */
-.hero{padding:4.2rem 0 2.6rem;border-bottom:1px solid var(--border)}
-.eyebrow{font-family:"IBM Plex Mono";font-size:.78rem;letter-spacing:.04em;color:var(--accent-ink);
-  text-transform:uppercase;font-weight:500;margin-bottom:1rem}
-.hero h1{font-size:clamp(2.5rem,6vw,3.9rem);font-weight:700;margin:0 0 1.1rem}
-.hero h1 .lit{color:var(--accent)}
-.lede{font-size:1.24rem;line-height:1.5;color:var(--muted);max-width:36ch;margin:0 0 1.8rem}
+.hero{padding:4.6rem 0 3rem;position:relative}
+.eyebrow{font-family:"IBM Plex Mono";font-size:.76rem;letter-spacing:.03em;color:var(--accent-ink);
+  text-transform:uppercase;font-weight:600;margin-bottom:1.1rem;display:flex;align-items:center;gap:.55rem}
+.eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-glow)}
+.hero h1{font-size:clamp(2.6rem,6vw,4.1rem);font-weight:800;margin:0 0 1.2rem;letter-spacing:-.03em}
+.hero h1 .lit{color:var(--accent);position:relative}
+.lede{font-size:1.26rem;line-height:1.5;color:var(--muted);max-width:40ch;margin:0 0 2rem}
 .lede strong{color:var(--ink);font-weight:600}
 .cta-row{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center}
 .btn{display:inline-flex;align-items:center;gap:.5rem;font-weight:600;font-size:.95rem;
-  padding:.62rem 1.15rem;border-radius:10px;border:1px solid transparent}
-.btn.primary{background:var(--accent);color:var(--on-accent)}
-.btn.primary:hover{text-decoration:none;filter:brightness(1.05)}
+  padding:.68rem 1.25rem;border-radius:11px;border:1px solid transparent;transition:.15s}
+.btn.primary{background:var(--accent);color:var(--on-accent);box-shadow:0 6px 18px -6px var(--accent-glow),0 1px 0 rgba(255,255,255,.15) inset}
+.btn.primary:hover{text-decoration:none;background:var(--accent-bri)}
 .btn.ghost{background:var(--surface);border-color:var(--border-strong);color:var(--ink)}
 .btn.ghost:hover{text-decoration:none;border-color:var(--accent);color:var(--accent-ink)}
 
 /* ---- code ---- */
 .code{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
   overflow:hidden;box-shadow:var(--shadow);margin:1.5rem 0}
-.code .bar{display:flex;align-items:center;gap:.5rem;padding:.5rem .9rem;border-bottom:1px solid var(--border);
-  background:var(--surface-2)}
-.code .bar .dot{width:9px;height:9px;border-radius:50%;background:var(--border-strong)}
-.code .bar .fn{font-family:"IBM Plex Mono";font-size:.76rem;color:var(--muted);margin-left:.35rem}
-.code pre{margin:0;padding:1.05rem 1.15rem;overflow-x:auto;font-size:.9rem;line-height:1.7;tab-size:4}
+.code .bar{display:flex;align-items:center;gap:.55rem;padding:.55rem .95rem;border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,var(--surface-2),var(--surface))}
+.code .bar .dot{width:9px;height:9px;border-radius:50%;background:var(--accent-line)}
+.code .bar .dot:first-child{background:var(--accent)}
+.code .bar .fn{font-family:"IBM Plex Mono";font-size:.75rem;color:var(--muted);margin-left:.4rem}
+.code pre{margin:0;padding:1.1rem 1.2rem;overflow-x:auto;font-size:.9rem;line-height:1.7;tab-size:4}
 .code.plain pre{font-size:.87rem}
-.tok-k{color:var(--k);font-weight:500}
+.tok-k{color:var(--k);font-weight:600}
 .tok-s{color:var(--str)}
 .tok-n{color:var(--num)}
 .tok-c{color:var(--com);font-style:italic}
 .tok-b{color:var(--ink);font-weight:600}
-p code,li code,td code{background:var(--surface-2);border:1px solid var(--border);
-  padding:.06em .38em;border-radius:5px;font-size:.86em;color:var(--accent-ink)}
-
-/* ---- sections & prose ---- */
-section{padding:3rem 0;border-bottom:1px solid var(--border)}
-section h2{font-size:1.95rem;font-weight:700;margin:0 0 .3rem}
-section .kicker{font-family:"IBM Plex Mono";font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;
-  color:var(--accent-ink);margin-bottom:.7rem;font-weight:500}
-section h3{font-size:1.2rem;font-weight:600;margin:2.2rem 0 .4rem}
-p{margin:.9rem 0}
-.main p,.main li{max-width:68ch}
-ul,ol{padding-left:1.3rem}
-li{margin:.35rem 0}
-strong{color:var(--ink);font-weight:600}
 
 /* ---- feature grid ---- */
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin:1.6rem 0}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.15rem 1.2rem}
-.card .ic{font-size:1.15rem;margin-bottom:.5rem}
-.card h4{margin:0 0 .3rem;font-family:"Bricolage Grotesque";font-weight:600;font-size:1.02rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:1rem;margin:1.8rem 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:1.3rem 1.25rem;transition:.18s;position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--accent);
+  transform:scaleY(0);transform-origin:top;transition:transform .2s}
+.card:hover{transform:translateY(-3px);border-color:var(--border-strong);box-shadow:var(--shadow)}
+.card:hover::before{transform:scaleY(1)}
+.card .ic{display:inline-flex;width:38px;height:38px;align-items:center;justify-content:center;
+  font-size:1.1rem;background:var(--accent-soft);border:1px solid var(--accent-line);
+  border-radius:10px;margin-bottom:.75rem}
+.card h4{margin:0 0 .35rem;font-weight:600;font-size:1.04rem}
 .card p{margin:0;font-size:.9rem;color:var(--muted);max-width:none}
 
 /* ---- callout ---- */
-.note{display:flex;gap:.8rem;background:var(--accent-soft);border:1px solid var(--accent-line);
-  border-radius:12px;padding:.95rem 1.1rem;margin:1.5rem 0}
-.note .ic{color:var(--accent-ink);font-weight:700;flex-shrink:0}
-.note p{margin:0;font-size:.92rem}
-.note p:first-child{margin-top:0}
+.note{display:flex;gap:.85rem;background:var(--accent-soft);border:1px solid var(--accent-line);
+  border-radius:12px;padding:1rem 1.15rem;margin:1.6rem 0}
+.note .ic{color:var(--accent-ink);font-weight:700;flex-shrink:0;font-size:1.05rem}
+.note p{margin:0;font-size:.92rem;max-width:none}
 
 /* ---- table ---- */
-.tablewrap{overflow-x:auto;margin:1.4rem 0;border:1px solid var(--border);border-radius:var(--radius)}
+.tablewrap{overflow-x:auto;margin:1.5rem 0;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm)}
 table{border-collapse:collapse;width:100%;font-size:.9rem}
-th,td{text-align:left;padding:.62rem .9rem;border-bottom:1px solid var(--border)}
-th{background:var(--surface-2);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+th,td{text-align:left;padding:.66rem .95rem;border-bottom:1px solid var(--border)}
+th{background:var(--surface-2);font-weight:600;font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-3)}
 td.num{font-family:"IBM Plex Mono";font-variant-numeric:tabular-nums;text-align:right}
-.win{color:var(--str);font-weight:600}
+.win{color:var(--str);font-weight:700}
+
+/* ---- about ---- */
+.about-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:1.4rem;margin-top:1.6rem}
+.about-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.4rem}
+.stat{display:flex;flex-direction:column;gap:.15rem;padding:.7rem 0;border-bottom:1px solid var(--border)}
+.stat:last-child{border-bottom:0}
+.stat .v{font-family:"Bricolage Grotesque";font-weight:700;font-size:1.35rem;color:var(--accent-ink)}
+.stat .l{font-size:.82rem;color:var(--muted)}
+@media (max-width:680px){.about-grid{grid-template-columns:1fr}}
 
 /* ---- footer ---- */
-footer{padding:2.6rem 0 4rem;color:var(--muted);font-size:.88rem}
-footer a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
-footer a:hover{color:var(--accent-ink)}
+footer{padding:2.8rem 0 4rem;color:var(--muted);font-size:.88rem}
 .foot-top{display:flex;flex-wrap:wrap;gap:1.4rem;justify-content:space-between;align-items:baseline}
+footer a{color:var(--accent-ink)}
 
-/* ---- mobile ---- */
+/* ---- topbar / mobile ---- */
+.topbar{display:none}
 .menubtn{display:none}
-@media (max-width:860px){
+@media (max-width:880px){
   .shell{grid-template-columns:1fr}
-  .sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border);
-    padding:1.1rem 1.3rem;display:none}
+  .sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border);display:none}
   .sidebar.open{display:block}
-  .topbar{display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;
+  .topbar{display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:30;
     background:var(--ground);border-bottom:1px solid var(--border);padding:.7rem 1.1rem}
   .menubtn{display:inline-flex;align-items:center;gap:.4rem;background:var(--surface-2);
-    border:1px solid var(--border);color:var(--ink);font:inherit;font-size:.85rem;padding:.4rem .7rem;border-radius:8px;cursor:pointer}
-  .hero{padding-top:2.4rem}
+    border:1px solid var(--border);color:var(--ink);font:inherit;font-size:.85rem;padding:.42rem .75rem;border-radius:9px;cursor:pointer}
+  .hero{padding-top:2.6rem}
+  .about-grid{grid-template-columns:1fr}
 }
-@media (min-width:861px){.topbar{display:none}}
 </style>
 
 </head>
 <body>
 <div class="topbar">
   <div class="brand"><span class="mark">🔆</span><span class="word">Lovax</span></div>
-  <button class="menubtn" id="menubtn" aria-label="Toggle navigation">☰ Menu</button>
+  <button class="menubtn" id="menubtn" aria-label="Menu">☰</button>
 </div>
 
 <div class="shell">
   <aside class="sidebar" id="sidebar">
-    <div class="brand">
-      <span class="mark">🔆</span><span class="word">Lovax</span><span class="ver">v1.2</span>
+    <div class="brand"><span class="mark">🔆</span><span class="word">Lovax</span><span class="ver">v1.2</span></div>
+    <div class="tagline-side">
+      <span class="lang-en">Simple like Python, fast like C++. Built for games.</span>
+      <span class="lang-tr">Python kadar sade, C++ kadar hızlı. Oyunlar için.</span>
     </div>
-    <div class="tagline-side">Simple like Python, fast like C++. Built for games.</div>
+    <div class="switchrow">
+      <button class="pill" id="langbtn" aria-label="Language">🌐 <span class="seg" data-l="en">EN</span><span class="seg" data-l="tr">TR</span></button>
+      <button class="pill" id="themebtn" aria-label="Theme"><span id="themeic">◐</span> <span id="themelbl" class="lang-en">Theme</span><span id="themelbl2" class="lang-tr">Tema</span></button>
+    </div>
 
-    <nav class="nav-group">
-      <div class="lbl">Start</div>
-      <a href="#install">Install &amp; run</a>
-      <a href="#hello">First program</a>
-      <a href="#why">Why Lovax</a>
+    <nav class="toc" id="toc">
+      <div class="grp"><span class="lang-en">Start</span><span class="lang-tr">Başlangıç</span></div>
+      <div class="item"><a href="#install"><span><span class="lang-en">Install &amp; run</span><span class="lang-tr">Kurulum &amp; çalıştırma</span></span></a></div>
+      <div class="item"><a href="#hello"><span><span class="lang-en">First program</span><span class="lang-tr">İlk program</span></span></a></div>
+      <div class="item"><a href="#why"><span><span class="lang-en">Why Lovax</span><span class="lang-tr">Neden Lovax</span></span></a></div>
+
+      <div class="grp"><span class="lang-en">Language</span><span class="lang-tr">Dil</span></div>
+      <div class="item"><a href="#variables"><span><span class="lang-en">Variables</span><span class="lang-tr">Değişkenler</span></span></a></div>
+      <div class="item" data-sub><a href="#types"><span><span class="lang-en">Types &amp; operators</span><span class="lang-tr">Tipler &amp; operatörler</span></span><span class="chev">▶</span></a>
+        <div class="sub"><a href="#types-div"><span class="lang-en">Division</span><span class="lang-tr">Bölme</span></a><a href="#types-null"><span class="lang-en">Null safety</span><span class="lang-tr">Null güvenliği</span></a></div></div>
+      <div class="item" data-sub><a href="#control"><span><span class="lang-en">Control flow</span><span class="lang-tr">Akış kontrolü</span></span><span class="chev">▶</span></a>
+        <div class="sub"><a href="#control-match"><span class="lang-en">Match</span><span class="lang-tr">Match</span></a></div></div>
+      <div class="item" data-sub><a href="#functions"><span><span class="lang-en">Functions</span><span class="lang-tr">Fonksiyonlar</span></span><span class="chev">▶</span></a>
+        <div class="sub"><a href="#fn-lambda"><span class="lang-en">Anonymous &amp; arrow</span><span class="lang-tr">Anonim &amp; ok</span></a></div></div>
+      <div class="item"><a href="#structs"><span><span class="lang-en">Structs &amp; enums</span><span class="lang-tr">Struct &amp; enum</span></span></a></div>
+      <div class="item"><a href="#errors"><span><span class="lang-en">Errors</span><span class="lang-tr">Hatalar</span></span></a></div>
+      <div class="item"><a href="#coroutines"><span>Coroutine</span></a></div>
+      <div class="item"><a href="#modules"><span><span class="lang-en">Modules &amp; stdlib</span><span class="lang-tr">Modüller &amp; stdlib</span></span></a></div>
+
+      <div class="grp"><span class="lang-en">Runtime</span><span class="lang-tr">Çalışma zamanı</span></div>
+      <div class="item"><a href="#performance"><span><span class="lang-en">Performance</span><span class="lang-tr">Performans</span></span></a></div>
+      <div class="item"><a href="#internals"><span><span class="lang-en">Under the hood</span><span class="lang-tr">Kaputun altı</span></span></a></div>
+      <div class="item"><a href="#embedding"><span><span class="lang-en">Embedding</span><span class="lang-tr">Gömme</span></span></a></div>
+      <div class="item"><a href="#bundle"><span><span class="lang-en">Ship a binary</span><span class="lang-tr">Tek binary</span></span></a></div>
+      <div class="item"><a href="#about"><span>About</span></a></div>
     </nav>
-    <nav class="nav-group">
-      <div class="lbl">Language</div>
-      <a href="#variables">Variables</a>
-      <a href="#types">Types &amp; operators</a>
-      <a href="#control">Control flow</a>
-      <a href="#functions">Functions</a>
-      <a href="#structs">Structs &amp; enums</a>
-      <a href="#errors">Errors</a>
-      <a href="#coroutines">Coroutines</a>
-      <a href="#modules">Modules &amp; stdlib</a>
-    </nav>
-    <nav class="nav-group">
-      <div class="lbl">Runtime</div>
-      <a href="#performance">Performance</a>
-      <a href="#internals">Under the hood</a>
-      <a href="#embedding">Embedding</a>
-      <a href="#bundle">Ship a binary</a>
-    </nav>
-    <button class="themebtn" id="themebtn"><span id="themeic">◐</span> <span id="themelbl">Theme</span></button>
   </aside>
 
   <main class="main">
     <!-- HERO -->
     <div class="wrap hero" id="top">
-      <div class="eyebrow">A zero-dependency language · own JIT · exact int64</div>
-      <h1>The scripting language for your <span class="lit">game engine</span>.</h1>
-      <p class="lede">Lovax reads like Python and runs on a <strong>three-tier JIT</strong> it carries itself — no LLVM, no runtime to install. Weighted loot tables, signals, coroutines and deterministic RNG are <strong>in the language</strong>, not bolted on.</p>
+      <div class="eyebrow"><span class="dot"></span><span class="lang-en">Zero dependencies · own JIT · exact int64</span><span class="lang-tr">Sıfır bağımlılık · kendi JIT'i · tam int64</span></div>
+      <h1><span class="lang-en">The scripting language for your <span class="lit">game engine</span>.</span><span class="lang-tr">Oyun motorunun <span class="lit">betik dili</span>.</span></h1>
+      <p class="lede">
+        <span class="lang-en">Lovax reads like Python and runs on a <strong>three-tier JIT</strong> it carries itself — no LLVM, no runtime to install. Loot tables, signals, coroutines and deterministic RNG are <strong>in the language</strong>, not bolted on.</span>
+        <span class="lang-tr">Lovax Python gibi okunur, kendi taşıdığı <strong>üç-katmanlı JIT</strong> ile çalışır — LLVM yok, kurulacak runtime yok. Ganimet tabloları, sinyaller, coroutine'ler ve deterministik RNG <strong>dilin içinde</strong>, sonradan eklenmiş değil.</span>
+      </p>
       <div class="cta-row">
-        <a class="btn primary" href="#install">Get started →</a>
-        <a class="btn ghost" href="https://github.com/uixova/lovax">View on GitHub</a>
+        <a class="btn primary" href="#install"><span class="lang-en">Get started →</span><span class="lang-tr">Başla →</span></a>
+        <a class="btn ghost" href="https://github.com/uixova/lovax">GitHub</a>
       </div>
-
       <div class="code" data-lov>
-        <div class="bar"><span class="dot"></span><span class="fn">dungeon.lov</span></div>
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">dungeon.lov</span></div>
         <pre>use game: pick_weighted, signal, connect, emit
 use file
 
@@ -240,34 +296,37 @@ file.save_data("save.json", player)</pre>
 
     <!-- INSTALL -->
     <section id="install"><div class="wrap">
-      <div class="kicker">Getting started</div>
-      <h2>Install &amp; run</h2>
-      <p>Install once, then run your files — the same two steps as Python. There is <strong>no build or compile step per program</strong>: <code>lovax game.lov</code> is to Lovax what <code>python app.py</code> is to Python.</p>
+      <div class="kicker"><span class="lang-en">Getting started</span><span class="lang-tr">Başlangıç</span></div>
+      <h2><span class="lang-en">Install &amp; run</span><span class="lang-tr">Kurulum &amp; çalıştırma</span></h2>
+      <p><span class="lang-en">Install once, then run your files — the same two steps as Python. There is <strong>no build or compile step per program</strong>: <code>lovax game.lov</code> is to Lovax what <code>python app.py</code> is to Python.</span>
+      <span class="lang-tr">Bir kez kur, sonra dosyalarını çalıştır — Python'daki aynı iki adım. <strong>Program başına derleme adımı YOK</strong>: <code>lovax game.lov</code>, Lovax'ta <code>python app.py</code>'nin karşılığıdır.</span></p>
 
-      <p><strong>1. Install</strong> — the installer downloads the prebuilt binary for your platform and puts it on your <code>PATH</code>. No compiler, nothing else.</p>
+      <p><strong><span class="lang-en">1. Install</span><span class="lang-tr">1. Kur</span></strong> — <span class="lang-en">the installer downloads the prebuilt binary for your platform onto your <code>PATH</code>. No compiler.</span><span class="lang-tr">kurucu, platformunun hazır binary'sini indirir ve <code>PATH</code>'e koyar. Derleyici gerekmez.</span></p>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
 <pre>curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh   # Linux / macOS
 irm https://raw.githubusercontent.com/uixova/lovax/main/install.ps1 | iex        # Windows</pre></div>
 
-      <p><strong>2. Run</strong> — point <code>lovax</code> at a file, or launch the REPL with no arguments. That's the whole workflow.</p>
+      <p><strong><span class="lang-en">2. Run</span><span class="lang-tr">2. Çalıştır</span></strong> — <span class="lang-en">point <code>lovax</code> at a file, or launch the REPL. That's the whole workflow.</span><span class="lang-tr"><code>lovax</code>'ı bir dosyaya yönlendir ya da REPL'i aç. Tüm akış bu.</span></p>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
 <pre>lovax game.lov         # run a program   (like: python app.py)
 lovax                  # interactive REPL
 lovax --version        # Lovax 1.2.0
 lovax update           # self-update to the newest release</pre></div>
 
-      <div class="note"><span class="ic">✳</span><p><strong>Building from source is optional</strong> — the same as compiling CPython yourself, not something you do to run a script. If you'd rather build the interpreter (to contribute, or on a platform with no release), it's one zero-dependency C++17 command; after that you still just <code>lovax file.lov</code>.</p></div>
-      <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell · optional, build from source</span></div>
-<pre>make                                       # optimized ./lovax   (or: make dev / make test)
-g++ -std=c++17 -O3 -o lovax src/main.cpp   # no make? one line still works</pre></div>
+      <div class="note"><span class="ic">✳</span><p><span class="lang-en"><strong>Building from source is optional</strong> — the same as compiling CPython yourself, not something you do to run a script. It's one zero-dependency C++17 command; after that you still just <code>lovax file.lov</code>.</span>
+      <span class="lang-tr"><strong>Kaynaktan derlemek opsiyoneldir</strong> — CPython'ı kendin derlemek gibi, betik çalıştırmak için yapılan bir şey değil. Tek, bağımlılıksız bir C++17 komutu; sonrasında yine sadece <code>lovax file.lov</code>.</span></p></div>
+      <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell · optional</span></div>
+<pre>make                                       # optimized ./lovax
+g++ -std=c++17 -O3 -o lovax src/main.cpp   # no make? one line works</pre></div>
     </div></section>
 
     <!-- HELLO -->
     <section id="hello"><div class="wrap">
-      <div class="kicker">Getting started</div>
-      <h2>Your first program</h2>
-      <p>Blocks are indentation. Strings interpolate with <code>{}</code>. <code>say</code> prints a line.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">hello.lov</span></div>
+      <div class="kicker"><span class="lang-en">Getting started</span><span class="lang-tr">Başlangıç</span></div>
+      <h2><span class="lang-en">Your first program</span><span class="lang-tr">İlk programın</span></h2>
+      <p><span class="lang-en">Blocks are indentation. Strings interpolate with <code>{}</code>. <code>say</code> prints a line.</span>
+      <span class="lang-tr">Bloklar girintiyle. Stringler <code>{}</code> ile araya değer alır. <code>say</code> bir satır yazar.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">hello.lov</span></div>
 <pre>set name = "world"
 say "Hello, {name}!"
 
@@ -276,27 +335,31 @@ set total = 0
 for i in range(100):
     total = total + i
 say "sum is {total}"        # sum is 4950</pre></div>
-      <div class="note"><span class="ic">→</span><p>Identifiers are full UTF-8, so <code>oyuncu_adı</code> is first-class and <code>len("şey")</code> is <code>3</code> — counted by code point, not byte.</p></div>
+      <div class="note"><span class="ic">→</span><p><span class="lang-en">Identifiers are full UTF-8, so <code>oyuncu_adı</code> is first-class and <code>len("şey")</code> is <code>3</code> — counted by code point, not byte.</span>
+      <span class="lang-tr">Tanımlayıcılar tam UTF-8, yani <code>oyuncu_adı</code> birinci sınıf ve <code>len("şey")</code> sonucu <code>3</code> — bayt değil, kod-noktası sayılır.</span></p></div>
     </div></section>
 
     <!-- WHY -->
     <section id="why"><div class="wrap">
-      <div class="kicker">Getting started</div>
-      <h2>Why Lovax</h2>
+      <div class="kicker"><span class="lang-en">Getting started</span><span class="lang-tr">Başlangıç</span></div>
+      <h2><span class="lang-en">Why Lovax</span><span class="lang-tr">Neden Lovax</span></h2>
       <div class="grid">
-        <div class="card"><div class="ic">🎮</div><h4>Game-first</h4><p>Loot tables, signals/events, easing curves, timers, save files and deterministic RNG ship in the language.</p></div>
-        <div class="card"><div class="ic">⚡</div><h4>Native speed</h4><p>Hot loops compile to x86-64 through a three-tier JIT with its own encoder — allocation-free entity updates.</p></div>
-        <div class="card"><div class="ic">📦</div><h4>Zero dependency</h4><p>One C++17 file, no LLVM, no package tree. Bundle a whole app into a single self-contained executable.</p></div>
-        <div class="card"><div class="ic">🧭</div><h4>Friendly by design</h4><p>Errors are located and tell you the fix. A typo can't silently create a variable. Full UTF-8, exact 64-bit ints.</p></div>
+        <div class="card"><div class="ic">🎮</div><h4><span class="lang-en">Game-first</span><span class="lang-tr">Önce oyun</span></h4><p><span class="lang-en">Loot tables, signals/events, easing curves, timers, save files and deterministic RNG ship in the language.</span><span class="lang-tr">Ganimet tabloları, sinyaller/olaylar, easing eğrileri, zamanlayıcılar, kayıt dosyaları ve deterministik RNG dilin içinde gelir.</span></p></div>
+        <div class="card"><div class="ic">⚡</div><h4><span class="lang-en">Native speed</span><span class="lang-tr">Native hız</span></h4><p><span class="lang-en">Hot loops compile to x86-64 through a three-tier JIT with its own encoder — allocation-free entity updates.</span><span class="lang-tr">Sıcak döngüler, kendi encoder'ı olan üç-katmanlı JIT ile x86-64'e derlenir — allocation'sız entity güncellemeleri.</span></p></div>
+        <div class="card"><div class="ic">📦</div><h4><span class="lang-en">Zero dependency</span><span class="lang-tr">Sıfır bağımlılık</span></h4><p><span class="lang-en">One C++17 file, no LLVM, no package tree. Bundle a whole app into a single self-contained executable.</span><span class="lang-tr">Tek C++17 dosyası, LLVM yok, paket ağacı yok. Tüm uygulamayı tek, kendine-yeten çalıştırılabilire paketle.</span></p></div>
+        <div class="card"><div class="ic">🧭</div><h4><span class="lang-en">Friendly by design</span><span class="lang-tr">Tasarımdan dostça</span></h4><p><span class="lang-en">Errors are located and tell you the fix. A typo can't silently create a variable. Full UTF-8.</span><span class="lang-tr">Hatalar konumlu ve çözümü söyler. Bir yazım hatası sessizce değişken yaratamaz. Tam UTF-8.</span></p></div>
+        <div class="card"><div class="ic">🎯</div><h4><span class="lang-en">Deterministic</span><span class="lang-tr">Deterministik</span></h4><p><span class="lang-en">Exact 64-bit integers, never demoted to a double, plus seeded RNG — the foundation for reproducible replays and lockstep netcode.</span><span class="lang-tr">Tam 64-bit tam sayılar, asla double'a düşürülmez, artı tohumlu RNG — tekrarlanabilir replay ve lockstep netcode'un temeli.</span></p></div>
+        <div class="card"><div class="ic">🛡️</div><h4><span class="lang-en">Embeddable &amp; safe</span><span class="lang-tr">Gömülebilir &amp; güvenli</span></h4><p><span class="lang-en">A C++/C-ABI bridge hosts Lovax inside an engine; a Deno-style capability sandbox runs untrusted mods with only the access you grant.</span><span class="lang-tr">C++/C-ABI köprüsü Lovax'ı motorun içine gömer; Deno-tarzı yetenek sandbox'ı, güvenilmeyen mod'ları yalnızca verdiğin erişimle çalıştırır.</span></p></div>
       </div>
     </div></section>
 
     <!-- VARIABLES -->
     <section id="variables"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Variables</h2>
-      <p><code>set</code> <strong>defines</strong> a new variable; a bare name <strong>updates</strong> an existing one. Assigning a name that was never defined is an error — so a typo can't quietly introduce a new binding, and closures update outer counters with no ceremony.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">variables.lov</span></div>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Variables</span><span class="lang-tr">Değişkenler</span></h2>
+      <p><span class="lang-en"><code>set</code> <strong>defines</strong> a new variable; a bare name <strong>updates</strong> an existing one. Assigning a name that was never defined is an error — a typo can't quietly introduce a new binding, and closures update outer counters with no ceremony.</span>
+      <span class="lang-tr"><code>set</code> yeni bir değişken <strong>tanımlar</strong>; çıplak bir isim var olanı <strong>günceller</strong>. Hiç tanımlanmamış bir isme atama hatadır — yazım hatası sessizce yeni bir bağ oluşturamaz, closure'lar dıştaki sayaçları törensiz günceller.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">variables.lov</span></div>
 <pre>set speed = 10        # DEFINES a new variable
 speed = 20            # UPDATES the existing one
 speed += 5            # compound: += -= *= /= //= %=
@@ -306,23 +369,26 @@ score = 1             # ERROR: 'score' is not defined (typo protection)</pre></d
 
     <!-- TYPES -->
     <section id="types"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Types &amp; operators</h2>
-      <p>Numbers are exact 64-bit integers and 64-bit floats. Division is the one place Lovax deliberately differs from C: <code>/</code> is <strong>true division</strong> (always a float) and <code>//</code> is <strong>floor division</strong> — the same split Python 3 and Lua 5.4 make, so <code>1 / 3</code> is never <code>0</code>.</p>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Types &amp; operators</span><span class="lang-tr">Tipler &amp; operatörler</span></h2>
+      <p><span class="lang-en">Numbers are exact 64-bit integers and 64-bit floats.</span><span class="lang-tr">Sayılar tam 64-bit tam sayı ve 64-bit float.</span></p>
       <div class="tablewrap"><table>
-        <thead><tr><th>Type</th><th>Example</th><th>Notes</th></tr></thead>
+        <thead><tr><th><span class="lang-en">Type</span><span class="lang-tr">Tip</span></th><th><span class="lang-en">Example</span><span class="lang-tr">Örnek</span></th><th><span class="lang-en">Notes</span><span class="lang-tr">Not</span></th></tr></thead>
         <tbody>
-          <tr><td><code>int</code></td><td class="mono">42, 0xFF, 1_000_000</td><td>exact 64-bit</td></tr>
-          <tr><td><code>float</code></td><td class="mono">3.14, 2.5e-3</td><td>64-bit, scientific notation</td></tr>
-          <tr><td><code>string</code></td><td class="mono">"hi", """multi\nline"""</td><td>UTF-8; indexed by code point</td></tr>
+          <tr><td><code>int</code></td><td class="mono">42, 0xFF, 1_000_000</td><td><span class="lang-en">exact 64-bit</span><span class="lang-tr">tam 64-bit</span></td></tr>
+          <tr><td><code>float</code></td><td class="mono">3.14, 2.5e-3</td><td><span class="lang-en">64-bit, scientific</span><span class="lang-tr">64-bit, bilimsel</span></td></tr>
+          <tr><td><code>string</code></td><td class="mono">"hi", """multi"""</td><td><span class="lang-en">UTF-8; by code point</span><span class="lang-tr">UTF-8; kod-noktasıyla</span></td></tr>
           <tr><td><code>bool / null</code></td><td class="mono">true, false, null</td><td></td></tr>
-          <tr><td><code>list</code></td><td class="mono">[1, "two", [3]]</td><td>negative indexing, <code>+</code> joins</td></tr>
-          <tr><td><code>tuple</code></td><td class="mono">(x, y)</td><td>fixed, immutable</td></tr>
-          <tr><td><code>map</code></td><td class="mono">{"k": 1}</td><td>insertion-ordered; <code>player.hp</code></td></tr>
-          <tr><td><code>range</code></td><td class="mono">range(0, 10)</td><td>lazy, allocates nothing</td></tr>
+          <tr><td><code>list</code></td><td class="mono">[1, "two", [3]]</td><td><span class="lang-en">negative index, <code>+</code> joins</span><span class="lang-tr">negatif indeks, <code>+</code> birleştirir</span></td></tr>
+          <tr><td><code>tuple</code></td><td class="mono">(x, y)</td><td><span class="lang-en">fixed, immutable</span><span class="lang-tr">sabit, değişmez</span></td></tr>
+          <tr><td><code>map</code></td><td class="mono">{"k": 1}</td><td><span class="lang-en">ordered; <code>player.hp</code></span><span class="lang-tr">sıralı; <code>player.hp</code></span></td></tr>
+          <tr><td><code>range</code></td><td class="mono">range(0, 10)</td><td><span class="lang-en">lazy, allocates nothing</span><span class="lang-tr">tembel, allocation yok</span></td></tr>
         </tbody>
       </table></div>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">operators.lov</span></div>
+      <h3 id="types-div"><span class="lang-en">Division</span><span class="lang-tr">Bölme</span></h3>
+      <p><span class="lang-en"><code>/</code> is <strong>true division</strong> (always a float) and <code>//</code> is <strong>floor division</strong> — the split Python 3 and Lua 5.4 make, so <code>1 / 3</code> is never <code>0</code>.</span>
+      <span class="lang-tr"><code>/</code> <strong>gerçek bölme</strong> (her zaman float), <code>//</code> ise <strong>taban bölmesi</strong> — Python 3 ve Lua 5.4'ün yaptığı ayrım, böylece <code>1 / 3</code> asla <code>0</code> olmaz.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">operators.lov</span></div>
 <pre>say 7 / 2        # 3.5   — true division, always a float
 say 7 // 2       # 3     — floor division (toward -inf)
 say -7 // 2      # -4
@@ -332,10 +398,12 @@ say 2 ** 10      # 1024  — power (right-associative)
 say [1, 2] + [3]         # [1, 2, 3]
 say "cat" in "concat"    # true
 say 4 in range(0, 10, 2) # true</pre></div>
-      <p>Comparison is deep: <code>[1,[2]] == [1,[2]]</code> is <code>true</code>. Logic (<code>and or not</code>) short-circuits, and truthiness follows Python — <code>null</code>, <code>false</code>, <code>0</code>, <code>""</code>, <code>[]</code>, <code>{}</code> are falsy.</p>
-      <h3>Null safety</h3>
-      <p><code>?.</code> reads a field only when the value isn't <code>null</code> (otherwise the whole chain is <code>null</code>), and <code>??</code> supplies a fallback for a <code>null</code> — together they replace a pile of guards.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">null-safety.lov</span></div>
+      <p><span class="lang-en">Comparison is deep: <code>[1,[2]] == [1,[2]]</code> is <code>true</code>. Logic (<code>and or not</code>) short-circuits; falsy values are <code>null false 0 "" [] {}</code>.</span>
+      <span class="lang-tr">Karşılaştırma derindir: <code>[1,[2]] == [1,[2]]</code> sonucu <code>true</code>. Mantık (<code>and or not</code>) kısa-devre yapar; yanlış sayılanlar: <code>null false 0 "" [] {}</code>.</span></p>
+      <h3 id="types-null"><span class="lang-en">Null safety</span><span class="lang-tr">Null güvenliği</span></h3>
+      <p><span class="lang-en"><code>?.</code> reads a field only when the value isn't <code>null</code> (otherwise the chain is <code>null</code>), and <code>??</code> supplies a fallback — together they replace a pile of guards.</span>
+      <span class="lang-tr"><code>?.</code> bir alanı yalnızca değer <code>null</code> değilken okur (aksi hâlde zincir <code>null</code> olur), <code>??</code> ise bir yedek verir — birlikte bir yığın kontrolün yerine geçerler.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">null-safety.lov</span></div>
 <pre>set weapon = player?.equipped?.name ?? "bare hands"
 
 set x = null
@@ -345,10 +413,11 @@ say has(map, "key")         # test a map key without throwing</pre></div>
 
     <!-- CONTROL -->
     <section id="control"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Control flow</h2>
-      <p><code>if</code> / <code>else if</code> / <code>else</code>, <code>while</code>, and <code>for … in</code> over any iterable — a range, list, string, or map's keys. <code>break</code> and <code>continue</code> work as you'd expect, and a one-line <strong>ternary</strong> is an expression.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">control.lov</span></div>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Control flow</span><span class="lang-tr">Akış kontrolü</span></h2>
+      <p><span class="lang-en"><code>if</code> / <code>else if</code> / <code>else</code>, <code>while</code>, and <code>for … in</code> over any iterable. <code>break</code> and <code>continue</code> work as expected, and a one-line <strong>ternary</strong> is an expression.</span>
+      <span class="lang-tr"><code>if</code> / <code>else if</code> / <code>else</code>, <code>while</code> ve herhangi bir iterable üzerinde <code>for … in</code>. <code>break</code> ve <code>continue</code> beklendiği gibi çalışır, tek-satırlık <strong>ternary</strong> bir ifadedir.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">control.lov</span></div>
 <pre>set hp = 72
 if hp > 66:
     say "healthy"
@@ -360,16 +429,11 @@ else:
 set label = "low" if hp < 20 else "ok"    # ternary expression
 
 for item in ["sword", "shield", "potion"]:
-    say item
-
-set n = 0
-while n < 5:
-    if n == 3:
-        break
-    n += 1</pre></div>
-      <h3>Match</h3>
-      <p><code>match</code> tests a value against patterns — several per arm, with <code>_</code> as the catch-all.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">match.lov</span></div>
+    say item</pre></div>
+      <h3 id="control-match">Match</h3>
+      <p><span class="lang-en"><code>match</code> tests a value against patterns — several per arm, with <code>_</code> as the catch-all.</span>
+      <span class="lang-tr"><code>match</code> bir değeri desenlere karşı sınar — kol başına birkaç desen, <code>_</code> yakala-hepsi.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">match.lov</span></div>
 <pre>match state:
     "running":
         say "active"
@@ -381,10 +445,11 @@ while n < 5:
 
     <!-- FUNCTIONS -->
     <section id="functions"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Functions</h2>
-      <p>Declared with <code>fn</code>. They're first-class values, close over their scope, take <strong>default parameters</strong>, and return with <code>return</code> (or <code>null</code> by default). Wrong argument counts are errors — arity is strict.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">functions.lov</span></div>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Functions</span><span class="lang-tr">Fonksiyonlar</span></h2>
+      <p><span class="lang-en">Declared with <code>fn</code>. First-class values that close over their scope, take <strong>default parameters</strong>, and return with <code>return</code>. Arity is strict.</span>
+      <span class="lang-tr"><code>fn</code> ile tanımlanır. Kapsamlarını kapatan, <strong>varsayılan parametre</strong> alan ve <code>return</code> ile dönen birinci-sınıf değerler. Argüman sayısı katıdır.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">functions.lov</span></div>
 <pre>fn heal(target, amount = 10):        # default parameter
     return "{target} +{amount} hp"
 say heal("hero")                     # hero +10 hp
@@ -396,13 +461,13 @@ fn make_counter():
         n += 1            # closes over n, updates it
         return n
     return tick
-
 set next = make_counter()
 say next()   # 1
 say next()   # 2</pre></div>
-      <h3>Anonymous &amp; arrow</h3>
-      <p>Functions are values, so they pass into higher-order builtins like <code>filter</code> and <code>sort</code>. A single-expression body can use the arrow form.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">lambdas.lov</span></div>
+      <h3 id="fn-lambda"><span class="lang-en">Anonymous &amp; arrow</span><span class="lang-tr">Anonim &amp; ok</span></h3>
+      <p><span class="lang-en">Functions are values, so they pass into higher-order builtins like <code>filter</code>. A single-expression body can use the arrow form.</span>
+      <span class="lang-tr">Fonksiyonlar birer değerdir, <code>filter</code> gibi üst-düzey yerleşiklere geçebilirler. Tek-ifadelik gövde ok formunu kullanabilir.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">lambdas.lov</span></div>
 <pre>set is_even = fn(n):
     return n % 2 == 0
 say filter([1, 2, 3, 4], is_even)    # [2, 4]
@@ -413,10 +478,11 @@ say double(21)                       # 42</pre></div>
 
     <!-- STRUCTS -->
     <section id="structs"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Structs &amp; enums</h2>
-      <p>A <code>struct</code> groups typed fields with methods; <code>this</code> is implicit. Fields are unboxed inline values, so an <code>entity.x</code> update allocates nothing — the property that makes entity loops fast.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">entity.lov</span></div>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Structs &amp; enums</span><span class="lang-tr">Struct &amp; enum</span></h2>
+      <p><span class="lang-en">A <code>struct</code> groups typed fields with methods; <code>this</code> is implicit. Fields are unboxed inline values, so an <code>entity.x</code> update allocates nothing — the property that makes entity loops fast.</span>
+      <span class="lang-tr"><code>struct</code> tipli alanları metotlarla gruplar; <code>this</code> örtüktür. Alanlar kutulanmamış satır-içi değerlerdir, yani <code>entity.x</code> güncellemesi hiç allocation yapmaz — entity döngülerini hızlı kılan özellik.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">entity.lov</span></div>
 <pre>struct Player:
     hp = 100
     name = "hero"
@@ -435,10 +501,11 @@ say State.ATTACK              # 2</pre></div>
 
     <!-- ERRORS -->
     <section id="errors"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Errors</h2>
-      <p><code>try</code> / <code>catch</code> / <code>finally</code>, and <code>throw</code> for your own. <code>finally</code> always runs — even when a <code>return</code> or <code>break</code> leaves the block.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">errors.lov</span></div>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Errors</span><span class="lang-tr">Hatalar</span></h2>
+      <p><span class="lang-en"><code>try</code> / <code>catch</code> / <code>finally</code>, and <code>throw</code> for your own. <code>finally</code> always runs — even when a <code>return</code> or <code>break</code> leaves the block.</span>
+      <span class="lang-tr"><code>try</code> / <code>catch</code> / <code>finally</code> ve kendi hataların için <code>throw</code>. <code>finally</code> her zaman çalışır — bir <code>return</code> ya da <code>break</code> bloktan çıksa bile.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">errors.lov</span></div>
 <pre>fn load(path):
     try:
         return file.load_data(path)
@@ -447,15 +514,17 @@ say State.ATTACK              # 2</pre></div>
         return {}
     finally:
         say "load attempt finished"</pre></div>
-      <div class="note"><span class="ic">!</span><p>Runtime errors are located and readable — <code class="mono">[Runtime Error] line 4: division by zero</code> — and an uncaught error exits non-zero, so scripts fail loudly, never silently.</p></div>
+      <div class="note"><span class="ic">!</span><p><span class="lang-en">Runtime errors are located and readable — <code class="mono">[Runtime Error] line 4: division by zero</code> — and an uncaught error exits non-zero, so scripts fail loudly, never silently.</span>
+      <span class="lang-tr">Çalışma-zamanı hataları konumlu ve okunur — <code class="mono">[Runtime Error] line 4: division by zero</code> — yakalanmayan hata sıfırdan-farklı çıkar, betikler sessizce değil sesli başarısız olur.</span></p></div>
     </div></section>
 
     <!-- COROUTINES -->
     <section id="coroutines"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Coroutines</h2>
-      <p>Cooperative coroutines drive AI, dialogue, and frame-spread work. <code>spawn</code> a function, <code>resume</code> it, and <code>yield</code> values back — <code>resume</code> can pass a value into the paused <code>yield</code>.</p>
-      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="fn">coroutines.lov</span></div>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2>Coroutine</h2>
+      <p><span class="lang-en">Cooperative coroutines drive AI, dialogue, and frame-spread work. <code>spawn</code> a function, <code>resume</code> it, and <code>yield</code> values back — <code>resume</code> can pass a value into the paused <code>yield</code>.</span>
+      <span class="lang-tr">İşbirlikçi coroutine'ler yapay zekâyı, diyaloğu ve kareye-yayılan işi sürer. Bir fonksiyonu <code>spawn</code> et, <code>resume</code> ile devam ettir, <code>yield</code> ile değer döndür — <code>resume</code>, duraklamış <code>yield</code>'e değer geçirebilir.</span></p>
+      <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">coroutines.lov</span></div>
 <pre>fn patrol(start):
     set n = start
     while true:
@@ -470,87 +539,125 @@ say co_status(guard)         # suspended</pre></div>
 
     <!-- MODULES -->
     <section id="modules"><div class="wrap">
-      <div class="kicker">Language tour</div>
-      <h2>Modules &amp; the standard library</h2>
-      <p>Built-in modules stay out of your scope until you <code>use</code> them, so nothing is shadowed by accident. Third-party packages install reproducibly, pinned by commit.</p>
+      <div class="kicker"><span class="lang-en">Language tour</span><span class="lang-tr">Dil turu</span></div>
+      <h2><span class="lang-en">Modules &amp; the standard library</span><span class="lang-tr">Modüller &amp; standart kütüphane</span></h2>
+      <p><span class="lang-en">Built-in modules stay out of your scope until you <code>use</code> them, so nothing is shadowed by accident. Packages install reproducibly, pinned by commit.</span>
+      <span class="lang-tr">Yerleşik modüller <code>use</code> edene dek kapsamının dışında kalır, hiçbir şey kazara gölgelenmez. Paketler commit'e sabitlenerek tekrarlanabilir kurulur.</span></p>
       <div class="grid">
-        <div class="card"><h4><code>game</code></h4><p>weighted picks, signals/events, easing, timers, deterministic RNG</p></div>
-        <div class="card"><h4><code>file</code></h4><p>read/write text, JSON save-data, paths</p></div>
-        <div class="card"><h4><code>net</code></h4><p>TCP/UDP sockets — servers, clients, LAN &amp; VPS</p></div>
-        <div class="card"><h4><code>os</code> · <code>regex</code></h4><p>arguments &amp; environment; a self-contained regex engine</p></div>
+        <div class="card"><div class="ic">🎲</div><h4><code>game</code></h4><p><span class="lang-en">weighted picks, signals/events, easing, timers, deterministic RNG</span><span class="lang-tr">ağırlıklı seçim, sinyal/olay, easing, zamanlayıcı, deterministik RNG</span></p></div>
+        <div class="card"><div class="ic">💾</div><h4><code>file</code></h4><p><span class="lang-en">read/write text, JSON save-data, paths</span><span class="lang-tr">metin oku/yaz, JSON kayıt-verisi, yollar</span></p></div>
+        <div class="card"><div class="ic">🌐</div><h4><code>net</code></h4><p><span class="lang-en">TCP/UDP sockets — servers, clients, LAN &amp; VPS</span><span class="lang-tr">TCP/UDP soket — sunucu, istemci, LAN &amp; VPS</span></p></div>
+        <div class="card"><div class="ic">🔧</div><h4><code>os</code> · <code>regex</code></h4><p><span class="lang-en">arguments &amp; environment; a self-contained regex engine</span><span class="lang-tr">argüman &amp; ortam; kendine-yeten regex motoru</span></p></div>
       </div>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
 <pre>lovax install someuser/inventory@v1.2.0   # version-pinned in lovax.lock
 lovax --sandbox --allow-net app.lov       # untrusted code: net yes, disk/env no</pre></div>
-      <p>The capability <strong>sandbox</strong> is Deno-style: a sandboxed run gets nothing until you grant it, so you can run code you don't fully trust.</p>
+      <p><span class="lang-en">The capability <strong>sandbox</strong> is Deno-style: a sandboxed run gets nothing until you grant it, so you can run code you don't fully trust.</span>
+      <span class="lang-tr">Yetenek <strong>sandbox</strong>'ı Deno-tarzıdır: sandbox'lı çalıştırma sen verene dek hiçbir şey almaz, tam güvenmediğin kodu çalıştırabilirsin.</span></p>
     </div></section>
 
     <!-- PERFORMANCE -->
     <section id="performance"><div class="wrap">
-      <div class="kicker">Runtime</div>
-      <h2>Performance</h2>
-      <p>Lovax compiles to bytecode on a computed-goto stack VM, then lifts hot loops to native x86-64 through a <strong>three-tier JIT</strong> — a register allocator, a tracing compiler, and an always-correct template fallback — all written from scratch, no LLVM, no DynASM.</p>
-      <p>Two levers make game loops fast: struct fields are unboxed inline values, and <strong>allocation sinking</strong> scalar-replaces per-frame temporaries — a <code>tmp = [i, i+1, i+2]</code> built and read each iteration never reaches the heap. The interpreter is always the oracle: every tier is verified bit-identical to it.</p>
+      <div class="kicker"><span class="lang-en">Runtime</span><span class="lang-tr">Çalışma zamanı</span></div>
+      <h2><span class="lang-en">Performance</span><span class="lang-tr">Performans</span></h2>
+      <p><span class="lang-en">Lovax compiles to bytecode on a computed-goto stack VM, then lifts hot loops to native x86-64 through a <strong>three-tier JIT</strong> — a register allocator, a tracing compiler, and an always-correct template fallback — all from scratch, no LLVM.</span>
+      <span class="lang-tr">Lovax, computed-goto yığın-VM'inde bytecode'a derlenir, sonra sıcak döngüleri <strong>üç-katmanlı JIT</strong> ile native x86-64'e taşır — register ayırıcı, izleyen (tracing) derleyici ve her-zaman-doğru şablon yedeği — hepsi sıfırdan, LLVM yok.</span></p>
+      <p><span class="lang-en">Two levers make game loops fast: struct fields are unboxed inline values, and <strong>allocation sinking</strong> scalar-replaces per-frame temporaries — a <code>tmp = [i, i+1, i+2]</code> built and read each iteration never reaches the heap. The interpreter is always the oracle: every tier is verified bit-identical to it.</span>
+      <span class="lang-tr">İki kaldıraç oyun döngülerini hızlandırır: struct alanları kutulanmamış satır-içi değerlerdir ve <strong>allocation sinking</strong>, kare-başı geçici nesneleri skalerle değiştirir — her iterasyonda kurulup okunan bir <code>tmp = [i, i+1, i+2]</code> heap'e hiç ulaşmaz. Yorumlayıcı daima referanstır: her katman ona bit-birebir doğrulanır.</span></p>
       <div class="tablewrap"><table>
-        <thead><tr><th>Benchmark</th><th class="num">Lovax</th><th class="num">LuaJIT</th><th class="num">Node</th><th>what it is</th></tr></thead>
+        <thead><tr><th>Benchmark</th><th class="num">Lovax</th><th class="num">LuaJIT</th><th class="num">Node</th><th><span class="lang-en">what it is</span><span class="lang-tr">ne olduğu</span></th></tr></thead>
         <tbody>
-          <tr><td>gc</td><td class="num">2.8</td><td class="num">2.0</td><td class="num">27</td><td>per-iter temp aggregate (sinking → parity)</td></tr>
-          <tr><td>intloop</td><td class="num win">158</td><td class="num">208</td><td class="num">90</td><td>pure integer loop (beats LuaJIT)</td></tr>
-          <tr><td>entity_update</td><td class="num">28</td><td class="num">7</td><td class="num">34</td><td>struct-of-arrays float update</td></tr>
-          <tr><td>aos_update</td><td class="num">38</td><td class="num">18</td><td class="num">48</td><td>array-of-structs entity update</td></tr>
-          <tr><td>particles</td><td class="num">74</td><td class="num">39</td><td class="num">35</td><td>per-frame spawn/update churn</td></tr>
+          <tr><td>gc</td><td class="num">2.8</td><td class="num">2.0</td><td class="num">27</td><td><span class="lang-en">per-iter temp aggregate (sinking → parity)</span><span class="lang-tr">kare-başı geçici (sinking → başabaş)</span></td></tr>
+          <tr><td>intloop</td><td class="num win">158</td><td class="num">208</td><td class="num">90</td><td><span class="lang-en">pure integer loop (beats LuaJIT)</span><span class="lang-tr">saf tam-sayı döngüsü (LuaJIT'i geçer)</span></td></tr>
+          <tr><td>entity_update</td><td class="num">28</td><td class="num">7</td><td class="num">34</td><td><span class="lang-en">struct-of-arrays float update</span><span class="lang-tr">dizi-yapısı float güncelleme</span></td></tr>
+          <tr><td>aos_update</td><td class="num">38</td><td class="num">18</td><td class="num">48</td><td><span class="lang-en">array-of-structs entity update</span><span class="lang-tr">yapı-dizisi entity güncelleme</span></td></tr>
+          <tr><td>particles</td><td class="num">74</td><td class="num">39</td><td class="num">35</td><td><span class="lang-en">per-frame spawn/update churn</span><span class="lang-tr">kare-başı üret/güncelle churn</span></td></tr>
         </tbody>
       </table></div>
-      <p style="font-size:.86rem;color:var(--muted)">Best of 3, milliseconds, lower is better; outputs verified identical across languages. Exact numbers vary by machine — the full harness lives in <code>benchmarks/cross/</code>.</p>
+      <p style="font-size:.86rem;color:var(--muted)"><span class="lang-en">Best of 3, milliseconds, lower is better; outputs verified identical across languages. Numbers vary by machine — the harness lives in <code>benchmarks/cross/</code>.</span>
+      <span class="lang-tr">3'ün en iyisi, milisaniye, düşük daha iyi; çıktılar diller arası birebir doğrulandı. Sayılar makineye göre değişir — koşum takımı <code>benchmarks/cross/</code>'ta.</span></p>
+    </div></section>
+
+    <!-- INTERNALS -->
+    <section id="internals"><div class="wrap">
+      <div class="kicker"><span class="lang-en">Runtime</span><span class="lang-tr">Çalışma zamanı</span></div>
+      <h2><span class="lang-en">Under the hood</span><span class="lang-tr">Kaputun altı</span></h2>
+      <p><span class="lang-en">Lovax is one C++17 translation unit with no third-party code. Source flows through a short, legible pipeline — each stage a small header you can read end to end:</span>
+      <span class="lang-tr">Lovax, üçüncü-parti kod içermeyen tek bir C++17 derleme birimidir. Kaynak, kısa ve okunur bir hattan geçer — her aşama baştan sona okuyabileceğin küçük bir başlık:</span></p>
+      <ul>
+        <li><span class="lang-en"><strong>Lexer → Parser</strong> turn <code>.lov</code> text into an AST, with located, fix-suggesting errors and a bounded recursion depth so pathological source can't smash the stack.</span><span class="lang-tr"><strong>Lexer → Parser</strong>, <code>.lov</code> metnini AST'ye çevirir; konumlu, çözüm-öneren hatalar ve sınırlı özyineleme derinliğiyle patolojik kaynak yığını çökertemez.</span></li>
+        <li><span class="lang-en"><strong>Compiler</strong> lowers the AST to bytecode for a stack VM; <strong>the VM</strong> runs it on a computed-goto dispatch loop.</span><span class="lang-tr"><strong>Compiler</strong> AST'yi yığın-VM bytecode'una indirir; <strong>VM</strong> onu computed-goto döngüsünde çalıştırır.</span></li>
+        <li><span class="lang-en"><strong>Three-tier JIT</strong> lifts hot loops to native x86-64 through its own encoder: a register allocator, a tracing compiler (with allocation sinking), and a template compiler as the always-correct fallback.</span><span class="lang-tr"><strong>Üç-katmanlı JIT</strong> sıcak döngüleri kendi encoder'ıyla native x86-64'e taşır: register ayırıcı, izleyen derleyici (allocation sinking'li) ve her-zaman-doğru yedek şablon derleyici.</span></li>
+        <li><span class="lang-en"><strong>Garbage collector</strong> is tracing and incremental, with sub-millisecond pauses and a write barrier — tuned for a frame budget.</span><span class="lang-tr"><strong>Çöp toplayıcı</strong> izleyen ve artımlıdır; milisaniye-altı duraklar ve bir write-barrier ile — kare bütçesine göre ayarlı.</span></li>
+      </ul>
+      <p><span class="lang-en">Values are <strong>NaN-boxed</strong> into 8 bytes (a 16-byte fallback exists for platforms without the pointer guarantee), and integers stay <strong>exact 64-bit</strong>. Every JIT tier is proven bit-identical to the interpreter across a differential matrix, sanitizers, and an adversarial torture suite.</span>
+      <span class="lang-tr">Değerler 8 bayta <strong>NaN-box</strong>lanır (pointer garantisi olmayan platformlar için 16-baytlık yedek vardır) ve tam sayılar <strong>tam 64-bit</strong> kalır. Her JIT katmanı yorumlayıcıya bit-birebir kanıtlanır: differential matris, sanitizer'lar ve adversarial işkence takımıyla.</span></p>
+      <div class="note"><span class="ic">✳</span><p><span class="lang-en">The JIT, GC and value model were <strong>studied, not copied</strong>, from the <a href="https://www.lua.org/">Lua 5.5</a> and <a href="https://github.com/python/cpython">CPython</a> source trees — reading how they solve a problem, then writing our own zero-dependency answer. <a href="https://luajit.org/">LuaJIT</a> is the north star for the tracing JIT.</span>
+      <span class="lang-tr">JIT, GC ve değer modeli <a href="https://www.lua.org/">Lua 5.5</a> ve <a href="https://github.com/python/cpython">CPython</a> kaynaklarından <strong>kopyalanmadan, incelenerek</strong> yapıldı — bir problemi nasıl çözdüklerini okuyup kendi bağımlılıksız cevabımızı yazarak. İzleyen JIT için kutup yıldızı <a href="https://luajit.org/">LuaJIT</a>.</span></p></div>
     </div></section>
 
     <!-- EMBEDDING -->
     <section id="embedding"><div class="wrap">
-      <div class="kicker">Runtime</div>
-      <h2>Embedding</h2>
-      <p>Lovax is built to be hosted. A C++ façade and a stable C ABI (<code>lovax.h</code>) let an engine register native functions, expose owning userdata with finalizers, and hold values as roots across collections — the bridge a game engine binds its systems through.</p>
+      <div class="kicker"><span class="lang-en">Runtime</span><span class="lang-tr">Çalışma zamanı</span></div>
+      <h2><span class="lang-en">Embedding</span><span class="lang-tr">Gömme</span></h2>
+      <p><span class="lang-en">Lovax is built to be hosted. A C++ façade and a stable C ABI (<code>lovax.h</code>) let an engine register native functions, expose owning userdata with finalizers, and hold values as roots across collections.</span>
+      <span class="lang-tr">Lovax gömülmek için tasarlandı. Bir C++ cephesi ve kararlı C ABI (<code>lovax.h</code>), bir motorun native fonksiyon kaydetmesine, finalizer'lı sahip-userdata sunmasına ve değerleri toplama boyunca kök olarak tutmasına izin verir.</span></p>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">host.cpp</span></div>
 <pre>Lovax vm;
 vm.registerFn("engine_time", [](Args a){ return Value::number(now()); });
 vm.run("say \"frame at {engine_time()}\"");</pre></div>
-      <p>FFI is gated behind <code>--allow-ffi</code> and denied under the sandbox, so embedding never widens the trust boundary by accident.</p>
+      <p><span class="lang-en">FFI is gated behind <code>--allow-ffi</code> and denied under the sandbox, so embedding never widens the trust boundary by accident.</span>
+      <span class="lang-tr">FFI, <code>--allow-ffi</code> arkasındadır ve sandbox altında reddedilir, gömme güven sınırını kazara genişletmez.</span></p>
     </div></section>
 
     <!-- BUNDLE -->
     <section id="bundle"><div class="wrap">
-      <div class="kicker">Runtime</div>
-      <h2>Ship a single binary</h2>
-      <p>Because the interpreter is already a small static binary, a whole Lovax program — <code>net</code> and all — bundles into one self-contained executable. Your players run it with nothing else installed.</p>
+      <div class="kicker"><span class="lang-en">Runtime</span><span class="lang-tr">Çalışma zamanı</span></div>
+      <h2><span class="lang-en">Ship a single binary</span><span class="lang-tr">Tek binary olarak dağıt</span></h2>
+      <p><span class="lang-en">Because the interpreter is already a small static binary, a whole Lovax program — <code>net</code> and all — bundles into one self-contained executable. Your players run it with nothing else installed.</span>
+      <span class="lang-tr">Yorumlayıcı zaten küçük bir statik binary olduğundan, tüm bir Lovax programı — <code>net</code> dahil — tek kendine-yeten çalıştırılabilire paketlenir. Oyuncuların başka hiçbir şey kurmadan çalıştırır.</span></p>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
 <pre>lovax bundle game.lov -o game
 ./game arg1 arg2      # no Lovax install; argv reaches the app via os.args()</pre></div>
-      <p>The same model behind Deno <code>compile</code> and Bun <code>--compile</code>, natural here because there was never a runtime to ship separately.</p>
+      <p><span class="lang-en">The same model behind Deno <code>compile</code> and Bun <code>--compile</code>, natural here because there was never a runtime to ship separately.</span>
+      <span class="lang-tr">Deno <code>compile</code> ve Bun <code>--compile</code> arkasındaki aynı model; burada doğal çünkü ayrıca dağıtılacak bir runtime hiç olmadı.</span></p>
     </div></section>
 
-    <!-- UNDER THE HOOD -->
-    <section id="internals"><div class="wrap">
-      <div class="kicker">Runtime</div>
-      <h2>Under the hood</h2>
-      <p>Lovax is one C++17 translation unit with no third-party code. Source flows through a short, legible pipeline — each stage a small header you can read end to end:</p>
-      <ul>
-        <li><strong>Lexer → Parser</strong> turn <code>.lov</code> text into an AST, with located, fix-suggesting errors and a bounded recursion depth so pathological source can't smash the stack.</li>
-        <li><strong>Compiler</strong> lowers the AST to bytecode for a stack VM; <strong>the VM</strong> runs it on a computed-goto dispatch loop.</li>
-        <li><strong>Three-tier JIT</strong> lifts hot loops to native x86-64 through its own encoder: a register allocator for integer loops, a tracing compiler for float / struct / list loops (with allocation sinking), and a template compiler as the always-correct fallback.</li>
-        <li><strong>Garbage collector</strong> is a tracing, incremental collector with sub-millisecond pauses and a write barrier — tuned for a frame budget, not a batch job.</li>
-      </ul>
-      <p>Values are <strong>NaN-boxed</strong> into 8 bytes (a 16-byte tagged-union fallback exists for platforms without the pointer guarantee), and integers stay <strong>exact 64-bit</strong> — never silently demoted to a double. Every JIT tier is proven bit-identical to the interpreter across a differential matrix, sanitizers, and an adversarial torture suite; the interpreter is always the oracle.</p>
-      <div class="note"><span class="ic">✳</span><p>The JIT, GC and value model were <strong>studied, not copied</strong>, from the <a href="https://www.lua.org/">Lua 5.5</a> and <a href="https://github.com/python/cpython">CPython</a> source trees — reading how they solve a problem, then writing our own zero-dependency answer. <a href="https://luajit.org/">LuaJIT</a> is the north star for the tracing JIT.</p></div>
+    <!-- ABOUT -->
+    <section id="about"><div class="wrap">
+      <div class="kicker">About</div>
+      <h2><span class="lang-en">About Lovax</span><span class="lang-tr">Lovax hakkında</span></h2>
+      <p><span class="lang-en">Lovax is a from-scratch language, written in modern C++17 with <strong>zero third-party dependencies</strong>, aimed at being the scripting layer for an upcoming 2 / 2.5D game engine — as simple as Python to write, close to C++ in speed to run. It is developed in the open, correctness-first: nothing merges unless the whole test battery is green, and the interpreter is always the reference every faster path must match.</span>
+      <span class="lang-tr">Lovax, modern C++17 ile <strong>sıfır üçüncü-parti bağımlılıkla</strong> sıfırdan yazılan bir dildir; gelecek bir 2 / 2.5D oyun motorunun betik katmanı olmayı hedefler — yazması Python kadar sade, çalışması C++'a yakın hızlı. Açıkta, önce-doğruluk ilkesiyle geliştirilir: tüm test bataryası yeşil olmadan hiçbir şey birleşmez, ve yorumlayıcı her hızlı yolun eşleşmesi gereken referanstır.</span></p>
+      <div class="about-grid">
+        <div class="about-card">
+          <h4 style="margin:0 0 .6rem"><span class="lang-en">Project</span><span class="lang-tr">Proje</span></h4>
+          <p style="margin:0 0 1rem;font-size:.92rem"><span class="lang-en">Source, issues and releases live on GitHub. Contributions and bug reports are welcome — the whole implementation is a small set of readable headers.</span>
+          <span class="lang-tr">Kaynak, sorunlar ve sürümler GitHub'da. Katkı ve hata bildirimleri memnuniyetle karşılanır — tüm uygulama okunur başlıklardan oluşan küçük bir settir.</span></p>
+          <div class="cta-row">
+            <a class="btn primary" href="https://github.com/uixova/lovax">github.com/uixova/lovax</a>
+          </div>
+        </div>
+        <div class="about-card">
+          <div class="stat"><span class="v">v1.2.0</span><span class="l"><span class="lang-en">current release</span><span class="lang-tr">güncel sürüm</span></span></div>
+          <div class="stat"><span class="v">0</span><span class="l"><span class="lang-en">third-party dependencies</span><span class="lang-tr">üçüncü-parti bağımlılık</span></span></div>
+          <div class="stat"><span class="v">C++17</span><span class="l"><span class="lang-en">single translation unit</span><span class="lang-tr">tek derleme birimi</span></span></div>
+          <div class="stat"><span class="v">MIT</span><span class="l"><span class="lang-en">style license</span><span class="lang-tr">tarzı lisans</span></span></div>
+        </div>
+      </div>
+      <p style="margin-top:1.4rem;font-size:.9rem;color:var(--muted)"><span class="lang-en">Credit where due: the runtime's hardest parts were learned by reading <a href="https://www.lua.org/">Lua 5.5</a>, <a href="https://luajit.org/">LuaJIT</a> and <a href="https://github.com/python/cpython">CPython</a> — studied for method, never copied.</span>
+      <span class="lang-tr">Hakkı teslim: runtime'ın en zor kısımları <a href="https://www.lua.org/">Lua 5.5</a>, <a href="https://luajit.org/">LuaJIT</a> ve <a href="https://github.com/python/cpython">CPython</a> okunarak öğrenildi — yöntem için incelendi, asla kopyalanmadı.</span></p>
     </div></section>
 
     <footer><div class="wrap">
       <div class="foot-top">
         <div>
-          <div class="brand" style="margin-bottom:.4rem"><span class="mark">🔆</span><span class="word">Lovax</span></div>
-          <div style="max-width:40ch">A from-scratch, zero-dependency language for a 2 / 2.5D game engine. Written in modern C++17.</div>
+          <div class="brand" style="margin-bottom:.5rem"><span class="mark">🔆</span><span class="word">Lovax</span></div>
+          <div style="max-width:40ch"><span class="lang-en">A from-scratch, zero-dependency language for a 2 / 2.5D game engine. Written in modern C++17.</span><span class="lang-tr">2 / 2.5D oyun motoru için sıfırdan, bağımlılıksız bir dil. Modern C++17 ile yazıldı.</span></div>
         </div>
-        <div>
+        <div style="text-align:right">
           <div style="margin-bottom:.3rem"><a href="https://github.com/uixova/lovax">github.com/uixova/lovax</a></div>
-          <div style="color:var(--faint);font-size:.8rem">v1.2.0 · MIT-style license · built with study, not copy, from Lua 5.5 &amp; CPython</div>
+          <div style="color:var(--faint);font-size:.8rem">v1.2.0 · <span class="lang-en">MIT-style license · studied, not copied</span><span class="lang-tr">MIT-tarzı lisans · kopyalanmadan incelendi</span></div>
         </div>
       </div>
     </div></footer>
@@ -559,38 +666,56 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
 
 <script>
 (function(){
-  // ---- theme toggle ----
-  var root=document.documentElement, btn=document.getElementById('themebtn'),
-      ic=document.getElementById('themeic'), lbl=document.getElementById('themelbl');
+  var root=document.documentElement;
+  // ---- theme ----
+  var tbtn=document.getElementById('themebtn'),tic=document.getElementById('themeic');
   function sysDark(){return window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches;}
-  function cur(){var t=root.getAttribute('data-theme');return t?t:(sysDark()?'dark':'light');}
-  function paint(){var d=cur()==='dark';ic.textContent=d?'☀':'☾';lbl.textContent=d?'Light':'Dark';}
-  try{var s=localStorage.getItem('lovax-theme');if(s)root.setAttribute('data-theme',s);}catch(e){}
-  paint();
-  btn.addEventListener('click',function(){
-    var next=cur()==='dark'?'light':'dark';
-    root.setAttribute('data-theme',next);
-    try{localStorage.setItem('lovax-theme',next);}catch(e){}
-    paint();
-  });
-
+  function curTheme(){var t=root.getAttribute('data-theme');return t?t:(sysDark()?'dark':'light');}
+  function paintTheme(){tic.textContent=curTheme()==='dark'?'☀':'☾';}
+  try{var st=localStorage.getItem('lovax-theme');if(st)root.setAttribute('data-theme',st);}catch(e){}
+  paintTheme();
+  tbtn.addEventListener('click',function(){var n=curTheme()==='dark'?'light':'dark';root.setAttribute('data-theme',n);try{localStorage.setItem('lovax-theme',n);}catch(e){}paintTheme();});
+  // ---- language ----
+  var lbtn=document.getElementById('langbtn');
+  function curLang(){return root.getAttribute('data-lang')==='tr'?'tr':'en';}
+  function paintLang(){var l=curLang();lbtn.querySelectorAll('.seg').forEach(function(s){s.classList.toggle('on',s.getAttribute('data-l')===l);});}
+  try{var sl=localStorage.getItem('lovax-lang');if(sl)root.setAttribute('data-lang',sl);}catch(e){}
+  paintLang();
+  lbtn.addEventListener('click',function(){var n=curLang()==='tr'?'en':'tr';root.setAttribute('data-lang',n);try{localStorage.setItem('lovax-lang',n);}catch(e){}paintLang();});
   // ---- mobile menu ----
-  var mb=document.getElementById('menubtn'), sb=document.getElementById('sidebar');
+  var mb=document.getElementById('menubtn'),sb=document.getElementById('sidebar');
   if(mb)mb.addEventListener('click',function(){sb.classList.toggle('open');});
-  sb.addEventListener('click',function(e){if(e.target.tagName==='A'&&window.innerWidth<=860)sb.classList.remove('open');});
-
-  // ---- scroll spy ----
-  var links=[].slice.call(document.querySelectorAll('.nav-group a[href^="#"]'));
-  var map={};links.forEach(function(a){var id=a.getAttribute('href').slice(1);var el=document.getElementById(id);if(el)map[id]=a;});
+  // ---- accordion nav ----
+  var items=[].slice.call(document.querySelectorAll('.toc .item'));
+  items.forEach(function(it){
+    var a=it.querySelector(':scope>a');
+    a.addEventListener('click',function(e){
+      if(it.hasAttribute('data-sub')){
+        // toggle expansion; still navigate
+        items.forEach(function(o){if(o!==it)o.classList.remove('open');});
+        it.classList.add('open');
+      }
+      if(window.innerWidth<=880)sb.classList.remove('open');
+    });
+  });
+  // ---- scroll spy: highlight section + open its accordion ----
+  var allLinks=[].slice.call(document.querySelectorAll('.toc a[href^="#"]'));
+  var map={};allLinks.forEach(function(a){var id=a.getAttribute('href').slice(1);(map[id]=map[id]||[]).push(a);});
+  var ids=Object.keys(map),targets=ids.map(function(id){return document.getElementById(id);}).filter(Boolean);
   var obs=new IntersectionObserver(function(ents){
-    ents.forEach(function(en){if(en.isIntersecting){
-      links.forEach(function(a){a.classList.remove('active');});
-      var a=map[en.target.id];if(a)a.classList.add('active');
-    }});
-  },{rootMargin:'-10% 0px -80% 0px'});
-  Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)obs.observe(el);});
+    ents.forEach(function(en){
+      if(en.isIntersecting){
+        allLinks.forEach(function(a){a.classList.remove('active');});
+        (map[en.target.id]||[]).forEach(function(a){a.classList.add('active');});
+        // open the owning accordion item
+        var owner=(map[en.target.id]||[])[0];
+        if(owner){var it=owner.closest('.item');if(it&&it.hasAttribute('data-sub')){items.forEach(function(o){if(o!==it)o.classList.remove('open');});it.classList.add('open');}}
+      }
+    });
+  },{rootMargin:'-8% 0px -82% 0px'});
+  targets.forEach(function(t){obs.observe(t);});
 
-  // ---- lightweight Lovax syntax highlighter ----
+  // ---- Lovax syntax highlighter ----
   var KW=['set','fn','if','else','while','for','in','return','struct','enum','match','try','catch',
           'finally','throw','yield','spawn','resume','use','and','or','not','break','continue','this'];
   var LIT=['true','false','null'];
@@ -599,42 +724,20 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
   var kwRe=new RegExp('\\b('+KW.concat(LIT).join('|')+')\\b','g');
   var builtRe=new RegExp('\\b('+BUILT.join('|')+')\\b','g');
   function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-  function hl(src){
-    var lines=src.split('\n');
-    return lines.map(function(line){
-      var hash=line.indexOf('#');
-      // only treat as comment if the # is not inside a string
-      var inStr=false,q='';
-      for(var i=0;i<line.length;i++){var c=line[i];
-        if(inStr){if(c===q)inStr=false;}
-        else if(c==='"'){inStr=true;q='"';}
-        else if(c==='#'){hash=i;break;}
-        if(i===line.length-1)hash=(hash>=0&&!inStr)?hash:-1;
-      }
-      var code=line, comment='';
-      if(hash>=0){code=line.slice(0,hash);comment=line.slice(hash);}
-      // tokenize the code part: split out strings first
-      var out='',re=/"(?:[^"\\]|\\.)*"/g,last=0,m;
-      while((m=re.exec(code))){
-        out+=frag(code.slice(last,m.index));
-        out+='<span class="tok-s">'+esc(m[0])+'</span>';
-        last=m.index+m[0].length;
-      }
-      out+=frag(code.slice(last));
-      if(comment)out+='<span class="tok-c">'+esc(comment)+'</span>';
-      return out;
-    }).join('\n');
-  }
-  function frag(s){
-    s=esc(s);
+  function frag(s){s=esc(s);
     s=s.replace(/\b(0x[0-9A-Fa-f]+|\d[\d_]*\.?\d*(?:e-?\d+)?)\b/g,'<span class="tok-n">$1</span>');
     s=s.replace(builtRe,'<span class="tok-b">$1</span>');
-    s=s.replace(kwRe,'<span class="tok-k">$1</span>');
-    return s;
-  }
-  document.querySelectorAll('.code[data-lov] pre').forEach(function(pre){
-    pre.innerHTML=hl(pre.textContent);
-  });
+    s=s.replace(kwRe,'<span class="tok-k">$1</span>');return s;}
+  function hl(src){return src.split('\n').map(function(line){
+    var inStr=false,hash=-1;
+    for(var i=0;i<line.length;i++){var c=line[i];
+      if(inStr){if(c==='"')inStr=false;}else if(c==='"'){inStr=true;}else if(c==='#'){hash=i;break;}}
+    var code=line,comment='';if(hash>=0){code=line.slice(0,hash);comment=line.slice(hash);}
+    var out='',re=/"(?:[^"\\]|\\.)*"/g,last=0,m;
+    while((m=re.exec(code))){out+=frag(code.slice(last,m.index));out+='<span class="tok-s">'+esc(m[0])+'</span>';last=m.index+m[0].length;}
+    out+=frag(code.slice(last));if(comment)out+='<span class="tok-c">'+esc(comment)+'</span>';return out;
+  }).join('\n');}
+  document.querySelectorAll('.code[data-lov] pre').forEach(function(pre){pre.innerHTML=hl(pre.textContent);});
 })();
 </script>
 </body>
