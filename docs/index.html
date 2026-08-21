@@ -226,8 +226,8 @@ footer a{color:var(--accent-ink)}
   <aside class="sidebar" id="sidebar">
     <div class="brand"><span class="mark">🔆</span><span class="word">Lovax</span><span class="ver">v1.2</span></div>
     <div class="tagline-side">
-      <span class="lang-en">Simple like Python, fast like C++. Built for games.</span>
-      <span class="lang-tr">Python kadar sade, C++ kadar hızlı. Oyunlar için.</span>
+      <span class="lang-en">Simple like Python, fast like C++. Zero dependencies.</span>
+      <span class="lang-tr">Python kadar sade, C++ kadar hızlı. Sıfır bağımlılık.</span>
     </div>
     <div class="switchrow">
       <button class="pill" id="langbtn" aria-label="Language">🌐 <span class="seg" data-l="en">EN</span><span class="seg" data-l="tr">TR</span></button>
@@ -266,10 +266,10 @@ footer a{color:var(--accent-ink)}
     <!-- HERO -->
     <div class="wrap hero" id="top">
       <div class="eyebrow"><span class="dot"></span><span class="lang-en">Zero dependencies · own JIT · exact int64</span><span class="lang-tr">Sıfır bağımlılık · kendi JIT'i · tam int64</span></div>
-      <h1><span class="lang-en">The scripting language for your <span class="lit">game engine</span>.</span><span class="lang-tr">Oyun motorunun <span class="lit">betik dili</span>.</span></h1>
+      <h1><span class="lang-en">As simple as Python. As fast as <span class="lit">native code</span>.</span><span class="lang-tr">Python kadar sade. <span class="lit">Native</span> kadar hızlı.</span></h1>
       <p class="lede">
-        <span class="lang-en">Lovax reads like Python and runs on a <strong>three-tier JIT</strong> it carries itself — no LLVM, no runtime to install. Loot tables, signals, coroutines and deterministic RNG are <strong>in the language</strong>, not bolted on.</span>
-        <span class="lang-tr">Lovax Python gibi okunur, kendi taşıdığı <strong>üç-katmanlı JIT</strong> ile çalışır — LLVM yok, kurulacak runtime yok. Ganimet tabloları, sinyaller, coroutine'ler ve deterministik RNG <strong>dilin içinde</strong>, sonradan eklenmiş değil.</span>
+        <span class="lang-en">A general-purpose language that reads like Python and runs on a <strong>three-tier JIT</strong> it carries itself — no LLVM, no runtime to install. Batteries from signals to deterministic RNG are <strong>in the language</strong>, so it's as at home in a game loop as in a tool or a server.</span>
+        <span class="lang-tr">Python gibi okunan, kendi taşıdığı <strong>üç-katmanlı JIT</strong> ile çalışan genel-amaçlı bir dil — LLVM yok, kurulacak runtime yok. Sinyallerden deterministik RNG'ye kadar <strong>dilin içinde</strong> gelen özelliklerle bir oyun döngüsünde de bir araçta ya da sunucuda da rahat.</span>
       </p>
       <div class="cta-row">
         <a class="btn primary" href="#install"><span class="lang-en">Get started →</span><span class="lang-tr">Başla →</span></a>
@@ -566,8 +566,8 @@ lovax --sandbox --allow-net app.lov       # untrusted code: net yes, disk/env no
       <h2><span class="lang-en">Performance</span><span class="lang-tr">Performans</span></h2>
       <p><span class="lang-en">Lovax compiles to bytecode on a computed-goto stack VM, then lifts hot loops to native x86-64 through a <strong>three-tier JIT</strong> — a register allocator, a tracing compiler, and an always-correct template fallback — all from scratch, no LLVM.</span>
       <span class="lang-tr">Lovax, computed-goto yığın-VM'inde bytecode'a derlenir, sonra sıcak döngüleri <strong>üç-katmanlı JIT</strong> ile native x86-64'e taşır — register ayırıcı, izleyen (tracing) derleyici ve her-zaman-doğru şablon yedeği — hepsi sıfırdan, LLVM yok.</span></p>
-      <p><span class="lang-en">Two levers make game loops fast: struct fields are unboxed inline values, and <strong>allocation sinking</strong> scalar-replaces per-frame temporaries — a <code>tmp = [i, i+1, i+2]</code> built and read each iteration never reaches the heap. The interpreter is always the oracle: every tier is verified bit-identical to it.</span>
-      <span class="lang-tr">İki kaldıraç oyun döngülerini hızlandırır: struct alanları kutulanmamış satır-içi değerlerdir ve <strong>allocation sinking</strong>, kare-başı geçici nesneleri skalerle değiştirir — her iterasyonda kurulup okunan bir <code>tmp = [i, i+1, i+2]</code> heap'e hiç ulaşmaz. Yorumlayıcı daima referanstır: her katman ona bit-birebir doğrulanır.</span></p>
+      <p><span class="lang-en">Two levers make tight loops fast: struct fields are unboxed inline values, and <strong>allocation sinking</strong> scalar-replaces short-lived temporaries — a <code>tmp = [i, i+1, i+2]</code> built and read each iteration never reaches the heap. The interpreter is always the oracle: every tier is verified bit-identical to it.</span>
+      <span class="lang-tr">İki kaldıraç sıkı döngüleri hızlandırır: struct alanları kutulanmamış satır-içi değerlerdir ve <strong>allocation sinking</strong>, kısa-ömürlü geçici nesneleri skalerle değiştirir — her iterasyonda kurulup okunan bir <code>tmp = [i, i+1, i+2]</code> heap'e hiç ulaşmaz. Yorumlayıcı daima referanstır: her katman ona bit-birebir doğrulanır.</span></p>
       <div class="tablewrap"><table>
         <thead><tr><th>Benchmark</th><th class="num">Lovax</th><th class="num">LuaJIT</th><th class="num">Node</th><th><span class="lang-en">what it is</span><span class="lang-tr">ne olduğu</span></th></tr></thead>
         <tbody>
@@ -631,8 +631,8 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
     <section id="about"><div class="wrap">
       <div class="kicker">About</div>
       <h2><span class="lang-en">About Lovax</span><span class="lang-tr">Lovax hakkında</span></h2>
-      <p><span class="lang-en">Lovax is a from-scratch language, written in modern C++17 with <strong>zero third-party dependencies</strong>, aimed at being the scripting layer for an upcoming 2 / 2.5D game engine — as simple as Python to write, close to C++ in speed to run. It is developed in the open, correctness-first: nothing merges unless the whole test battery is green, and the interpreter is always the reference every faster path must match.</span>
-      <span class="lang-tr">Lovax, modern C++17 ile <strong>sıfır üçüncü-parti bağımlılıkla</strong> sıfırdan yazılan bir dildir; gelecek bir 2 / 2.5D oyun motorunun betik katmanı olmayı hedefler — yazması Python kadar sade, çalışması C++'a yakın hızlı. Açıkta, önce-doğruluk ilkesiyle geliştirilir: tüm test bataryası yeşil olmadan hiçbir şey birleşmez, ve yorumlayıcı her hızlı yolun eşleşmesi gereken referanstır.</span></p>
+      <p><span class="lang-en">Lovax is a from-scratch, general-purpose language, written in modern C++17 with <strong>zero third-party dependencies</strong> — as simple as Python to write, close to native in speed to run. It's a comfortable fit for tools, servers, scripts and game code alike, and its batteries (signals, deterministic RNG, save files, a capability sandbox) make it especially strong for games. It is developed in the open, correctness-first: nothing merges unless the whole test battery is green, and the interpreter is always the reference every faster path must match.</span>
+      <span class="lang-tr">Lovax, modern C++17 ile <strong>sıfır üçüncü-parti bağımlılıkla</strong> sıfırdan yazılan genel-amaçlı bir dildir — yazması Python kadar sade, çalışması native'e yakın hızlı. Araçlar, sunucular, betikler ve oyun kodu için eşit derecede rahat; içindeki özellikler (sinyaller, deterministik RNG, kayıt dosyaları, yetenek sandbox'ı) onu özellikle oyunlarda güçlü kılar. Açıkta, önce-doğruluk ilkesiyle geliştirilir: tüm test bataryası yeşil olmadan hiçbir şey birleşmez, ve yorumlayıcı her hızlı yolun eşleşmesi gereken referanstır.</span></p>
       <div class="about-grid">
         <div class="about-card">
           <h4 style="margin:0 0 .6rem"><span class="lang-en">Project</span><span class="lang-tr">Proje</span></h4>
@@ -657,7 +657,7 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
       <div class="foot-top">
         <div>
           <div class="brand" style="margin-bottom:.5rem"><span class="mark">🔆</span><span class="word">Lovax</span></div>
-          <div style="max-width:40ch"><span class="lang-en">A from-scratch, zero-dependency language for a 2 / 2.5D game engine. Written in modern C++17.</span><span class="lang-tr">2 / 2.5D oyun motoru için sıfırdan, bağımlılıksız bir dil. Modern C++17 ile yazıldı.</span></div>
+          <div style="max-width:40ch"><span class="lang-en">A from-scratch, zero-dependency, general-purpose language. Written in modern C++17.</span><span class="lang-tr">Sıfırdan, bağımlılıksız, genel-amaçlı bir dil. Modern C++17 ile yazıldı.</span></div>
         </div>
         <div style="text-align:right">
           <div style="margin-bottom:.3rem"><a href="https://github.com/uixova/lovax">github.com/uixova/lovax</a></div>

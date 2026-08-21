@@ -2,7 +2,7 @@
 
 # 🔆 Lovax
 
-**A programming language that aims to be as simple as Python and as fast as C++ — built as the scripting language for an upcoming 2 / 2.5D game engine.**
+**A general-purpose programming language that aims to be as simple as Python and as fast as C++ — with its own JIT, zero dependencies, and batteries that make it especially strong for games.**
 
 Written from scratch in modern C++17, zero dependencies, single-command build.
 
@@ -132,7 +132,7 @@ lovax bundle game.lov -o game    # one self-contained executable — no install 
 user runs the result with nothing else installed — the model Deno `compile` and
 Bun `--compile` use. A plain `lovax` binary has no trailer and behaves as usual.
 
-> 📖 **Full documentation:** open [docs/index.html](docs/index.html) in a browser — a complete language reference with runnable examples.
+> 📖 **Full documentation:** **[uixova.github.io/lovax](https://uixova.github.io/lovax/)** — a complete, bilingual (EN/TR) language reference with runnable examples (also at [docs/index.html](docs/index.html)).
 
 ## Language Tour
 
@@ -359,7 +359,7 @@ math builtins (`sqrt`, `floor`, `ceil`, `abs`) emit SSE inside a trace, and
 `tmp = [i, i+1, i+2]; sink += tmp[0]` or `v = V(...); sink += v.x` loop no longer
 allocates at all — it becomes register arithmetic.
 
-Because Lovax is a **game** language, the benchmarks that matter are entity/update
+The benchmarks that matter are the hot loops real programs run — entity/update
 loops, not generic recursion. Same machine, outputs verified identical, best-of-3
 (ms, lower is better; full harness + all languages in [benchmarks/cross/](benchmarks/cross/)):
 
@@ -408,8 +408,9 @@ MIT — see [LICENSE](LICENSE).
 <details>
 <summary><h2>🇹🇷 Türkçe</h2></summary>
 
-**Lovax**, Python kadar sade söz dizimine sahip, C++ ile sıfırdan yazılmış, ileride
-geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama dilidir.
+**Lovax**, Python kadar sade söz dizimine sahip, C++ ile sıfırdan yazılmış, kendi
+JIT'i ve sıfır bağımlılığı olan genel-amaçlı bir programlama dilidir — araçlar,
+sunucular ve betikler için rahat, oyunlar için ise özellikle güçlüdür.
 
 ### Neden Lovax?
 
