@@ -404,11 +404,15 @@ say 4 in range(0, 10, 2) # true</pre></div>
       <p><span class="lang-en"><code>?.</code> reads a field only when the value isn't <code>null</code> (otherwise the chain is <code>null</code>), and <code>??</code> supplies a fallback — together they replace a pile of guards.</span>
       <span class="lang-tr"><code>?.</code> bir alanı yalnızca değer <code>null</code> değilken okur (aksi hâlde zincir <code>null</code> olur), <code>??</code> ise bir yedek verir — birlikte bir yığın kontrolün yerine geçerler.</span></p>
       <div class="code" data-lov><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fn">null-safety.lov</span></div>
-<pre>set weapon = player?.equipped?.name ?? "bare hands"
+<pre>struct Node:
+    value = 0
+    next = null              # a field that may be null
 
-set x = null
-say x ?? "fallback"          # fallback
-say has(map, "key")         # test a map key without throwing</pre></div>
+set tail = Node(2, null)
+set head = Node(1, tail)
+say head.next?.value ?? -1   # 2   — next exists
+say tail.next?.value ?? -1   # -1  — next is null, so the chain is null
+say has(map, "key")          # test a map key without throwing</pre></div>
     </div></section>
 
     <!-- CONTROL -->

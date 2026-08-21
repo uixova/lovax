@@ -37,12 +37,13 @@ say "HP: {player.hp}, you found: {reward}"
 file.save_data("save.json", player)
 ```
 
-## New in v0.7 — a real core
+## Structs, enums & error handling
 
 ```lovax
 struct Player:
     hp = 100
     name = "hero"
+    target = null             # a nullable field
     fn hurt(amount):          # 'this' is implicit
         this.hp -= amount
     fn status():
@@ -50,7 +51,7 @@ struct Player:
 
 enum State: IDLE, WALK, ATTACK
 
-set p = Player(80, "Aria")
+set p = Player(80, "Aria", null)
 p.hurt(30)
 say p.status()                # Aria: 50 hp
 say State.ATTACK              # 2
@@ -62,8 +63,8 @@ catch e:
 finally:
     say "boot complete"
 
-set weapon = p.weapon?.name ?? "bare hands"   # null-safe + coalesce
-set double = fn(x) -> x * 2                    # arrow lambda
+set label = p.target?.name ?? "no target"   # ?. guards a null base, ?? gives a fallback
+set double = fn(x) -> x * 2                  # arrow lambda (single expression)
 ```
 
 Run `lovax` with no arguments for an interactive **REPL**. Full rationale for what
@@ -71,7 +72,7 @@ earned a keyword (and what was rejected) is in
 [RFC-009](rfcs/009-rich-core.md); `struct`/`enum` in [RFC-010](rfcs/010-struct-enum.md),
 error handling in [RFC-008](rfcs/008-error-handling.md).
 
-## New in v0.10 — general-purpose & safe
+## Networking, packages & the capability sandbox
 
 ```lovax
 use net                                  # TCP/UDP sockets: servers, clients, LAN, VPS
@@ -298,7 +299,7 @@ A manifest (`lovax.json`) with version pinning and a registry are planned (see
 | **`os`** | `env` `set_env` `platform` `cwd` `args` `path_join` |
 
 > Binary formats beyond raw bytes (PDF, images, audio) belong to the engine plugin layer
-> (planned v1.0 embedding API), not the language core (RFC-006).
+> (the embedding API, [RFC-025](rfcs/025-embed-ffi.md)), not the language core (RFC-006).
 
 ### Errors
 
@@ -382,8 +383,9 @@ including the generic microbenches.
 ## Architecture & Roadmap
 
 `Lexer -> Parser (Pratt) -> AST -> Compiler -> Bytecode -> Stack VM -> JIT`.
-The language surface is stable (118 golden tests pin every behavior — including
-error messages — cross-checked against the interpreter across every build axis).
+The language surface is stable (134 golden tests pin every behavior — including
+error messages — cross-checked against the interpreter across every build axis,
+plus an adversarial torture gate that actively tries to break it).
 Milestones:
 
 1. ~~VM phase 2 — computed goto, superinstructions, call fast path~~ **done (v0.8)**.
@@ -391,7 +393,8 @@ Milestones:
 3. ~~Tracing GC + 16-byte value~~ **done (v0.11)** ([RFC-013](rfcs/013-value-representation.md)).
 4. ~~Compact/unboxed struct fields, incremental GC (≤1 ms pauses), stdlib gaps (set, tuple, bytes, regex, random distributions)~~ **done (v0.12–v0.16)**.
 5. ~~8-byte NaN-boxed value (exact int64 kept) + C++/C-ABI embedding bridge for engines~~ **done (v0.18 / v1.0, [RFC-025](rfcs/025-embed-ffi.md))**.
-6. **Now (v1.x JIT):** three-tier native compilation is live (register allocator + tracing + template, own x86-64 encoder). Next: hoist per-iteration bounds/range checks (ABC + LICM) and a young-generation nursery for per-frame allocation churn.
+6. ~~Three-tier native compilation (register allocator + tracing + template, own x86-64 encoder), **allocation sinking** (per-frame temporaries no longer allocate — `gc` now ~LuaJIT parity), true division + `//`, single-binary `lovax bundle`~~ **done (v1.0–v1.2)**.
+7. **Next:** hoist per-iteration bounds/range checks (LICM over an IR-driven trace) and a young-generation nursery for escaping per-frame allocation churn.
 
 See [lovax.md](lovax.md) for the deep performance research and [rfcs/](rfcs/) for design decisions.
 
@@ -421,23 +424,27 @@ geliştirilecek bir 2/2.5D oyun motorunun ana betik dili olacak bir programlama 
 
 ### Hızlı Başlangıç
 
+Python gibi: bir kez kur, sonra çalıştır — program başına derleme yok (`lovax dosya.lov`,
+`python app.py` gibidir):
+
 ```bash
-make                                      # optimize edilmiş ./lovax (veya: make dev / make test)
-./lovax examples/turkish_showcase.lov     # Türkçe tanımlayıcı vitrini
-./lovax examples/dungeon.lov
-./lovax                                   # argümansız: etkileşimli REPL
+curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh   # hazır binary indirir
+lovax examples/turkish_showcase.lov       # Türkçe tanımlayıcı vitrini
+lovax                                      # argümansız: etkileşimli REPL
+
+make                                       # (opsiyonel) kaynaktan derle — CPython'ı kendin derlemek gibi
 ```
 
 ### Öne çıkan kurallar
 
 - `set x = 5` **tanımlar**, çıplak `x = 5` **var olanı günceller** (yazım hatası koruması, RFC-001).
 - `"metin" + 5` bilerek hatadır; `text(5)` veya `"toplam: {x}"` interpolasyonu kullanılır.
-- `%` ve `/` taban (floor) kurallıdır: `(a / b) * b + a % b == a` her zaman doğrudur.
+- `/` **gerçek bölmedir** (her zaman float: `7 / 2 == 3.5`); `//` **taban bölmesidir** ve floor `%` ile tutarlıdır: `(a // b) * b + a % b == a` her zaman doğrudur.
 - `match` ilk eşleşen dalı çalıştırır, düşme yoktur; `_` jokerdir.
 - Kendi kütüphaneni yaz: `use "libs/envanter.lov"` — bir kez yüklenir, döngüsel `use`
   net hatayla yakalanır.
 
-Testler: `./tests/run_tests.sh` (66 golden test) + `./tests/fuzz.sh` (güvenlik kapısı). Paket kurma: `lovax install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/).
+Testler: `./tests/run_tests.sh` (134 golden test) + `./tests/fuzz.sh` (güvenlik kapısı) + `./tests/torture.sh` (kırmaya çalışan adversarial kapı). Paket kurma: `lovax install kullanıcı/repo` → `use paket_adı`. Tasarım kararları: [rfcs/](rfcs/). Tam dokümanlar: [docs/index.html](docs/index.html).
 
 </details>
 
