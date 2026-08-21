@@ -242,18 +242,24 @@ file.save_data("save.json", player)</pre>
     <section id="install"><div class="wrap">
       <div class="kicker">Getting started</div>
       <h2>Install &amp; run</h2>
-      <p>A prebuilt binary needs no compiler. On Linux or macOS:</p>
+      <p>Install once, then run your files — the same two steps as Python. There is <strong>no build or compile step per program</strong>: <code>lovax game.lov</code> is to Lovax what <code>python app.py</code> is to Python.</p>
+
+      <p><strong>1. Install</strong> — the installer downloads the prebuilt binary for your platform and puts it on your <code>PATH</code>. No compiler, nothing else.</p>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
-<pre>curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh</pre></div>
-      <p>Prefer source? Lovax is a single translation unit with <strong>zero dependencies</strong> — any C++17 compiler builds it:</p>
+<pre>curl -fsSL https://raw.githubusercontent.com/uixova/lovax/main/install.sh | sh   # Linux / macOS
+irm https://raw.githubusercontent.com/uixova/lovax/main/install.ps1 | iex        # Windows</pre></div>
+
+      <p><strong>2. Run</strong> — point <code>lovax</code> at a file, or launch the REPL with no arguments. That's the whole workflow.</p>
       <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
-<pre>make                 # optimized ./lovax   (or: make dev / make test)
+<pre>lovax game.lov         # run a program   (like: python app.py)
+lovax                  # interactive REPL
+lovax --version        # Lovax 1.2.0
+lovax update           # self-update to the newest release</pre></div>
+
+      <div class="note"><span class="ic">✳</span><p><strong>Building from source is optional</strong> — the same as compiling CPython yourself, not something you do to run a script. If you'd rather build the interpreter (to contribute, or on a platform with no release), it's one zero-dependency C++17 command; after that you still just <code>lovax file.lov</code>.</p></div>
+      <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell · optional, build from source</span></div>
+<pre>make                                       # optimized ./lovax   (or: make dev / make test)
 g++ -std=c++17 -O3 -o lovax src/main.cpp   # no make? one line still works</pre></div>
-      <p>Then run a file, or start the REPL with no arguments:</p>
-      <div class="code plain"><div class="bar"><span class="dot"></span><span class="fn">shell</span></div>
-<pre>lovax hello.lov
-lovax                # interactive REPL
-lovax --version      # Lovax 1.2.0</pre></div>
     </div></section>
 
     <!-- HELLO -->
