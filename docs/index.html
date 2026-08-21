@@ -16,7 +16,7 @@
   --ember:#6E2C0B;
   --on-accent:#FFF7EC;
   --border:#E1D8C5; --border-strong:#CFC3A9;
-  --k:#B4530A; --str:#2F7A44; --num:#9A4E12; --com:#A79A80;
+  --k:#B4530A; --str:#2F7A44; --num:#9A4E12; --com:#A79A80; --fn:#1F6F86; --mod:#3A8296;
   --shadow-sm:0 1px 2px rgba(60,42,14,.06);
   --shadow:0 2px 4px rgba(60,42,14,.05),0 14px 34px -14px rgba(90,58,16,.24);
   --radius:14px; --maxread:768px;
@@ -30,7 +30,7 @@
     --ember:#F6C88C;
     --on-accent:#1B1206;
     --border:#2B2519; --border-strong:#3D3524;
-    --k:#F0A63D; --str:#93D293; --num:#E7AC6C; --com:#7E7560;
+    --k:#F0A63D; --str:#93D293; --num:#E7AC6C; --com:#7E7560; --fn:#79C3D8; --mod:#6FB2C6;
     --shadow-sm:0 1px 2px rgba(0,0,0,.4);
     --shadow:0 2px 4px rgba(0,0,0,.4),0 16px 40px -16px rgba(0,0,0,.7);
   }
@@ -43,7 +43,7 @@
   --ember:#F6C88C;
   --on-accent:#1B1206;
   --border:#2B2519; --border-strong:#3D3524;
-  --k:#F0A63D; --str:#93D293; --num:#E7AC6C; --com:#7E7560;
+  --k:#F0A63D; --str:#93D293; --num:#E7AC6C; --com:#7E7560; --fn:#79C3D8; --mod:#6FB2C6;
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
   --shadow:0 2px 4px rgba(0,0,0,.4),0 16px 40px -16px rgba(0,0,0,.7);
 }
@@ -108,7 +108,7 @@ nav.toc{margin-top:1.1rem}
 /* ---- main ---- */
 .main{min-width:0;padding:0 clamp(1.1rem,4vw,3.6rem)}
 .wrap{max-width:var(--maxread);margin:0 auto}
-section{padding:3.1rem 0;border-bottom:1px solid var(--border)}
+section{padding:3.1rem 0;border-bottom:1px solid var(--border);scroll-margin-top:1.5rem}
 .kicker{display:inline-flex;align-items:center;gap:.5rem;font-family:"IBM Plex Mono";font-size:.72rem;
   text-transform:uppercase;letter-spacing:.12em;color:var(--accent-ink);font-weight:600;margin-bottom:.8rem}
 .kicker::before{content:"";width:22px;height:2px;background:var(--accent);border-radius:2px}
@@ -153,7 +153,9 @@ p code,li code,td code{background:var(--surface-2);border:1px solid var(--border
 .tok-s{color:var(--str)}
 .tok-n{color:var(--num)}
 .tok-c{color:var(--com);font-style:italic}
-.tok-b{color:var(--ink);font-weight:600}
+.tok-b{color:var(--fn);font-weight:500}
+.tok-call{color:var(--fn)}
+.tok-mod{color:var(--mod)}
 
 /* ---- feature grid ---- */
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:1rem;margin:1.8rem 0}
@@ -692,34 +694,44 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
   // ---- mobile menu ----
   var mb=document.getElementById('menubtn'),sb=document.getElementById('sidebar');
   if(mb)mb.addEventListener('click',function(){sb.classList.toggle('open');});
-  // ---- accordion nav ----
+  // ---- accordion + deterministic scroll nav ----
   var items=[].slice.call(document.querySelectorAll('.toc .item'));
-  items.forEach(function(it){
-    var a=it.querySelector(':scope>a');
+  var allLinks=[].slice.call(document.querySelectorAll('.toc a[href^="#"]'));
+  function openOnly(it){ items.forEach(function(o){ o.classList.toggle('open', o===it); }); }
+  allLinks.forEach(function(a){
     a.addEventListener('click',function(e){
-      if(it.hasAttribute('data-sub')){
-        // toggle expansion; still navigate
-        items.forEach(function(o){if(o!==it)o.classList.remove('open');});
-        it.classList.add('open');
+      var id=a.getAttribute('href').slice(1), el=document.getElementById(id);
+      if(el){                                   // scroll to the exact element ourselves
+        e.preventDefault();
+        el.scrollIntoView({behavior:'smooth', block:'start'});
+        if(history.replaceState) history.replaceState(null,'','#'+id);
       }
-      if(window.innerWidth<=880)sb.classList.remove('open');
+      var it=a.closest('.item');
+      if(it && it.hasAttribute('data-sub')) openOnly(it);
+      if(window.innerWidth<=880) sb.classList.remove('open');
     });
   });
-  // ---- scroll spy: highlight section + open its accordion ----
-  var allLinks=[].slice.call(document.querySelectorAll('.toc a[href^="#"]'));
-  var map={};allLinks.forEach(function(a){var id=a.getAttribute('href').slice(1);(map[id]=map[id]||[]).push(a);});
-  var ids=Object.keys(map),targets=ids.map(function(id){return document.getElementById(id);}).filter(Boolean);
+  // ---- scroll spy: highlight the top-most visible section; open its accordion
+  //      only when the owning section actually changes (no per-scroll thrash) ----
+  var map={}; allLinks.forEach(function(a){var id=a.getAttribute('href').slice(1);(map[id]=map[id]||[]).push(a);});
+  var targets=Object.keys(map).map(function(id){return document.getElementById(id);}).filter(Boolean);
+  var visible={}, lastOwner=null, lastId=null;
+  function refreshSpy(){
+    var best=null, bestTop=1e9;
+    Object.keys(visible).forEach(function(id){ if(visible[id]<bestTop){bestTop=visible[id];best=id;} });
+    if(!best || best===lastId) return;
+    lastId=best;
+    allLinks.forEach(function(a){ a.classList.toggle('active', a.getAttribute('href')==='#'+best); });
+    var owner=(map[best]||[])[0], it=owner && owner.closest('.item');
+    if(it && it.hasAttribute('data-sub') && it!==lastOwner){ openOnly(it); lastOwner=it; }
+  }
   var obs=new IntersectionObserver(function(ents){
     ents.forEach(function(en){
-      if(en.isIntersecting){
-        allLinks.forEach(function(a){a.classList.remove('active');});
-        (map[en.target.id]||[]).forEach(function(a){a.classList.add('active');});
-        // open the owning accordion item
-        var owner=(map[en.target.id]||[])[0];
-        if(owner){var it=owner.closest('.item');if(it&&it.hasAttribute('data-sub')){items.forEach(function(o){if(o!==it)o.classList.remove('open');});it.classList.add('open');}}
-      }
+      if(en.isIntersecting) visible[en.target.id]=en.boundingClientRect.top;
+      else delete visible[en.target.id];
     });
-  },{rootMargin:'-8% 0px -82% 0px'});
+    refreshSpy();
+  },{rootMargin:'-12% 0px -78% 0px', threshold:0});
   targets.forEach(function(t){obs.observe(t);});
 
   // ---- Lovax syntax highlighter ----
@@ -728,11 +740,15 @@ vm.run("say \"frame at {engine_time()}\"");</pre></div>
   var LIT=['true','false','null'];
   var BUILT=['say','len','push','range','sort','max','min','sum','floor','ceil','abs','sqrt','filter',
              'has','text','check','signal','connect','emit','pick_weighted','co_status','co_done'];
+  var MOD=['game','file','os','net','regex','math','strings','json','time','random','bytes'];
   var kwRe=new RegExp('\\b('+KW.concat(LIT).join('|')+')\\b','g');
-  var builtRe=new RegExp('\\b('+BUILT.join('|')+')\\b','g');
+  var builtRe=new RegExp('(?<![.>\\w])('+BUILT.join('|')+')\\b','g');   // not after a dot / inside a span
+  var modRe=new RegExp('\\b('+MOD.join('|')+')\\b(?=\\s*\\.)','g');
   function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   function frag(s){s=esc(s);
     s=s.replace(/\b(0x[0-9A-Fa-f]+|\d[\d_]*\.?\d*(?:e-?\d+)?)\b/g,'<span class="tok-n">$1</span>');
+    s=s.replace(/(\.)([A-Za-z_][A-Za-z0-9_]*)(?=\s*\()/g,'$1<span class="tok-call">$2</span>');  // .method(
+    s=s.replace(modRe,'<span class="tok-mod">$1</span>');                                        // module before dot
     s=s.replace(builtRe,'<span class="tok-b">$1</span>');
     s=s.replace(kwRe,'<span class="tok-k">$1</span>');return s;}
   function hl(src){return src.split('\n').map(function(line){
