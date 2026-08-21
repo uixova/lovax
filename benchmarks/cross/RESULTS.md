@@ -1,5 +1,35 @@
 # Cross-language benchmark
 
+## RFC-028 C1: allocation sinking — the gc gap closes on LuaJIT — 2026-08-20
+
+The trace JIT now scalar-replaces non-escaping per-frame temporaries (a list/tuple
+or struct temp built each iteration and read only by a constant accessor, then
+dropped), so the allocation-bound loops become register arithmetic. Full re-measure
+across the languages on this machine (best of 3, ms, lower better):
+
+| bench | lovax | lua5.4 | luajit | python | node | vs LuaJIT |
+|---|--:|--:|--:|--:|--:|--:|
+| gc | **2.8** | 21.2 | 2.0 | 44.0 | 26.7 | **1.4x off** (was ~8x) |
+| intloop | **158** | 425 | 208 | 2199 | 90 | **beats LuaJIT** |
+| fib | 19.9 | 101 | 12.3 | 174 | 37 | 1.6x off |
+| mandel | 7.0 | 18.4 | 3.4 | 185 | 27 | 2.1x off |
+| aos_update | 38 | 97 | 18 | n/a | 48 | 2.1x off |
+| particles | 74 | 99 | 39 | n/a | 35 | 1.9x off (escaping structs → nursery) |
+| entity_update | 28 | 74 | 6.7 | n/a | 34 | 4.1x off (LICM) |
+| qsort | 138 | 117 | 48 | 355 | 62 | 2.9x off (LICM) |
+| sieve | 103 | 88 | 23 | 464 | 46 | 4.5x off (LICM) |
+| strcat | 55 | 10 | 16 | 13 | 23 | strings — LOW priority |
+
+The headline: **gc goes 2.8ms vs LuaJIT's 2.0ms** — the allocation-sinking pass took
+the `tmp=[i,i+1,i+2]; sink+=tmp[0]` shape from ~8x off LuaJIT to essentially
+competitive (a 3M-iter micro-loop drops 0.117s→0.009s, ~13x; the struct-temp
+equivalent 0.200s→0.014s, ~14x). intloop still beats LuaJIT. A sunk temp does not
+allocate at all; anything that escapes (pushed/returned/mutated/aliased) stays a
+real heap object, so particles (structs pushed into a list) is unchanged and remains
+the nursery target. The remaining LuaJIT gaps (sieve/qsort/entity_update) are the
+per-iteration bounds + counter range checks LuaJIT hoists with LICM — the next lever
+(an IR-level optimise pass over the trace).
+
 ## Stage-8: GAME-FIRST — struct/entity JIT + math intrinsics — 2026-08-11
 
 Lovax is a game language, so the targets are now game-representative loops, not

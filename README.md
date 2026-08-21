@@ -332,10 +332,11 @@ Module caching is in-memory per run — no cache files are ever written to disk.
 ## Tests & Benchmarks
 
 ```bash
-./tests/run_tests.sh              # 66 golden-file tests (features + errors + stress)
+make test                         # full correctness + safety suite (all gates)
+./tests/run_tests.sh              # 134 golden-file tests (features + errors + stress)
 ./tests/fuzz.sh                   # security gate: adversarial + fuzz, no crashes allowed
 ./tests/run_tests.sh --update     # regenerate expected outputs (verify diffs first!)
-./benchmarks/run_benchmarks.sh
+./benchmarks/cross/run.sh         # cross-language benchmarks (Lovax vs Lua/LuaJIT/Python/Node)
 ```
 
 ## Performance — honest baseline
@@ -350,18 +351,22 @@ JIT** (all zero-dependency, our own encoder — no LLVM, no DynASM):
 3. a **template compiler** is the always-correct fallback.
 
 Struct fields are unboxed inline values (an `entity.x` write allocates nothing),
-and math builtins (`sqrt`, `floor`, `ceil`, `abs`) emit SSE inside a trace.
+math builtins (`sqrt`, `floor`, `ceil`, `abs`) emit SSE inside a trace, and
+**allocation sinking** scalar-replaces non-escaping per-frame temporaries so a
+`tmp = [i, i+1, i+2]; sink += tmp[0]` or `v = V(...); sink += v.x` loop no longer
+allocates at all — it becomes register arithmetic.
 
 Because Lovax is a **game** language, the benchmarks that matter are entity/update
 loops, not generic recursion. Same machine, outputs verified identical, best-of-3
-(ms, lower is better; full harness in [benchmarks/cross/](benchmarks/cross/)):
+(ms, lower is better; full harness + all languages in [benchmarks/cross/](benchmarks/cross/)):
 
 | Game loop | Lovax | LuaJIT | Node | what it is |
 |-----------|------:|-------:|-----:|-----------|
-| entity_update | **39** | 8 | 42 | struct-of-arrays float update (beats Node) |
-| aos_update | **49** | 23 | — | array-of-structs `e = ents[j]; e.x += e.vx` |
-| vec_math | **56** | 22 | — | `sqrt(dx*dx+dy*dy)` distance accumulation |
-| particles | **97** | 42 | — | per-frame spawn/update/despawn churn |
+| gc | **2.8** | 2.0 | 27 | per-iter temp aggregate (allocation sinking → ~parity) |
+| intloop | **158** | 208 | 90 | pure integer loop (beats LuaJIT) |
+| entity_update | **28** | 7 | 34 | struct-of-arrays float update |
+| aos_update | **38** | 18 | 48 | array-of-structs `e = ents[j]; e.x += e.vx` |
+| particles | **74** | 39 | 35 | per-frame spawn/update/despawn churn |
 
 The game loops trace to native and land **2–5× off LuaJIT** (and Lovax wins on
 startup — a small static binary, ~5 ms). LuaJIT is the reference to learn from,
