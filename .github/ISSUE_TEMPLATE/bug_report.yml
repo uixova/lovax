@@ -1,0 +1,33 @@
+name: Bug report
+description: Something behaves incorrectly, crashes, or produces the wrong output
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest `.lov` program (or steps) that shows the problem.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `lovax --version`, plus OS/arch.
+      placeholder: "Lovax 1.2.0 — Linux x64"
+    validations:
+      required: true
+  - type: checkboxes
+    id: jit
+    attributes:
+      label: Does it also happen with the JIT off?
+      options:
+        - label: I tried `lovax --no-jit file.lov` and noted whether it differs

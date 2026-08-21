@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://uixova.github.io/lovax/
+    about: The full language reference (EN / TR).
