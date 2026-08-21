@@ -1,8 +1,7 @@
 # Lovax feature matrix — Tier 1 + Tier 2 closure (v0.14)
 
 The measurable definition of "no gap remains": every Tier 1/Tier 2 row from
-the Python-3.16/Lua-5.5 gap analysis (ANALYSIS_*.md, COMPREHENSIVE_ANALYSIS
-Part 5), with its Lovax answer. Tier 3 (SQLite, compression, crypto, SSL/HTTP,
+the Python-3.16/Lua-5.5 gap analysis, with its Lovax answer. Tier 3 (SQLite, compression, crypto, SSL/HTTP,
 async) is intentionally OUT — the foundations (bytes type, one-file module
 registry, socket layer) keep the door open without shipping dead code.
 
