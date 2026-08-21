@@ -139,3 +139,9 @@ jobs:
       # executable that runs with no separate install and passes argv through.
       - name: Bundle gate (single-binary distribution)
         run: ./tests/bundle.sh
+
+      # The adversarial capacity gate: pathological programs must fail gracefully
+      # (never segfault/abort/hang) and a deterministic JIT fuzz must stay
+      # byte-identical with the JIT on and off.
+      - name: Torture gate (adversarial + differential JIT fuzz)
+        run: ./tests/torture.sh
