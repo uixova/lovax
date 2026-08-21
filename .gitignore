@@ -47,3 +47,5 @@ lovax_16b_backup
 
 # compiled unit-test binary (built by tests/unit.sh)
 tests/unit/unit_tests
+editors/vscode/*.vsix
+editors/vscode/node_modules/

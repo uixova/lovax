@@ -1,0 +1,32 @@
+{
+  "name": "lovax",
+  "displayName": "Lovax",
+  "description": "Syntax highlighting for the Lovax programming language (.lov).",
+  "version": "1.0.0",
+  "publisher": "uixova",
+  "license": "MIT",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["lovax", "lov", "game", "scripting", "jit"],
+  "icon": "icon.png",
+  "repository": { "type": "git", "url": "https://github.com/uixova/lovax" },
+  "bugs": { "url": "https://github.com/uixova/lovax/issues" },
+  "homepage": "https://uixova.github.io/lovax/",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lovax",
+        "aliases": ["Lovax", "lovax"],
+        "extensions": [".lov"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lovax",
+        "scopeName": "source.lovax",
+        "path": "./syntaxes/lovax.tmLanguage.json"
+      }
+    ]
+  }
+}

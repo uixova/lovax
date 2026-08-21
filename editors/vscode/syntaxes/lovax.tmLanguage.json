@@ -1,0 +1,121 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Lovax",
+  "scopeName": "source.lovax",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#function-def" },
+    { "include": "#type-def" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#builtins" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.lovax",
+          "begin": "#",
+          "end": "$",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.lovax" } }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.lovax",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            { "include": "#string-escape" },
+            { "include": "#interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.double.lovax",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "include": "#string-escape" },
+            { "include": "#interpolation" }
+          ]
+        }
+      ]
+    },
+    "string-escape": {
+      "name": "constant.character.escape.lovax",
+      "match": "\\\\([nrt\"'\\\\{}]|u[0-9A-Fa-f]{4})"
+    },
+    "interpolation": {
+      "name": "meta.template.expression.lovax",
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.lovax" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.lovax" } },
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#constants" },
+        { "include": "#builtins" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#operators" }
+      ]
+    },
+    "function-def": {
+      "match": "\\b(fn)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "1": { "name": "storage.type.function.lovax" },
+        "2": { "name": "entity.name.function.lovax" }
+      }
+    },
+    "type-def": {
+      "match": "\\b(struct|enum)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "1": { "name": "storage.type.lovax" },
+        "2": { "name": "entity.name.type.lovax" }
+      }
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.lovax", "match": "\\b(if|else|while|for|match|try|catch|finally|throw|yield|break|continue|return|in)\\b" },
+        { "name": "storage.type.lovax", "match": "\\b(set|fn|struct|enum)\\b" },
+        { "name": "keyword.control.import.lovax", "match": "\\b(use)\\b" },
+        { "name": "keyword.other.coroutine.lovax", "match": "\\b(spawn|resume)\\b" },
+        { "name": "keyword.operator.logical.lovax", "match": "\\b(and|or|not)\\b" },
+        { "name": "variable.language.this.lovax", "match": "\\b(this)\\b" }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        { "name": "constant.language.lovax", "match": "\\b(true|false|null)\\b" }
+      ]
+    },
+    "builtins": {
+      "name": "support.function.builtin.lovax",
+      "match": "\\b(say|len|push|pop|range|sort|max|min|sum|floor|ceil|abs|sqrt|round|filter|map|reduce|has|keys|values|text|int|float|type|check|input|signal|connect|emit|pick_weighted|co_status|co_done)\\b(?=\\s*\\()"
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.lovax", "match": "\\b0[xX][0-9A-Fa-f_]+\\b" },
+        { "name": "constant.numeric.binary.lovax", "match": "\\b0[bB][01_]+\\b" },
+        { "name": "constant.numeric.float.lovax", "match": "\\b[0-9][0-9_]*\\.[0-9_]+([eE][+-]?[0-9]+)?\\b" },
+        { "name": "constant.numeric.float.lovax", "match": "\\b[0-9][0-9_]*[eE][+-]?[0-9]+\\b" },
+        { "name": "constant.numeric.integer.lovax", "match": "\\b[0-9][0-9_]*\\b" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.arrow.lovax", "match": "->" },
+        { "name": "keyword.operator.null.lovax", "match": "\\?\\?|\\?\\." },
+        { "name": "keyword.operator.assignment.compound.lovax", "match": "//=|\\*\\*=|\\+=|-=|\\*=|/=|%=" },
+        { "name": "keyword.operator.arithmetic.lovax", "match": "//|\\*\\*|<<|>>|[+\\-*/%&|^~]" },
+        { "name": "keyword.operator.comparison.lovax", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.assignment.lovax", "match": "=" }
+      ]
+    }
+  }
+}
