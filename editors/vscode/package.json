@@ -2,7 +2,7 @@
   "name": "lovax",
   "displayName": "Lovax",
   "description": "Syntax highlighting for the Lovax programming language (.lov).",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "uixova",
   "license": "MIT",
   "engines": { "vscode": "^1.60.0" },

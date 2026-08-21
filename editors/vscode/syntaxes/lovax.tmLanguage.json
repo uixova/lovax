@@ -9,6 +9,8 @@
     { "include": "#type-def" },
     { "include": "#keywords" },
     { "include": "#constants" },
+    { "include": "#modules" },
+    { "include": "#member-call" },
     { "include": "#builtins" },
     { "include": "#numbers" },
     { "include": "#operators" }
@@ -94,9 +96,23 @@
         { "name": "constant.language.lovax", "match": "\\b(true|false|null)\\b" }
       ]
     },
+    "modules": {
+      "comment": "known standard-library modules, when used as `module.` before a member",
+      "name": "support.class.module.lovax",
+      "match": "\\b(game|file|os|net|regex|math|strings|json|time|random|bytes)\\b(?=\\s*\\.)"
+    },
+    "member-call": {
+      "comment": "a method / module function call: the identifier after a dot, before (",
+      "match": "(\\.)([\\p{L}_][\\p{L}\\p{N}_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "punctuation.accessor.lovax" },
+        "2": { "name": "support.function.member.lovax" }
+      }
+    },
     "builtins": {
+      "comment": "core builtins highlight whether or not they are followed by ( — `say` is used without parens",
       "name": "support.function.builtin.lovax",
-      "match": "\\b(say|len|push|pop|range|sort|max|min|sum|floor|ceil|abs|sqrt|round|filter|map|reduce|has|keys|values|text|int|float|type|check|input|signal|connect|emit|pick_weighted|co_status|co_done)\\b(?=\\s*\\()"
+      "match": "\\b(say|len|push|pop|range|sort|max|min|sum|floor|ceil|abs|sqrt|round|filter|map|reduce|has|keys|values|text|int|float|type|check|input|signal|connect|emit|pick_weighted|co_status|co_done)\\b"
     },
     "numbers": {
       "patterns": [
