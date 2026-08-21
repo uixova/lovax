@@ -131,6 +131,8 @@ lovax bundle game.lov -o game    # one self-contained executable — no install 
 user runs the result with nothing else installed — the model Deno `compile` and
 Bun `--compile` use. A plain `lovax` binary has no trailer and behaves as usual.
 
+> 📖 **Full documentation:** open [docs/index.html](docs/index.html) in a browser — a complete language reference with runnable examples.
+
 ## Language Tour
 
 ### Variables — `set` defines, bare assignment updates
